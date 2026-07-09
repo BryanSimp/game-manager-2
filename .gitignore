@@ -26,3 +26,6 @@ apps/mobile/ios/
 Thumbs.db
 .vscode/
 .idea/
+
+# claude code local state
+.claude/
