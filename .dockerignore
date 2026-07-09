@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.expo
+**/.turbo
+.git
+.env
+.env.*
+!.env.example
+data

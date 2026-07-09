@@ -1,0 +1,24 @@
+{
+  "name": "game-manager-2",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.12.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "dev:api": "pnpm --filter @gm/api dev",
+    "dev:web": "pnpm --filter @gm/web dev",
+    "dev:mobile": "pnpm --filter @gm/mobile start",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "db:generate": "pnpm --filter @gm/api db:generate",
+    "db:migrate": "pnpm --filter @gm/api db:migrate",
+    "db:seed": "pnpm --filter @gm/api db:seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0"
+  }
+}

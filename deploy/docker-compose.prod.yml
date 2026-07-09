@@ -1,0 +1,83 @@
+# Production on the home server, behind the existing Traefik proxy.
+#   Run from the repo root:
+#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+#
+# Set GM_HOST (e.g. gm.example.com) and secrets in .env at the repo root.
+# To pull prebuilt images from a registry instead of building, replace the
+# `build:` blocks with `image: <registry>/<user>/gm2-api:latest` etc.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-gamemanager}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-gamemanager}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gamemanager}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set in .env}
+      BETTER_AUTH_URL: https://${GM_HOST:?set in .env}
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      API_PORT: "3001"
+      API_HOST: 0.0.0.0
+      CORS_ORIGINS: https://${GM_HOST}
+      IGDB_CLIENT_ID: ${IGDB_CLIENT_ID:-}
+      IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET:-}
+      IMAGE_DIR: /data/images
+      TZ: ${TZ:-America/Chicago}
+    volumes:
+      - images:/data/images
+    networks:
+      - internal
+      - proxy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.gm2-api.rule=Host(`${GM_HOST}`) && PathPrefix(`/api`)
+      - traefik.http.routers.gm2-api.priority=20
+      - traefik.http.routers.gm2-api.entrypoints=websecure
+      - traefik.http.routers.gm2-api.tls.certresolver=cloudflare
+      - traefik.http.services.gm2-api.loadbalancer.server.port=3001
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.gm2-web.rule=Host(`${GM_HOST}`)
+      - traefik.http.routers.gm2-web.priority=10
+      - traefik.http.routers.gm2-web.entrypoints=websecure
+      - traefik.http.routers.gm2-web.tls.certresolver=cloudflare
+      - traefik.http.services.gm2-web.loadbalancer.server.port=80
+
+volumes:
+  pgdata:
+  images:
+
+networks:
+  internal:
+  proxy:
+    external: true

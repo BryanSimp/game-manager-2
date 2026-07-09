@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+
+# env — never commit real secrets (v1 leaked one; not again)
+.env
+.env.*
+!.env.example
+
+# expo
+.expo/
+apps/mobile/android/
+apps/mobile/ios/
+
+# runtime data
+/data/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
