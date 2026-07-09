@@ -11,7 +11,9 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
         <Stack>
-          <Stack.Screen name="index" options={{ title: "Game Manager" }} />
+          <Stack.Screen name="index" options={{ title: "Library" }} />
+          <Stack.Screen name="add" options={{ title: "Add game" }} />
+          <Stack.Screen name="game/[id]" options={{ title: "Game" }} />
           <Stack.Screen name="login" options={{ title: "Sign in", headerShown: false }} />
           <Stack.Screen name="register" options={{ title: "Create account", headerShown: false }} />
         </Stack>

@@ -3,6 +3,10 @@ import cors from "@fastify/cors";
 import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "./auth.js";
 import { env } from "./env.js";
+import { registerLibraryRoutes } from "./routes/library.js";
+import { registerGameRoutes } from "./routes/games.js";
+import { registerImageRoutes } from "./routes/images.js";
+import { registerAdminRoutes } from "./routes/admin.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -61,6 +65,11 @@ export async function buildServer() {
       createdAt: user.createdAt,
     };
   });
+
+  registerLibraryRoutes(app);
+  registerGameRoutes(app);
+  registerImageRoutes(app);
+  registerAdminRoutes(app);
 
   return app;
 }

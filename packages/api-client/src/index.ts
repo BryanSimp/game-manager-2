@@ -1,4 +1,16 @@
-import type { Health, User } from "@gm/shared";
+import type {
+  AddGameInput,
+  AdminSettings,
+  BulkAddItem,
+  BulkAddResult,
+  Health,
+  LibraryEntry,
+  OwnershipFormat,
+  Platform,
+  SearchResponse,
+  UpdateEntryInput,
+  User,
+} from "@gm/shared";
 
 export class ApiError extends Error {
   constructor(
@@ -72,6 +84,75 @@ export class ApiClient {
   me(): Promise<User> {
     return this.request<User>("/api/me");
   }
+
+  // ---- catalog / search ----
+
+  searchGames(q: string): Promise<SearchResponse> {
+    return this.request<SearchResponse>(`/api/games/search?q=${encodeURIComponent(q)}`);
+  }
+
+  getPlatforms(): Promise<Platform[]> {
+    return this.request<Platform[]>("/api/platforms");
+  }
+
+  // ---- library ----
+
+  getLibrary(): Promise<LibraryEntry[]> {
+    return this.request<LibraryEntry[]>("/api/library");
+  }
+
+  getEntry(id: string): Promise<LibraryEntry> {
+    return this.request<LibraryEntry>(`/api/library/${id}`);
+  }
+
+  addToLibrary(input: AddGameInput): Promise<{ id: string; gameId: string }> {
+    return this.request("/api/library", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  bulkAdd(items: BulkAddItem[]): Promise<BulkAddResult> {
+    return this.request("/api/library/bulk", {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    });
+  }
+
+  updateEntry(id: string, input: UpdateEntryInput): Promise<{ ok: true }> {
+    return this.request(`/api/library/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+
+  setEntryPlatforms(
+    id: string,
+    platforms: Array<{ platformId: string; format: OwnershipFormat }>,
+  ): Promise<{ ok: true }> {
+    return this.request(`/api/library/${id}/platforms`, {
+      method: "PUT",
+      body: JSON.stringify({ platforms }),
+    });
+  }
+
+  removeEntry(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/library/${id}`, { method: "DELETE" });
+  }
+
+  // ---- admin ----
+
+  getAdminSettings(): Promise<AdminSettings> {
+    return this.request<AdminSettings>("/api/admin/settings");
+  }
+
+  saveIgdbCredentials(clientId: string, clientSecret: string): Promise<{ ok: true }> {
+    return this.request("/api/admin/settings/igdb", {
+      method: "PUT",
+      body: JSON.stringify({ clientId, clientSecret }),
+    });
+  }
+
+  testIgdb(): Promise<{ ok: true }> {
+    return this.request("/api/admin/settings/igdb/test", { method: "POST" });
+  }
 }
 
-export type { Health, User };
+export type { Health, User, LibraryEntry, Platform, SearchResponse };

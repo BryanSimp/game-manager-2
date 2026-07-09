@@ -8,7 +8,11 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { DashboardPage } from "./pages/Dashboard.js";
+import { LibraryPage } from "./pages/Library.js";
+import { AddGamePage } from "./pages/AddGame.js";
+import { GameDetailPage } from "./pages/GameDetail.js";
+import { ImportPage } from "./pages/Import.js";
+import { SettingsPage } from "./pages/Settings.js";
 import { LoginPage } from "./pages/Login.js";
 import { RegisterPage } from "./pages/Register.js";
 import "./styles.css";
@@ -17,27 +21,17 @@ const rootRoute = createRootRoute({
   component: () => <Outlet />,
 });
 
-const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/",
-  component: DashboardPage,
-});
+const routes = [
+  createRoute({ getParentRoute: () => rootRoute, path: "/", component: LibraryPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/add", component: AddGamePage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/game/$id", component: GameDetailPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/import", component: ImportPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/login", component: LoginPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/register", component: RegisterPage }),
+];
 
-const loginRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/login",
-  component: LoginPage,
-});
-
-const registerRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/register",
-  component: RegisterPage,
-});
-
-const router = createRouter({
-  routeTree: rootRoute.addChildren([indexRoute, loginRoute, registerRoute]),
-});
+const router = createRouter({ routeTree: rootRoute.addChildren(routes) });
 
 declare module "@tanstack/react-router" {
   interface Register {

@@ -32,6 +32,8 @@ export const games = pgTable("games", {
   summary: text("summary"),
   releaseDate: date("release_date"),
   coverImageId: uuid("cover_image_id").references(() => images.id),
+  // remote IGDB cover URL — fallback while/if the local download hasn't happened
+  coverUrl: text("cover_url"),
   ttbMain: integer("ttb_main"),
   ttbMainExtra: integer("ttb_main_extra"),
   ttbCompletionist: integer("ttb_completionist"),

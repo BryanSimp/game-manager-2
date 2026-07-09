@@ -1,0 +1,47 @@
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { requireAdmin } from "../plugins/auth.js";
+import { getIgdbCredentials, setSetting } from "../services/settings.js";
+import { igdbTest } from "../services/igdb.js";
+
+const igdbSchema = z.object({
+  clientId: z.string().min(1).max(200),
+  clientSecret: z.string().min(1).max(200),
+});
+
+export function registerAdminRoutes(app: FastifyInstance): void {
+  app.get("/api/admin/settings", async (request, reply) => {
+    const user = await requireAdmin(request, reply);
+    if (!user) return;
+    const creds = await getIgdbCredentials();
+    return {
+      igdbConfigured: creds !== null,
+      igdbClientId: creds ? `${creds.clientId.slice(0, 4)}…` : null,
+    };
+  });
+
+  app.put("/api/admin/settings/igdb", async (request, reply) => {
+    const user = await requireAdmin(request, reply);
+    if (!user) return;
+    const parsed = igdbSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+    }
+    await setSetting("igdb_client_id", parsed.data.clientId.trim());
+    await setSetting("igdb_client_secret", parsed.data.clientSecret.trim());
+    return { ok: true };
+  });
+
+  app.post("/api/admin/settings/igdb/test", async (request, reply) => {
+    const user = await requireAdmin(request, reply);
+    if (!user) return;
+    try {
+      await igdbTest();
+      return { ok: true };
+    } catch (err) {
+      return reply
+        .status(400)
+        .send({ message: err instanceof Error ? err.message : "IGDB test failed" });
+    }
+  });
+}
