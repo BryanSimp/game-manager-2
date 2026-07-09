@@ -1,22 +1,76 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { GAME_STATUSES, type GameStatus } from "@gm/shared";
+import { GAME_STATUSES, type GameStatus, type LibraryEntry } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { GameCard } from "../components/GameCard.js";
-import { STATUS_META } from "../lib/format.js";
+import { STATUS_META, statusChip } from "../lib/format.js";
+import { usePreferences } from "../lib/prefs.js";
+
+type SortKey = "title" | "rating" | "release" | "added" | "ttb";
+
+const SORTS: Array<{ key: SortKey; label: string }> = [
+  { key: "title", label: "Title A–Z" },
+  { key: "rating", label: "Highest rated" },
+  { key: "release", label: "Newest release" },
+  { key: "added", label: "Recently added" },
+  { key: "ttb", label: "Shortest first" },
+];
+
+function sortEntries(entries: LibraryEntry[], sort: SortKey): LibraryEntry[] {
+  const list = [...entries];
+  switch (sort) {
+    case "title":
+      return list.sort((a, b) => a.game.title.localeCompare(b.game.title));
+    case "rating":
+      return list.sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1));
+    case "release":
+      return list.sort((a, b) => (b.game.releaseDate ?? "").localeCompare(a.game.releaseDate ?? ""));
+    case "added":
+      return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    case "ttb":
+      return list.sort(
+        (a, b) => (a.game.ttbMain ?? Number.MAX_SAFE_INTEGER) - (b.game.ttbMain ?? Number.MAX_SAFE_INTEGER),
+      );
+  }
+}
 
 export function LibraryPage() {
+  const prefs = usePreferences();
   const [statusFilter, setStatusFilter] = useState<GameStatus | "all">("all");
+  const [platformFilter, setPlatformFilter] = useState<string>("all");
+  const [tagFilter, setTagFilter] = useState<string>("all");
+  const [sort, setSort] = useState<SortKey>("title");
   const [search, setSearch] = useState("");
+
   const library = useQuery({ queryKey: ["library"], queryFn: () => api.getLibrary() });
 
-  const entries = (library.data ?? []).filter((e) => {
-    if (statusFilter !== "all" && e.status !== statusFilter) return false;
-    if (search && !e.game.title.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  // filter options derived from what's actually in the library
+  const { platformOptions, tagOptions } = useMemo(() => {
+    const platforms = new Map<string, string>();
+    const tags = new Map<string, string>();
+    for (const e of library.data ?? []) {
+      for (const p of e.platforms) platforms.set(p.platformId, p.abbreviation ?? p.name);
+      for (const t of e.tags) tags.set(t.id, t.name);
+    }
+    return {
+      platformOptions: [...platforms.entries()].sort((a, b) => a[1].localeCompare(b[1])),
+      tagOptions: [...tags.entries()].sort((a, b) => a[1].localeCompare(b[1])),
+    };
+  }, [library.data]);
+
+  const entries = useMemo(() => {
+    const filtered = (library.data ?? []).filter((e) => {
+      if (statusFilter !== "all" && e.status !== statusFilter) return false;
+      if (platformFilter !== "all" && !e.platforms.some((p) => p.platformId === platformFilter))
+        return false;
+      if (tagFilter !== "all" && !e.tags.some((t) => t.id === tagFilter)) return false;
+      if (search && !e.game.title.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+    return sortEntries(filtered, sort);
+  }, [library.data, statusFilter, platformFilter, tagFilter, search, sort]);
 
   const counts = new Map<string, number>();
   for (const e of library.data ?? []) {
@@ -29,15 +83,56 @@ export function LibraryPage() {
         <h1 className="mr-auto text-xl font-bold">
           Library{" "}
           <span className="text-sm font-normal text-zinc-500">
-            {library.data?.length ?? 0} games
+            {entries.length === library.data?.length
+              ? `${library.data?.length ?? 0} games`
+              : `${entries.length} of ${library.data?.length ?? 0}`}
           </span>
         </h1>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Filter by title…"
-          className="w-48 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
+          className="w-44 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
         />
+        {platformOptions.length > 0 && (
+          <select
+            value={platformFilter}
+            onChange={(e) => setPlatformFilter(e.target.value)}
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+          >
+            <option value="all">All platforms</option>
+            {platformOptions.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        )}
+        {tagOptions.length > 0 && (
+          <select
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+          >
+            <option value="all">All tags</option>
+            {tagOptions.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        )}
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortKey)}
+          className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+        >
+          {SORTS.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="mb-6 flex flex-wrap gap-2">
@@ -46,15 +141,23 @@ export function LibraryPage() {
           active={statusFilter === "all"}
           onClick={() => setStatusFilter("all")}
         />
-        {GAME_STATUSES.map((s) => (
-          <FilterChip
-            key={s}
-            label={`${STATUS_META[s].label} (${counts.get(s) ?? 0})`}
-            active={statusFilter === s}
-            onClick={() => setStatusFilter(s)}
-            dot={STATUS_META[s].dot}
-          />
-        ))}
+        {GAME_STATUSES.map((s) => {
+          const chip = statusChip(s, prefs);
+          return (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(statusFilter === s ? "all" : s)}
+              className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
+                statusFilter === s
+                  ? chip.className
+                  : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+              }`}
+              style={statusFilter === s ? chip.style : undefined}
+            >
+              {STATUS_META[s].label} ({counts.get(s) ?? 0})
+            </button>
+          );
+        })}
       </div>
 
       {library.isLoading && <p className="text-zinc-500">Loading library…</p>}
@@ -89,7 +192,7 @@ export function LibraryPage() {
       </div>
 
       {library.data && library.data.length > 0 && entries.length === 0 && (
-        <p className="text-zinc-500">No games match this filter.</p>
+        <p className="text-zinc-500">No games match these filters.</p>
       )}
     </Shell>
   );
@@ -99,23 +202,20 @@ function FilterChip({
   label,
   active,
   onClick,
-  dot,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
-  dot?: string;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition ${
+      className={`rounded-full border px-3 py-1 text-sm transition ${
         active
           ? "border-indigo-500 bg-indigo-600/20 text-indigo-200"
           : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
       }`}
     >
-      {dot && <span className={`h-2 w-2 rounded-full ${dot}`} />}
       {label}
     </button>
   );

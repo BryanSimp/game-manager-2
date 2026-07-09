@@ -21,6 +21,13 @@ export interface OwnedPlatform {
   format: OwnershipFormat;
 }
 
+export interface Tag {
+  id: string;
+  name: string;
+  color: string | null;
+  groupName: string | null;
+}
+
 export interface LibraryEntry {
   id: string;
   status: GameStatus;
@@ -30,8 +37,10 @@ export interface LibraryEntry {
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
+  hasCustomCover: boolean;
   game: GameSummary;
   platforms: OwnedPlatform[];
+  tags: Tag[];
 }
 
 export interface Platform {
@@ -87,4 +96,36 @@ export interface BulkAddResult {
 export interface AdminSettings {
   igdbConfigured: boolean;
   igdbClientId: string | null;
+}
+
+export interface TagInput {
+  name: string;
+  color?: string | null;
+  groupName?: string | null;
+}
+
+export interface Preferences {
+  theme: "dark" | "light";
+  statusColors: Partial<Record<GameStatus, string>> | null;
+  showPlatformBadge: boolean;
+  showTimeBadge: boolean;
+}
+
+export interface DashboardData {
+  total: number;
+  statusCounts: Partial<Record<GameStatus, number>>;
+  platformCounts: Array<{
+    name: string;
+    abbreviation: string | null;
+    family: PlatformFamily;
+    count: number;
+  }>;
+  backlogSeconds: number;
+  recentlyFinished: Array<{
+    id: string;
+    title: string;
+    finishedAt: string | null;
+    rating: number | null;
+    coverSrc: string | null;
+  }>;
 }

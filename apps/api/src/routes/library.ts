@@ -92,11 +92,39 @@ async function entryPlatforms(userGameIds: string[]) {
   return map;
 }
 
+async function entryTags(userGameIds: string[]) {
+  if (userGameIds.length === 0) return new Map<string, unknown[]>();
+  const rows = await db
+    .select({
+      userGameId: schema.userGameTags.userGameId,
+      id: schema.tags.id,
+      name: schema.tags.name,
+      color: schema.tags.color,
+      groupName: schema.tags.groupName,
+    })
+    .from(schema.userGameTags)
+    .innerJoin(schema.tags, eq(schema.userGameTags.tagId, schema.tags.id))
+    .where(inArray(schema.userGameTags.userGameId, userGameIds));
+  const map = new Map<string, unknown[]>();
+  for (const row of rows) {
+    const { userGameId, ...rest } = row;
+    if (!map.has(userGameId)) map.set(userGameId, []);
+    map.get(userGameId)!.push(rest);
+  }
+  return map;
+}
+
 function entryToJson(
   entry: typeof schema.userGames.$inferSelect,
   game: typeof schema.games.$inferSelect,
   platforms: unknown[],
+  tags: unknown[] = [],
 ) {
+  const gameJson = gameToJson(game);
+  // a user-uploaded cover overrides the catalog cover
+  if (entry.customCoverImageId) {
+    gameJson.coverSrc = `/api/images/${entry.customCoverImageId}`;
+  }
   return {
     id: entry.id,
     status: entry.status,
@@ -106,8 +134,10 @@ function entryToJson(
     startedAt: entry.startedAt,
     finishedAt: entry.finishedAt,
     createdAt: entry.createdAt,
-    game: gameToJson(game),
+    hasCustomCover: entry.customCoverImageId !== null,
+    game: gameJson,
     platforms,
+    tags,
   };
 }
 
@@ -121,9 +151,16 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       .innerJoin(schema.games, eq(schema.userGames.gameId, schema.games.id))
       .where(eq(schema.userGames.userId, user.id))
       .orderBy(asc(schema.games.title));
-    const platformMap = await entryPlatforms(rows.map((r) => r.user_games.id));
+    const ids = rows.map((r) => r.user_games.id);
+    const platformMap = await entryPlatforms(ids);
+    const tagMap = await entryTags(ids);
     return rows.map((r) =>
-      entryToJson(r.user_games, r.games, platformMap.get(r.user_games.id) ?? []),
+      entryToJson(
+        r.user_games,
+        r.games,
+        platformMap.get(r.user_games.id) ?? [],
+        tagMap.get(r.user_games.id) ?? [],
+      ),
     );
   });
 
@@ -188,7 +225,13 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       .where(and(eq(schema.userGames.id, request.params.id), eq(schema.userGames.userId, user.id)));
     if (!row) return reply.status(404).send({ message: "Not found" });
     const platformMap = await entryPlatforms([row.user_games.id]);
-    return entryToJson(row.user_games, row.games, platformMap.get(row.user_games.id) ?? []);
+    const tagMap = await entryTags([row.user_games.id]);
+    return entryToJson(
+      row.user_games,
+      row.games,
+      platformMap.get(row.user_games.id) ?? [],
+      tagMap.get(row.user_games.id) ?? [],
+    );
   });
 
   app.patch<{ Params: { id: string } }>("/api/library/:id", async (request, reply) => {

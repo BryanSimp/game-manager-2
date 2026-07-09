@@ -1,11 +1,16 @@
 import { Link } from "@tanstack/react-router";
 import type { LibraryEntry } from "@gm/shared";
-import { STATUS_META, formatHours } from "../lib/format.js";
+import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
+import { usePreferences } from "../lib/prefs.js";
 import { StarRating } from "./StarRating.js";
 
 export function GameCard({ entry }: { entry: LibraryEntry }) {
-  const meta = STATUS_META[entry.status];
+  const prefs = usePreferences();
+  const chip = statusChip(entry.status, prefs);
   const ttb = formatHours(entry.game.ttbMain);
+  const showTime = prefs?.showTimeBadge ?? true;
+  const showPlatforms = prefs?.showPlatformBadge ?? true;
+
   return (
     <Link
       to="/game/$id"
@@ -26,13 +31,26 @@ export function GameCard({ entry }: { entry: LibraryEntry }) {
           </div>
         )}
         <span
-          className={`absolute left-2 top-2 rounded-full border px-2 py-0.5 text-xs font-medium ${meta.classes}`}
+          className={`absolute left-2 top-2 rounded-full border px-2 py-0.5 text-xs font-medium ${chip.className}`}
+          style={chip.style}
         >
-          {meta.label}
+          {STATUS_META[entry.status].label}
         </span>
-        {ttb && entry.ttbEnabled && (
+        {showTime && ttb && entry.ttbEnabled && (
           <span className="absolute right-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-xs text-zinc-200">
             {ttb}
+          </span>
+        )}
+        {entry.tags.length > 0 && (
+          <span className="absolute bottom-2 left-2 flex gap-1">
+            {entry.tags.slice(0, 5).map((t) => (
+              <span
+                key={t.id}
+                title={t.name}
+                className="h-2.5 w-2.5 rounded-full border border-black/40"
+                style={{ backgroundColor: t.color ?? "#71717a" }}
+              />
+            ))}
           </span>
         )}
       </div>
@@ -42,9 +60,11 @@ export function GameCard({ entry }: { entry: LibraryEntry }) {
         </p>
         <div className="mt-1 flex items-center justify-between">
           <StarRating value={entry.rating} size="sm" />
-          <span className="truncate pl-2 text-xs text-zinc-500">
-            {entry.platforms.map((p) => p.abbreviation ?? p.name).join(" · ")}
-          </span>
+          {showPlatforms && (
+            <span className="truncate pl-2 text-xs text-zinc-500">
+              {entry.platforms.map((p) => p.abbreviation ?? p.name).join(" · ")}
+            </span>
+          )}
         </div>
       </div>
     </Link>

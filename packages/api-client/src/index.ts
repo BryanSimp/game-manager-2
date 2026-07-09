@@ -3,11 +3,15 @@ import type {
   AdminSettings,
   BulkAddItem,
   BulkAddResult,
+  DashboardData,
   Health,
   LibraryEntry,
   OwnershipFormat,
   Platform,
+  Preferences,
   SearchResponse,
+  Tag,
+  TagInput,
   UpdateEntryInput,
   User,
 } from "@gm/shared";
@@ -42,7 +46,8 @@ export class ApiClient {
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const doFetch = this.opts.fetch ?? fetch;
     const headers = new Headers(init.headers);
-    if (init.body != null && !headers.has("content-type")) {
+    // FormData sets its own multipart boundary — only default JSON for string bodies
+    if (typeof init.body === "string" && !headers.has("content-type")) {
       headers.set("content-type", "application/json");
     }
     const token = await this.opts.getToken?.();
@@ -135,6 +140,55 @@ export class ApiClient {
 
   removeEntry(id: string): Promise<{ ok: true }> {
     return this.request(`/api/library/${id}`, { method: "DELETE" });
+  }
+
+  setEntryTags(id: string, tagIds: string[]): Promise<{ ok: true }> {
+    return this.request(`/api/library/${id}/tags`, {
+      method: "PUT",
+      body: JSON.stringify({ tagIds }),
+    });
+  }
+
+  uploadCover(id: string, file: Blob, filename: string): Promise<{ imageId: string; coverSrc: string }> {
+    const form = new FormData();
+    form.append("file", file, filename);
+    return this.request(`/api/library/${id}/cover`, { method: "POST", body: form });
+  }
+
+  removeCover(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/library/${id}/cover`, { method: "DELETE" });
+  }
+
+  // ---- tags ----
+
+  getTags(): Promise<Tag[]> {
+    return this.request<Tag[]>("/api/tags");
+  }
+
+  createTag(input: TagInput): Promise<Tag> {
+    return this.request("/api/tags", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  updateTag(id: string, input: Partial<TagInput>): Promise<Tag> {
+    return this.request(`/api/tags/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+  }
+
+  deleteTag(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/tags/${id}`, { method: "DELETE" });
+  }
+
+  // ---- preferences & dashboard ----
+
+  getPreferences(): Promise<Preferences> {
+    return this.request<Preferences>("/api/preferences");
+  }
+
+  savePreferences(input: Partial<Preferences>): Promise<{ ok: true }> {
+    return this.request("/api/preferences", { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  getDashboard(): Promise<DashboardData> {
+    return this.request<DashboardData>("/api/dashboard");
   }
 
   // ---- admin ----

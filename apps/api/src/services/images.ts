@@ -52,6 +52,27 @@ export async function cacheRemoteImage(
   }
 }
 
+/** Persist an uploaded image buffer (e.g. a custom cover) and record it. */
+export async function saveUploadedImage(
+  buffer: Buffer,
+  mime: string,
+  kind: "custom_cover" | "shelf_photo" | "background",
+  ownerUserId: string,
+): Promise<string> {
+  await ensureImageDir();
+  const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
+  const [row] = await db
+    .insert(schema.images)
+    .values({ kind, filename: "pending", mime, ownerUserId })
+    .returning({ id: schema.images.id });
+  if (!row) throw new Error("Failed to record image");
+  const filename = `${row.id}.${ext}`;
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(imagePath(filename), buffer);
+  await db.update(schema.images).set({ filename }).where(eq(schema.images.id, row.id));
+  return row.id;
+}
+
 export async function getImageRecord(id: string) {
   const [row] = await db.select().from(schema.images).where(eq(schema.images.id, id));
   if (!row || row.filename === "pending") return null;

@@ -3,10 +3,15 @@ import cors from "@fastify/cors";
 import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "./auth.js";
 import { env } from "./env.js";
+import multipart from "@fastify/multipart";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerGameRoutes } from "./routes/games.js";
 import { registerImageRoutes } from "./routes/images.js";
 import { registerAdminRoutes } from "./routes/admin.js";
+import { registerTagRoutes } from "./routes/tags.js";
+import { registerUploadRoutes } from "./routes/uploads.js";
+import { registerPreferenceRoutes } from "./routes/preferences.js";
+import { registerDashboardRoutes } from "./routes/dashboard.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -66,10 +71,18 @@ export async function buildServer() {
     };
   });
 
+  await app.register(multipart, {
+    limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+  });
+
   registerLibraryRoutes(app);
   registerGameRoutes(app);
   registerImageRoutes(app);
   registerAdminRoutes(app);
+  registerTagRoutes(app);
+  registerUploadRoutes(app);
+  registerPreferenceRoutes(app);
+  registerDashboardRoutes(app);
 
   return app;
 }

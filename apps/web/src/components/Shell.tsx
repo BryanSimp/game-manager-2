@@ -38,15 +38,24 @@ export function Shell({ children }: { children: ReactNode }) {
           <Link to="/" className="mr-4 text-lg font-bold tracking-tight">
             🎮 Game Manager
           </Link>
-          <nav className="flex flex-1 items-center gap-1">
+          <nav className="flex flex-1 items-center gap-1 overflow-x-auto">
             <Link to="/" className={link}>
               Library
+            </Link>
+            <Link to="/dashboard" className={link}>
+              Dashboard
             </Link>
             <Link to="/add" className={link}>
               Add game
             </Link>
             <Link to="/import" className={link}>
               Import
+            </Link>
+            <Link to="/tags" className={link}>
+              Tags
+            </Link>
+            <Link to="/preferences" className={link}>
+              Preferences
             </Link>
             {me.data?.role === "admin" && (
               <Link to="/settings" className={link}>

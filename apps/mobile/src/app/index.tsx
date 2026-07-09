@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Redirect, useRouter } from "expo-router";
 import {
   ActivityIndicator,
@@ -5,13 +6,14 @@ import {
   Image,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import type { LibraryEntry } from "@gm/shared";
+import { GAME_STATUSES, type GameStatus, type LibraryEntry } from "@gm/shared";
 import { authClient } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { resolveImage, STATUS_COLORS } from "@/lib/ui";
@@ -19,12 +21,17 @@ import { resolveImage, STATUS_COLORS } from "@/lib/ui";
 export default function LibraryScreen() {
   const router = useRouter();
   const { data: session, isPending } = authClient.useSession();
+  const [statusFilter, setStatusFilter] = useState<GameStatus | "all">("all");
 
   const library = useQuery({
     queryKey: ["library"],
     queryFn: () => api.getLibrary(),
     enabled: !!session,
   });
+
+  const entries = (library.data ?? []).filter(
+    (e) => statusFilter === "all" || e.status === statusFilter,
+  );
 
   if (isPending) {
     return (
@@ -37,8 +44,34 @@ export default function LibraryScreen() {
 
   return (
     <View style={styles.screen}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterBar}
+        contentContainerStyle={{ paddingHorizontal: 12, gap: 8, alignItems: "center" }}
+      >
+        <FilterChip
+          label={`All (${library.data?.length ?? 0})`}
+          active={statusFilter === "all"}
+          onPress={() => setStatusFilter("all")}
+        />
+        {GAME_STATUSES.map((s) => {
+          const n = (library.data ?? []).filter((e) => e.status === s).length;
+          const meta = STATUS_COLORS[s];
+          return (
+            <FilterChip
+              key={s}
+              label={`${meta.label} (${n})`}
+              active={statusFilter === s}
+              activeColor={meta.text}
+              activeBg={meta.bg}
+              onPress={() => setStatusFilter(statusFilter === s ? "all" : s)}
+            />
+          );
+        })}
+      </ScrollView>
       <FlatList
-        data={library.data ?? []}
+        data={entries}
         keyExtractor={(item) => item.id}
         refreshControl={
           <RefreshControl refreshing={library.isRefetching} onRefresh={() => library.refetch()} />
@@ -60,6 +93,37 @@ export default function LibraryScreen() {
         <Text style={styles.fabText}>＋</Text>
       </TouchableOpacity>
     </View>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  onPress,
+  activeColor,
+  activeBg,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  activeColor?: string;
+  activeBg?: string;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[
+        styles.filterChip,
+        active && {
+          backgroundColor: activeBg ?? "#312e81",
+          borderColor: activeColor ?? "#818cf8",
+        },
+      ]}
+    >
+      <Text style={[styles.filterChipText, active && { color: activeColor ?? "#c7d2fe" }]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
   );
 }
 
@@ -94,6 +158,15 @@ function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => vo
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#101014" },
+  filterBar: { flexGrow: 0, paddingVertical: 10 },
+  filterChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#3f3f46",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  filterChipText: { color: "#a1a1aa", fontSize: 13, fontWeight: "500" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#101014" },
   row: {
     flexDirection: "row",

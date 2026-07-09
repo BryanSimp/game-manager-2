@@ -1,4 +1,5 @@
-import type { GameStatus } from "@gm/shared";
+import type { CSSProperties } from "react";
+import type { GameStatus, Preferences } from "@gm/shared";
 
 export const STATUS_META: Record<GameStatus, { label: string; classes: string; dot: string }> = {
   wishlist: { label: "Wishlist", classes: "bg-sky-950 text-sky-300 border-sky-800", dot: "bg-sky-400" },
@@ -7,6 +8,26 @@ export const STATUS_META: Record<GameStatus, { label: string; classes: string; d
   finished: { label: "Finished", classes: "bg-emerald-950 text-emerald-300 border-emerald-800", dot: "bg-emerald-400" },
   dropped: { label: "Dropped", classes: "bg-rose-950 text-rose-300 border-rose-800", dot: "bg-rose-400" },
 };
+
+/**
+ * Status chip appearance: user-picked colors from preferences win,
+ * otherwise the default Tailwind classes from STATUS_META.
+ */
+export function statusChip(
+  status: GameStatus,
+  prefs: Preferences | undefined,
+): { className: string; style?: CSSProperties } {
+  const custom = prefs?.statusColors?.[status];
+  if (!custom) return { className: STATUS_META[status].classes };
+  return {
+    className: "border",
+    style: {
+      backgroundColor: `${custom}26`,
+      color: custom,
+      borderColor: `${custom}66`,
+    },
+  };
+}
 
 export function formatHours(seconds: number | null): string | null {
   if (!seconds) return null;

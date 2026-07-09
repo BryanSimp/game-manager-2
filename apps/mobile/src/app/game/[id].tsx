@@ -24,6 +24,7 @@ export default function GameDetailScreen() {
   const queryClient = useQueryClient();
 
   const entry = useQuery({ queryKey: ["entry", id], queryFn: () => api.getEntry(id) });
+  const allTags = useQuery({ queryKey: ["tags"], queryFn: () => api.getTags() });
 
   const [notes, setNotes] = useState("");
   const [notesDirty, setNotesDirty] = useState(false);
@@ -44,6 +45,14 @@ export default function GameDetailScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["library"] });
       router.back();
+    },
+  });
+
+  const setTags = useMutation({
+    mutationFn: (tagIds: string[]) => api.setEntryTags(id, tagIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entry", id] });
+      queryClient.invalidateQueries({ queryKey: ["library"] });
     },
   });
 
@@ -111,6 +120,35 @@ export default function GameDetailScreen() {
           );
         })}
       </View>
+
+      {(allTags.data?.length ?? 0) > 0 && (
+        <>
+          <Text style={styles.section}>Tags</Text>
+          <View style={styles.chips}>
+            {(allTags.data ?? []).map((t) => {
+              const active = e.tags.some((et) => et.id === t.id);
+              const color = t.color ?? "#71717a";
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[
+                    styles.chip,
+                    active && { backgroundColor: `${color}26`, borderColor: color },
+                  ]}
+                  onPress={() => {
+                    const current = e.tags.map((et) => et.id);
+                    setTags.mutate(
+                      active ? current.filter((tid) => tid !== t.id) : [...current, t.id],
+                    );
+                  }}
+                >
+                  <Text style={[styles.chipText, active && { color }]}>{t.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </>
+      )}
 
       {e.game.summary && (
         <>

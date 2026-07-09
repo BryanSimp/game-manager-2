@@ -11,7 +11,8 @@ import {
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { StarRating } from "../components/StarRating.js";
-import { STATUS_META, formatHours } from "../lib/format.js";
+import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
+import { usePreferences } from "../lib/prefs.js";
 
 const FAMILY_LABELS: Record<string, string> = {
   nintendo: "Nintendo",
@@ -27,8 +28,11 @@ export function GameDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const prefs = usePreferences();
   const entry = useQuery({ queryKey: ["entry", id], queryFn: () => api.getEntry(id) });
   const platforms = useQuery({ queryKey: ["platforms"], queryFn: () => api.getPlatforms() });
+  const allTags = useQuery({ queryKey: ["tags"], queryFn: () => api.getTags() });
+  const [newTag, setNewTag] = useState("");
 
   const [notes, setNotes] = useState("");
   const [notesDirty, setNotesDirty] = useState(false);
@@ -58,6 +62,44 @@ export function GameDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["library"] });
       navigate({ to: "/" });
+    },
+  });
+
+  const setTags = useMutation({
+    mutationFn: (tagIds: string[]) => api.setEntryTags(id, tagIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entry", id] });
+      queryClient.invalidateQueries({ queryKey: ["library"] });
+    },
+  });
+
+  const createAndAttachTag = useMutation({
+    mutationFn: async (name: string) => {
+      const tag = await api.createTag({ name });
+      const current = entry.data?.tags.map((t) => t.id) ?? [];
+      await api.setEntryTags(id, [...current, tag.id]);
+    },
+    onSuccess: () => {
+      setNewTag("");
+      queryClient.invalidateQueries({ queryKey: ["tags"] });
+      queryClient.invalidateQueries({ queryKey: ["entry", id] });
+      queryClient.invalidateQueries({ queryKey: ["library"] });
+    },
+  });
+
+  const uploadCover = useMutation({
+    mutationFn: (file: File) => api.uploadCover(id, file, file.name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entry", id] });
+      queryClient.invalidateQueries({ queryKey: ["library"] });
+    },
+  });
+
+  const removeCover = useMutation({
+    mutationFn: () => api.removeCover(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entry", id] });
+      queryClient.invalidateQueries({ queryKey: ["library"] });
     },
   });
 
@@ -105,6 +147,30 @@ export function GameDetailPage() {
               </div>
             )}
           </div>
+          <div className="mt-3 flex flex-col gap-2">
+            <label className="cursor-pointer rounded-lg border border-zinc-700 px-3 py-1.5 text-center text-xs text-zinc-300 hover:bg-zinc-800">
+              {uploadCover.isPending ? "Uploading…" : "Upload custom cover"}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(ev) => {
+                  const file = ev.target.files?.[0];
+                  if (file) uploadCover.mutate(file);
+                  ev.target.value = "";
+                }}
+              />
+            </label>
+            {e.hasCustomCover && (
+              <button
+                onClick={() => removeCover.mutate()}
+                className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              >
+                Remove custom cover
+              </button>
+            )}
+          </div>
+
           {(e.game.ttbMain || e.game.ttbCompletionist) && (
             <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-sm">
               <p className="mb-2 font-semibold text-zinc-300">How long to beat</p>
@@ -130,19 +196,23 @@ export function GameDetailPage() {
           )}
 
           <div className="mt-4 flex flex-wrap gap-2">
-            {GAME_STATUSES.map((s: GameStatus) => (
-              <button
-                key={s}
-                onClick={() => update.mutate({ status: s })}
-                className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
-                  e.status === s
-                    ? STATUS_META[s].classes
-                    : "border-zinc-700 text-zinc-500 hover:border-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                {STATUS_META[s].label}
-              </button>
-            ))}
+            {GAME_STATUSES.map((s: GameStatus) => {
+              const chip = statusChip(s, prefs);
+              return (
+                <button
+                  key={s}
+                  onClick={() => update.mutate({ status: s })}
+                  className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
+                    e.status === s
+                      ? chip.className
+                      : "border-zinc-700 text-zinc-500 hover:border-zinc-500 hover:text-zinc-300"
+                  }`}
+                  style={e.status === s ? chip.style : undefined}
+                >
+                  {STATUS_META[s].label}
+                </button>
+              );
+            })}
           </div>
 
           <div className="mt-4">
@@ -201,6 +271,49 @@ export function GameDetailPage() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <p className="mb-2 text-sm font-semibold text-zinc-300">Tags</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {(allTags.data ?? []).map((t) => {
+                const active = e.tags.some((et) => et.id === t.id);
+                const color = t.color ?? "#71717a";
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      const current = e.tags.map((et) => et.id);
+                      setTags.mutate(
+                        active ? current.filter((tid) => tid !== t.id) : [...current, t.id],
+                      );
+                    }}
+                    className="rounded-full border px-3 py-1 text-sm font-medium transition"
+                    style={
+                      active
+                        ? { backgroundColor: `${color}26`, color, borderColor: `${color}66` }
+                        : { borderColor: "#3f3f46", color: "#71717a" }
+                    }
+                  >
+                    {t.name}
+                  </button>
+                );
+              })}
+              <form
+                onSubmit={(ev) => {
+                  ev.preventDefault();
+                  if (newTag.trim()) createAndAttachTag.mutate(newTag.trim());
+                }}
+                className="inline-flex"
+              >
+                <input
+                  value={newTag}
+                  onChange={(ev) => setNewTag(ev.target.value)}
+                  placeholder="+ new tag"
+                  className="w-28 rounded-full border border-dashed border-zinc-700 bg-transparent px-3 py-1 text-sm outline-none placeholder:text-zinc-600 focus:border-indigo-500"
+                />
+              </form>
             </div>
           </div>
 
