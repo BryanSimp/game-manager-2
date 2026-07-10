@@ -45,14 +45,18 @@ const NOISE_EXACT = new Set([
 
 // Suffixes that launchers append after a dash: "Game Name - Update Queued"
 const NOISE_SUFFIX_RE =
-  /\s*[-–—]\s*(update queued|update available|update|queued|downloading|installing|installed|ready to play|early access|coming soon)\s*$/i;
+  /\s*[-–—]\s*(update queued|update available|update paused|update required|update|queued|paused|downloading|installing|installed|ready to play|early access|coming soon)\s*$/i;
 
 export function cleanLine(raw: string): string {
   let line = raw.trim();
 
-  // 1. Strip trademark / copyright / special-decoration symbols.
-  //    These break IGDB searches ("DARK SOULS™ III" → "DARK SOULS III").
-  line = line.replace(/[™®©℗°]/g, "");
+  // 0. Steam/launcher lists show a game icon before each title — OCR reads
+  //    the icon as junk ("[PY Among us", "IB Aperture Desk Job", "& 3DMark").
+  //    Strip closed bracket fragments, unclosed bracket + short token, then
+  //    leading symbol runs. Never eat into a following capitalized word.
+  line = line.replace(/^\s*[[({][^\])}\s]{0,4}[\])}]\s*/, "");
+  line = line.replace(/^\s*[[({][^\s]{0,3}\s+/, "");
+  line = line.replace(/^[^A-Za-z0-9]+/, "");
 
   // 2. Fix the most common OCR roman-numeral misreads.
   //    In many fonts the digit sequence looks like lowercase letters:

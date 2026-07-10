@@ -68,6 +68,8 @@ export async function processImportJob(jobId: string): Promise<void> {
         .set({
           candidates: result.candidates,
           confidence: result.confidence,
+          // when a junk-prefix fallback won, keep the better title for manual adds
+          cleanedTitle: result.query,
           resolution: result.candidates.length > 0 && result.confidence >= 0.55 ? "auto" : "pending",
         })
         .where(eq(schema.importItems.id, item.id));
