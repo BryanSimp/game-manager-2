@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import {
+  boxSpecFor,
   caseColorFor,
   FAMILY_ACCENT,
   type ShelfEntry,
@@ -69,27 +70,46 @@ function ShelfRowView({ row }: { row: ShelfRow }) {
         showsHorizontalScrollIndicator={false}
         style={styles.rowBg}
         contentContainerStyle={{ padding: 10, gap: 10 }}
-        renderItem={({ item }) => <GameBox entry={item} caseColor={color} />}
+        renderItem={({ item }) => (
+          <GameBox entry={item} caseColor={color} platformName={row.platform.name} />
+        )}
       />
       <View style={styles.plank} />
     </View>
   );
 }
 
-function GameBox({ entry, caseColor }: { entry: ShelfEntry; caseColor: string }) {
+const SHELF_BOX_H = 100;
+
+function GameBox({
+  entry,
+  caseColor,
+  platformName,
+}: {
+  entry: ShelfEntry;
+  caseColor: string;
+  platformName: string;
+}) {
   const router = useRouter();
   const physical = entry.format === "physical";
   const cover = resolveImage(entry.coverSrc);
+  const spec = boxSpecFor(platformName);
+  const boxW = physical ? Math.round(SHELF_BOX_H * (spec.w / spec.h)) : 72;
   return (
     <TouchableOpacity
-      style={{ width: 76 }}
+      style={{ width: boxW }}
       onPress={() => router.push(`/game/${entry.userGameId}`)}
     >
       <View
         style={[
           styles.box,
+          { height: SHELF_BOX_H },
           physical
-            ? { borderLeftWidth: 5, borderLeftColor: caseColor, borderRadius: 4 }
+            ? {
+                borderLeftWidth: Math.max(4, Math.round(SHELF_BOX_H * (spec.d / spec.h) * 0.6)),
+                borderLeftColor: caseColor,
+                borderRadius: 4,
+              }
             : { borderRadius: 8, opacity: 0.9 },
         ]}
       >
@@ -135,7 +155,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 2,
   },
   box: {
-    aspectRatio: 3 / 4,
     backgroundColor: "#27272a",
     overflow: "hidden",
     justifyContent: "center",

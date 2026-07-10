@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  boxSpecFor,
   caseColorFor,
   caseColorIsLight,
   FAMILY_ACCENT,
@@ -154,6 +155,7 @@ function ShelfRowView({
           <GameBox
             key={`${entry.userGameId}-${entry.format}`}
             entry={entry}
+            platformName={row.platform.name}
             caseColor={caseStyle.color}
             draggable={sortMode === "custom"}
             onDragStart={() => (dragId.current = entry.userGameId)}
@@ -173,22 +175,29 @@ function ShelfRowView({
   );
 }
 
-const CASE_DEPTH = 14; // px — thickness of a physical game case
+const SHELF_BOX_H = 118; // px — every box on a shelf row is this tall; width/depth follow real ratios
 
 function GameBox({
   entry,
+  platformName,
   caseColor,
   draggable,
   onDragStart,
   onDrop,
 }: {
   entry: ShelfEntry;
+  platformName: string;
   caseColor: string;
   draggable: boolean;
   onDragStart: () => void;
   onDrop: () => void;
 }) {
   const physical = entry.format === "physical";
+  const spec = boxSpecFor(platformName);
+  // real retail proportions: SNES boxes come out landscape, Switch cases slim & tall
+  const boxW = Math.round(SHELF_BOX_H * (spec.w / spec.h));
+  const boxD = Math.max(7, Math.round(SHELF_BOX_H * (spec.d / spec.h)));
+  const lightCase = caseColorIsLight(caseColor);
 
   const cover = entry.coverSrc ? (
     <img
@@ -219,16 +228,35 @@ function GameBox({
         onDrop();
       }}
       title={`${entry.title} (${physical ? "physical" : "digital"})`}
-      className={`group w-24 flex-none select-none ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+      className={`group flex-none select-none ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+      style={{ width: physical ? boxW : 90 }}
     >
       {physical ? (
-        // real 3D case: angled on the shelf, spine facing out; straightens on hover
+        // real 3D case at the platform's retail proportions; straightens on hover
         <div className="case-scene">
           <div
-            className="case3d aspect-[3/4]"
-            style={{ filter: "drop-shadow(4px 6px 6px rgba(0,0,0,0.55))" }}
+            className="case3d"
+            style={{
+              width: boxW,
+              height: SHELF_BOX_H,
+              filter: "drop-shadow(4px 6px 6px rgba(0,0,0,0.55))",
+            }}
           >
             <div className="case3d-front bg-zinc-800">
+              {spec.style !== "cardboard" && spec.wordmark && (
+                <div
+                  className="absolute inset-x-0 top-0 z-10 flex items-center justify-center overflow-hidden font-extrabold"
+                  style={{
+                    height: Math.round(SHELF_BOX_H * 0.08),
+                    backgroundColor: caseColor,
+                    color: lightCase ? "rgba(0,0,0,0.8)" : "rgba(255,255,255,0.92)",
+                    fontSize: 6,
+                    letterSpacing: "0.1em",
+                  }}
+                >
+                  {spec.wordmark}
+                </div>
+              )}
               {cover}
               {entry.status === "finished" && (
                 <span className="absolute left-1 top-1 z-10 rounded bg-black/70 px-1 text-[10px]">
@@ -236,18 +264,18 @@ function GameBox({
                 </span>
               )}
             </div>
-            <div
-              className="case3d-spine"
-              style={{ width: CASE_DEPTH, backgroundColor: caseColor }}
-            >
-              {/* logo band at the top of the spine, like real cases */}
+            <div className="case3d-spine" style={{ width: boxD, backgroundColor: caseColor }}>
               <div
-                className="mt-1 h-4 w-2 rounded-[1px]"
-                style={{ backgroundColor: caseColorIsLight(caseColor) ? "rgba(0,0,0,0.65)" : "rgba(255,255,255,0.85)" }}
+                className="mt-1 rounded-[1px]"
+                style={{
+                  width: Math.max(2, boxD * 0.3),
+                  height: 14,
+                  backgroundColor: lightCase ? "rgba(0,0,0,0.65)" : "rgba(255,255,255,0.85)",
+                }}
               />
               <span
                 className="case3d-spine-title"
-                style={{ color: caseColorIsLight(caseColor) ? "rgba(0,0,0,0.8)" : "rgba(255,255,255,0.92)" }}
+                style={{ color: lightCase ? "rgba(0,0,0,0.8)" : "rgba(255,255,255,0.92)" }}
               >
                 {entry.title.toUpperCase()}
               </span>
@@ -257,8 +285,8 @@ function GameBox({
         </div>
       ) : (
         <div
-          className="relative aspect-[3/4] overflow-hidden rounded-lg bg-zinc-800 opacity-90 transition group-hover:-translate-y-1"
-          style={{ boxShadow: "0 2px 4px rgba(0,0,0,0.4)" }}
+          className="relative overflow-hidden rounded-lg bg-zinc-800 opacity-90 transition group-hover:-translate-y-1"
+          style={{ height: SHELF_BOX_H, boxShadow: "0 2px 4px rgba(0,0,0,0.4)" }}
         >
           {cover}
           <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px]">💾</span>
