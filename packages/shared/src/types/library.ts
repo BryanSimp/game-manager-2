@@ -144,6 +144,69 @@ export interface ImportJobDetail extends ImportJobSummary {
   items: ImportItem[];
 }
 
+export interface ShelfEntry {
+  userGameId: string;
+  gameId: string;
+  title: string;
+  coverSrc: string | null;
+  format: OwnershipFormat;
+  status: GameStatus;
+  rating: number | null;
+  releaseDate: string | null;
+  position: number;
+}
+
+export interface ShelfRow {
+  platform: {
+    id: string;
+    name: string;
+    abbreviation: string | null;
+    family: PlatformFamily;
+    sortOrder: number;
+  };
+  entries: ShelfEntry[];
+}
+
+export interface CollectionSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  accentColor: string | null;
+  total: number;
+  finished: number;
+}
+
+export interface CollectionNode {
+  gameId: string;
+  title: string;
+  coverSrc: string | null;
+  x: number;
+  y: number;
+  userGameId: string | null;
+  status: GameStatus | null;
+}
+
+export interface CollectionLink {
+  id: string;
+  fromGameId: string;
+  toGameId: string;
+  label: string | null;
+}
+
+export interface CollectionDetail {
+  id: string;
+  name: string;
+  description: string | null;
+  accentColor: string | null;
+  games: CollectionNode[];
+  links: CollectionLink[];
+}
+
+export interface CollectionLayoutInput {
+  nodes: Array<{ gameId: string; x: number; y: number }>;
+  links: Array<{ fromGameId: string; toGameId: string; label?: string | null }>;
+}
+
 export interface DashboardData {
   total: number;
   statusCounts: Partial<Record<GameStatus, number>>;

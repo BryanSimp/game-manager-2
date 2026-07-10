@@ -16,14 +16,20 @@ export default function RootLayout() {
             options={{
               title: "Library",
               headerRight: () => (
-                <Link href="/import">
-                  <Text style={{ fontSize: 18 }}>📷</Text>
-                </Link>
+                <>
+                  <Link href="/shelf" style={{ marginRight: 16 }}>
+                    <Text style={{ fontSize: 18 }}>🗄️</Text>
+                  </Link>
+                  <Link href="/import">
+                    <Text style={{ fontSize: 18 }}>📷</Text>
+                  </Link>
+                </>
               ),
             }}
           />
           <Stack.Screen name="add" options={{ title: "Add game" }} />
           <Stack.Screen name="import" options={{ title: "Import" }} />
+          <Stack.Screen name="shelf" options={{ title: "Shelf" }} />
           <Stack.Screen name="game/[id]" options={{ title: "Game" }} />
           <Stack.Screen name="login" options={{ title: "Sign in", headerShown: false }} />
           <Stack.Screen name="register" options={{ title: "Create account", headerShown: false }} />

@@ -3,6 +3,9 @@ import type {
   AdminSettings,
   BulkAddItem,
   BulkAddResult,
+  CollectionDetail,
+  CollectionLayoutInput,
+  CollectionSummary,
   DashboardData,
   Health,
   ImportJobDetail,
@@ -12,6 +15,7 @@ import type {
   Platform,
   Preferences,
   SearchResponse,
+  ShelfRow,
   Tag,
   TagInput,
   UpdateEntryInput,
@@ -177,6 +181,62 @@ export class ApiClient {
 
   deleteTag(id: string): Promise<{ ok: true }> {
     return this.request(`/api/tags/${id}`, { method: "DELETE" });
+  }
+
+  // ---- shelf ----
+
+  getShelf(): Promise<ShelfRow[]> {
+    return this.request<ShelfRow[]>("/api/shelf");
+  }
+
+  setShelfOrder(platformId: string, orderedUserGameIds: string[]): Promise<{ ok: true }> {
+    return this.request(`/api/shelf/${platformId}/order`, {
+      method: "PUT",
+      body: JSON.stringify({ orderedUserGameIds }),
+    });
+  }
+
+  // ---- collections ----
+
+  getCollections(): Promise<CollectionSummary[]> {
+    return this.request<CollectionSummary[]>("/api/collections");
+  }
+
+  createCollection(input: { name: string; description?: string | null; accentColor?: string | null }): Promise<CollectionSummary> {
+    return this.request("/api/collections", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  updateCollection(
+    id: string,
+    input: Partial<{ name: string; description: string | null; accentColor: string | null }>,
+  ): Promise<CollectionSummary> {
+    return this.request(`/api/collections/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+  }
+
+  deleteCollection(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/collections/${id}`, { method: "DELETE" });
+  }
+
+  getCollection(id: string): Promise<CollectionDetail> {
+    return this.request<CollectionDetail>(`/api/collections/${id}`);
+  }
+
+  addCollectionGame(id: string, gameId: string): Promise<{ ok: true }> {
+    return this.request(`/api/collections/${id}/games`, {
+      method: "POST",
+      body: JSON.stringify({ gameId }),
+    });
+  }
+
+  removeCollectionGame(id: string, gameId: string): Promise<{ ok: true }> {
+    return this.request(`/api/collections/${id}/games/${gameId}`, { method: "DELETE" });
+  }
+
+  saveCollectionLayout(id: string, layout: CollectionLayoutInput): Promise<{ ok: true }> {
+    return this.request(`/api/collections/${id}/layout`, {
+      method: "PUT",
+      body: JSON.stringify(layout),
+    });
   }
 
   // ---- imports (OCR pipeline) ----

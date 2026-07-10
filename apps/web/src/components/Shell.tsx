@@ -42,6 +42,12 @@ export function Shell({ children }: { children: ReactNode }) {
             <Link to="/" className={link}>
               Library
             </Link>
+            <Link to="/shelf" className={link}>
+              Shelf
+            </Link>
+            <Link to="/collections" className={link}>
+              Collections
+            </Link>
             <Link to="/dashboard" className={link}>
               Dashboard
             </Link>

@@ -82,12 +82,12 @@ Migrations are plain SQL in `apps/api/drizzle/`, applied by `src/db/migrate.ts`
 | 0 scaffold | `ff323fe` | Monorepo, auth on web+mobile, schema+migrations, compose files, CI |
 | 1 MVP library | `7fe0771` | IGDB search/metadata/TTB, library CRUD, platform ownership (physical/digital), half-star ratings, bulk add, admin IGDB settings, mobile library/add/detail |
 | 2 customization | `f3f1086` | Tags (colors/groups), library filters+sort, custom cover upload, preferences (status colors, badges), dashboard (stat tiles, backlog hours, random pick) |
-| 3 OCR import | `69a66cf`+ | pg-boss pipeline, tesseract + Claude vision providers, noise filter, confidence-scored review UI on web+mobile, camera capture on mobile |
+| 3 OCR import | `69a66cf`, `b0eb5c0` | pg-boss pipeline, tesseract + Claude vision providers, noise filter (hardened on a real Steam screenshot), confidence-scored review UI on web+mobile, camera capture on mobile |
+| 4 shelf + collections | see git log | Virtual shelf (per-console rows, physical boxes with console-colored spines vs digital tiles, sort modes + drag-to-reorder persisted in `user_game_platforms.position`); collections with SVG play-order graph editor (drag nodes, connect mode, click-edge-to-delete, status rings), roll-up stats; mobile shelf screen |
 
-**Next: Phase 4** — virtual shelf (games as boxes grouped by console family using
-`user_game_platforms`, physical vs digital visuals, custom ordering) + collections with
-the v1 play-order graph (normalized: `collections`, `collection_games` with x/y,
-`collection_links`).
+**Next: Phase 5** — mobile polish + barcode scanning (`expo-camera` UPC lookup) +
+offline caching (TanStack Query persistence). Then Phase 6 (email, export, randomizer,
+admin panel), 7 (completionist checklists), 8 (Steam achievements + library import).
 
 ## Deferred / known gaps
 

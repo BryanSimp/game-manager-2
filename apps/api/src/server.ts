@@ -13,6 +13,8 @@ import { registerUploadRoutes } from "./routes/uploads.js";
 import { registerPreferenceRoutes } from "./routes/preferences.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
 import { registerImportRoutes } from "./routes/imports.js";
+import { registerShelfRoutes } from "./routes/shelf.js";
+import { registerCollectionRoutes } from "./routes/collections.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -85,6 +87,8 @@ export async function buildServer() {
   registerPreferenceRoutes(app);
   registerDashboardRoutes(app);
   registerImportRoutes(app);
+  registerShelfRoutes(app);
+  registerCollectionRoutes(app);
 
   return app;
 }

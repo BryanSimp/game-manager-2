@@ -9,6 +9,9 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { LibraryPage } from "./pages/Library.js";
+import { ShelfPage } from "./pages/Shelf.js";
+import { CollectionsPage } from "./pages/Collections.js";
+import { CollectionDetailPage } from "./pages/CollectionDetail.js";
 import { AddGamePage } from "./pages/AddGame.js";
 import { GameDetailPage } from "./pages/GameDetail.js";
 import { ImportPage } from "./pages/Import.js";
@@ -26,6 +29,9 @@ const rootRoute = createRootRoute({
 
 const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: LibraryPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/shelf", component: ShelfPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/collections", component: CollectionsPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/collection/$id", component: CollectionDetailPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/add", component: AddGamePage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/game/$id", component: GameDetailPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/import", component: ImportPage }),

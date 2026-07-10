@@ -1,6 +1,7 @@
 import {
   boolean,
   index,
+  integer,
   jsonb,
   numeric,
   pgTable,
@@ -53,6 +54,8 @@ export const userGamePlatforms = pgTable(
       .notNull()
       .references(() => platforms.id, { onDelete: "cascade" }),
     format: ownershipFormatEnum("format").notNull(),
+    // custom order on the virtual shelf, per platform row
+    position: integer("position").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.userGameId, t.platformId, t.format] })],
 );
