@@ -10,7 +10,7 @@ The mobile client. Runs in **Expo Go** during development.
 3. Point the app at your dev machine's LAN IP — create `apps/mobile/.env`:
 
    ```
-   EXPO_PUBLIC_API_URL=http://192.168.1.50:3001
+   EXPO_PUBLIC_API_URL=http://192.168.68.67:8081
    ```
 
    (Find your IP with `ipconfig` — use the IPv4 address of your Wi-Fi adapter.

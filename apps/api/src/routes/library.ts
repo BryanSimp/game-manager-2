@@ -46,6 +46,16 @@ const bulkSchema = z.object({
     )
     .min(1)
     .max(200),
+  // ownership applied to every imported game ("this whole list is my Switch library")
+  platforms: z
+    .array(
+      z.object({
+        platformId: z.string().uuid(),
+        format: z.enum(OWNERSHIP_FORMATS),
+      }),
+    )
+    .max(5)
+    .optional(),
 });
 
 function gameToJson(game: typeof schema.games.$inferSelect) {
@@ -194,6 +204,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     let added = 0;
     let skipped = 0;
     const errors: string[] = [];
+    const batchPlatforms = parsed.data.platforms ?? [];
     for (const item of parsed.data.items) {
       try {
         const gameId = item.igdbId
@@ -206,6 +217,31 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
           .returning({ id: schema.userGames.id });
         if (created) added++;
         else skipped++;
+
+        if (batchPlatforms.length > 0) {
+          // apply ownership to new AND already-owned entries — re-importing a
+          // console's library should still tag existing games with it
+          let userGameId = created?.id;
+          if (!userGameId) {
+            const [existing] = await db
+              .select({ id: schema.userGames.id })
+              .from(schema.userGames)
+              .where(and(eq(schema.userGames.userId, user.id), eq(schema.userGames.gameId, gameId)));
+            userGameId = existing?.id;
+          }
+          if (userGameId) {
+            await db
+              .insert(schema.userGamePlatforms)
+              .values(
+                batchPlatforms.map((p) => ({
+                  userGameId: userGameId!,
+                  platformId: p.platformId,
+                  format: p.format,
+                })),
+              )
+              .onConflictDoNothing();
+          }
+        }
       } catch (err) {
         errors.push(
           `${item.title ?? `igdb:${item.igdbId}`}: ${err instanceof Error ? err.message : "failed"}`,

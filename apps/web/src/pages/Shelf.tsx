@@ -1,21 +1,17 @@
 import { useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { PlatformFamily, ShelfEntry, ShelfRow } from "@gm/shared";
+import {
+  caseColorFor,
+  caseColorIsLight,
+  FAMILY_ACCENT,
+  type ShelfEntry,
+  type ShelfRow,
+} from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 
 type SortMode = "custom" | "title" | "release" | "rating";
-
-/** Real-world console case colors — the physical boxes wear them. */
-const FAMILY_CASE: Record<PlatformFamily, { color: string; label: string }> = {
-  nintendo: { color: "#e60012", label: "Nintendo" },
-  sony: { color: "#0070d1", label: "PlayStation" },
-  xbox: { color: "#107c10", label: "Xbox" },
-  pc: { color: "#4b5563", label: "PC" },
-  sega: { color: "#0060a8", label: "Sega" },
-  other: { color: "#52525b", label: "Other" },
-};
 
 function sortEntries(entries: ShelfEntry[], mode: SortMode): ShelfEntry[] {
   const list = [...entries];
@@ -104,7 +100,10 @@ function ShelfRowView({
   sortMode: SortMode;
   onReorder: (orderedUserGameIds: string[]) => void;
 }) {
-  const caseStyle = FAMILY_CASE[row.platform.family];
+  const caseStyle = {
+    color: caseColorFor(row.platform.name, row.platform.family),
+    badge: FAMILY_ACCENT[row.platform.family],
+  };
   const [localOrder, setLocalOrder] = useState<string[] | null>(null);
   const dragId = useRef<string | null>(null);
 
@@ -139,7 +138,7 @@ function ShelfRowView({
       <div className="mb-2 flex items-baseline gap-3">
         <span
           className="rounded px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-white"
-          style={{ backgroundColor: caseStyle.color }}
+          style={{ backgroundColor: caseStyle.badge }}
         >
           {row.platform.abbreviation ?? row.platform.name}
         </span>
@@ -174,6 +173,8 @@ function ShelfRowView({
   );
 }
 
+const CASE_DEPTH = 14; // px — thickness of a physical game case
+
 function GameBox({
   entry,
   caseColor,
@@ -188,6 +189,21 @@ function GameBox({
   onDrop: () => void;
 }) {
   const physical = entry.format === "physical";
+
+  const cover = entry.coverSrc ? (
+    <img
+      src={entry.coverSrc}
+      alt={entry.title}
+      loading="lazy"
+      draggable={false}
+      className="h-full w-full object-cover"
+    />
+  ) : (
+    <div className="flex h-full items-center justify-center bg-zinc-800 p-1.5 text-center text-[10px] font-semibold text-zinc-400">
+      {entry.title}
+    </div>
+  );
+
   return (
     <Link
       to="/game/$id"
@@ -205,38 +221,52 @@ function GameBox({
       title={`${entry.title} (${physical ? "physical" : "digital"})`}
       className={`group w-24 flex-none select-none ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
     >
-      <div
-        className={`relative aspect-[3/4] overflow-hidden bg-zinc-800 transition group-hover:-translate-y-1 ${
-          physical ? "rounded-r-md rounded-l-sm" : "rounded-lg opacity-90"
-        }`}
-        style={
-          physical
-            ? {
-                borderLeft: `6px solid ${caseColor}`,
-                boxShadow: "2px 3px 6px rgba(0,0,0,0.55), inset -1px 0 2px rgba(255,255,255,0.08)",
-              }
-            : { boxShadow: "0 2px 4px rgba(0,0,0,0.4)" }
-        }
-      >
-        {entry.coverSrc ? (
-          <img
-            src={entry.coverSrc}
-            alt={entry.title}
-            loading="lazy"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center p-1.5 text-center text-[10px] font-semibold text-zinc-400">
-            {entry.title}
+      {physical ? (
+        // real 3D case: angled on the shelf, spine facing out; straightens on hover
+        <div className="case-scene">
+          <div
+            className="case3d aspect-[3/4]"
+            style={{ filter: "drop-shadow(4px 6px 6px rgba(0,0,0,0.55))" }}
+          >
+            <div className="case3d-front bg-zinc-800">
+              {cover}
+              {entry.status === "finished" && (
+                <span className="absolute left-1 top-1 z-10 rounded bg-black/70 px-1 text-[10px]">
+                  ✓
+                </span>
+              )}
+            </div>
+            <div
+              className="case3d-spine"
+              style={{ width: CASE_DEPTH, backgroundColor: caseColor }}
+            >
+              {/* logo band at the top of the spine, like real cases */}
+              <div
+                className="mt-1 h-4 w-2 rounded-[1px]"
+                style={{ backgroundColor: caseColorIsLight(caseColor) ? "rgba(0,0,0,0.65)" : "rgba(255,255,255,0.85)" }}
+              />
+              <span
+                className="case3d-spine-title"
+                style={{ color: caseColorIsLight(caseColor) ? "rgba(0,0,0,0.8)" : "rgba(255,255,255,0.92)" }}
+              >
+                {entry.title.toUpperCase()}
+              </span>
+            </div>
+            <div className="case3d-edge" />
           </div>
-        )}
-        {!physical && (
+        </div>
+      ) : (
+        <div
+          className="relative aspect-[3/4] overflow-hidden rounded-lg bg-zinc-800 opacity-90 transition group-hover:-translate-y-1"
+          style={{ boxShadow: "0 2px 4px rgba(0,0,0,0.4)" }}
+        >
+          {cover}
           <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px]">💾</span>
-        )}
-        {entry.status === "finished" && (
-          <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">✓</span>
-        )}
-      </div>
+          {entry.status === "finished" && (
+            <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[10px]">✓</span>
+          )}
+        </div>
+      )}
       <p className="mt-1 truncate text-center text-[11px] text-zinc-400 group-hover:text-zinc-200">
         {entry.title}
       </p>

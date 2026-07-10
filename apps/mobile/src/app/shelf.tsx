@@ -9,18 +9,14 @@ import {
   View,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import type { PlatformFamily, ShelfEntry, ShelfRow } from "@gm/shared";
+import {
+  caseColorFor,
+  FAMILY_ACCENT,
+  type ShelfEntry,
+  type ShelfRow,
+} from "@gm/shared";
 import { api } from "@/lib/api";
 import { resolveImage } from "@/lib/ui";
-
-const FAMILY_COLORS: Record<PlatformFamily, string> = {
-  nintendo: "#e60012",
-  sony: "#0070d1",
-  xbox: "#107c10",
-  pc: "#4b5563",
-  sega: "#0060a8",
-  other: "#52525b",
-};
 
 export default function ShelfScreen() {
   const shelf = useQuery({ queryKey: ["shelf"], queryFn: () => api.getShelf() });
@@ -55,11 +51,12 @@ export default function ShelfScreen() {
 }
 
 function ShelfRowView({ row }: { row: ShelfRow }) {
-  const color = FAMILY_COLORS[row.platform.family];
+  const color = caseColorFor(row.platform.name, row.platform.family);
+  const badge = FAMILY_ACCENT[row.platform.family];
   return (
     <View style={{ marginBottom: 22 }}>
       <View style={styles.header}>
-        <View style={[styles.badge, { backgroundColor: color }]}>
+        <View style={[styles.badge, { backgroundColor: badge }]}>
           <Text style={styles.badgeText}>{row.platform.abbreviation ?? row.platform.name}</Text>
         </View>
         <Text style={styles.headerTitle}>{row.platform.name}</Text>

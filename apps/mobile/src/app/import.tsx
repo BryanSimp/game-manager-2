@@ -4,6 +4,7 @@ import {
   Alert,
   FlatList,
   Image,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -38,6 +39,9 @@ export default function ImportScreen() {
   const [stage, setStage] = useState<"input" | "processing" | "review">("input");
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const platforms = useQuery({ queryKey: ["platforms"], queryFn: () => api.getPlatforms() });
+  const [ownPlatformId, setOwnPlatformId] = useState<string | null>(null);
+  const [ownFormat, setOwnFormat] = useState<"physical" | "digital">("digital");
 
   const job = useQuery({
     queryKey: ["import-job", jobId],
@@ -99,6 +103,7 @@ export default function ImportScreen() {
               ? { igdbId: it.selected.igdbId }
               : { title: it.selected?.title ?? it.cleaned },
           ),
+        ownPlatformId ? [{ platformId: ownPlatformId, format: ownFormat }] : undefined,
       );
       if (jobId) await api.finishImport(jobId);
       return res;
@@ -206,6 +211,51 @@ export default function ImportScreen() {
           )}
         />
         <View style={styles.footer}>
+          <Text style={styles.footerLabel}>Mark all as owned on:</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 6, paddingVertical: 6 }}
+          >
+            <TouchableOpacity
+              style={[styles.platChip, !ownPlatformId && styles.platChipActive]}
+              onPress={() => setOwnPlatformId(null)}
+            >
+              <Text style={[styles.platChipText, !ownPlatformId && styles.platChipTextActive]}>
+                Don't set
+              </Text>
+            </TouchableOpacity>
+            {(platforms.data ?? []).map((p) => {
+              const active2 = ownPlatformId === p.id;
+              return (
+                <TouchableOpacity
+                  key={p.id}
+                  style={[styles.platChip, active2 && styles.platChipActive]}
+                  onPress={() => setOwnPlatformId(active2 ? null : p.id)}
+                >
+                  <Text style={[styles.platChipText, active2 && styles.platChipTextActive]}>
+                    {p.abbreviation ?? p.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          {ownPlatformId && (
+            <View style={styles.formatRow}>
+              <TouchableOpacity
+                style={[styles.formatBtn, ownFormat === "digital" && styles.formatBtnActive]}
+                onPress={() => setOwnFormat("digital")}
+              >
+                <Text style={styles.platChipText}>💾 Digital</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.formatBtn, ownFormat === "physical" && styles.formatBtnActive]}
+                onPress={() => setOwnFormat("physical")}
+              >
+                <Text style={styles.platChipText}>📦 Physical</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           <TouchableOpacity
             style={styles.confirmBtn}
             disabled={confirm.isPending || active.length === 0}
@@ -324,8 +374,30 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 16,
+    paddingTop: 8,
     backgroundColor: "#101014ee",
   },
+  footerLabel: { color: "#a1a1aa", fontSize: 12, fontWeight: "600" },
+  platChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#3f3f46",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  platChipActive: { backgroundColor: "#312e81", borderColor: "#818cf8" },
+  platChipText: { color: "#a1a1aa", fontSize: 12, fontWeight: "500" },
+  platChipTextActive: { color: "#c7d2fe" },
+  formatRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
+  formatBtn: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#3f3f46",
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  formatBtnActive: { backgroundColor: "#312e81", borderColor: "#818cf8" },
   confirmBtn: {
     backgroundColor: "#4f46e5",
     borderRadius: 12,

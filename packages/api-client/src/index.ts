@@ -120,10 +120,13 @@ export class ApiClient {
     return this.request("/api/library", { method: "POST", body: JSON.stringify(input) });
   }
 
-  bulkAdd(items: BulkAddItem[]): Promise<BulkAddResult> {
+  bulkAdd(
+    items: BulkAddItem[],
+    platforms?: Array<{ platformId: string; format: OwnershipFormat }>,
+  ): Promise<BulkAddResult> {
     return this.request("/api/library/bulk", {
       method: "POST",
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, platforms }),
     });
   }
 

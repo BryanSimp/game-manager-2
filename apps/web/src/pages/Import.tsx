@@ -30,6 +30,10 @@ export function ImportPage() {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BulkAddResult | null>(null);
+  // batch ownership: "this whole list is my <platform> library"
+  const platforms = useQuery({ queryKey: ["platforms"], queryFn: () => api.getPlatforms() });
+  const [ownPlatformId, setOwnPlatformId] = useState("");
+  const [ownFormat, setOwnFormat] = useState<"physical" | "digital">("digital");
 
   // poll the job while the pipeline runs
   const job = useQuery({
@@ -92,6 +96,7 @@ export function ImportPage() {
               ? { igdbId: it.selected.igdbId }
               : { title: it.selected?.title ?? it.cleaned },
           ),
+        ownPlatformId ? [{ platformId: ownPlatformId, format: ownFormat }] : undefined,
       );
       if (jobId) await api.finishImport(jobId);
       return res;
@@ -217,10 +222,41 @@ export function ImportPage() {
 
       {stage === "review" && (
         <div>
-          <div className="mb-4 flex items-center gap-3">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
             <p className="mr-auto text-sm text-zinc-400">
               {active.length} of {items.length} titles will be added — fix any wrong matches first
             </p>
+            <label className="flex items-center gap-2 text-sm text-zinc-400">
+              Mark all as owned on
+              <select
+                value={ownPlatformId}
+                onChange={(e) => setOwnPlatformId(e.target.value)}
+                className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-200"
+              >
+                <option value="">— don't set —</option>
+                {(platforms.data ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {ownPlatformId && (
+              <div className="flex overflow-hidden rounded-lg border border-zinc-700">
+                <button
+                  onClick={() => setOwnFormat("digital")}
+                  className={`px-3 py-1.5 text-sm ${ownFormat === "digital" ? "bg-indigo-600/30 text-indigo-200" : "text-zinc-400 hover:bg-zinc-800"}`}
+                >
+                  💾 Digital
+                </button>
+                <button
+                  onClick={() => setOwnFormat("physical")}
+                  className={`border-l border-zinc-700 px-3 py-1.5 text-sm ${ownFormat === "physical" ? "bg-indigo-600/30 text-indigo-200" : "text-zinc-400 hover:bg-zinc-800"}`}
+                >
+                  📦 Physical
+                </button>
+              </div>
+            )}
             <button
               onClick={reset}
               className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
