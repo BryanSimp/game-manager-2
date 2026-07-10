@@ -12,6 +12,7 @@ import { registerTagRoutes } from "./routes/tags.js";
 import { registerUploadRoutes } from "./routes/uploads.js";
 import { registerPreferenceRoutes } from "./routes/preferences.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
+import { registerImportRoutes } from "./routes/imports.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -83,6 +84,7 @@ export async function buildServer() {
   registerUploadRoutes(app);
   registerPreferenceRoutes(app);
   registerDashboardRoutes(app);
+  registerImportRoutes(app);
 
   return app;
 }

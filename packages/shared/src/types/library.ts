@@ -111,6 +111,39 @@ export interface Preferences {
   showTimeBadge: boolean;
 }
 
+export type ImportSource = "screenshot" | "shelf_photo" | "text_paste";
+export type ImportJobStatus = "pending" | "ocr" | "matching" | "review" | "done" | "failed";
+export type ImportItemResolution = "pending" | "auto" | "manual" | "skipped";
+
+export interface ImportCandidate {
+  igdbId: number | null;
+  gameId: string | null;
+  title: string;
+  releaseYear: number | null;
+  coverSrc: string | null;
+}
+
+export interface ImportJobSummary {
+  id: string;
+  source: ImportSource;
+  status: ImportJobStatus;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface ImportItem {
+  id: string;
+  rawText: string;
+  cleanedTitle: string;
+  candidates: ImportCandidate[];
+  confidence: number | null;
+  resolution: ImportItemResolution;
+}
+
+export interface ImportJobDetail extends ImportJobSummary {
+  items: ImportItem[];
+}
+
 export interface DashboardData {
   total: number;
   statusCounts: Partial<Record<GameStatus, number>>;

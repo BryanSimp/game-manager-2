@@ -5,6 +5,8 @@ import type {
   BulkAddResult,
   DashboardData,
   Health,
+  ImportJobDetail,
+  ImportJobSummary,
   LibraryEntry,
   OwnershipFormat,
   Platform,
@@ -175,6 +177,41 @@ export class ApiClient {
 
   deleteTag(id: string): Promise<{ ok: true }> {
     return this.request(`/api/tags/${id}`, { method: "DELETE" });
+  }
+
+  // ---- imports (OCR pipeline) ----
+
+  createImageImport(
+    file: Blob,
+    filename: string,
+    source: "screenshot" | "shelf_photo",
+  ): Promise<ImportJobSummary> {
+    const form = new FormData();
+    form.append("source", source);
+    form.append("file", file, filename);
+    return this.request("/api/imports", { method: "POST", body: form });
+  }
+
+  createTextImport(text: string): Promise<ImportJobSummary> {
+    return this.request("/api/imports", {
+      method: "POST",
+      body: JSON.stringify({ source: "text_paste", text }),
+    });
+  }
+
+  getImports(): Promise<ImportJobSummary[]> {
+    return this.request<ImportJobSummary[]>("/api/imports");
+  }
+
+  getImport(id: string): Promise<ImportJobDetail> {
+    return this.request<ImportJobDetail>(`/api/imports/${id}`);
+  }
+
+  finishImport(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/imports/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "done" }),
+    });
   }
 
   // ---- preferences & dashboard ----
