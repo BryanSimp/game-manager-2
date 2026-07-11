@@ -85,6 +85,26 @@ export const gameGenres = pgTable(
   (t) => [primaryKey({ columns: [t.gameId, t.genreId] })],
 );
 
+/**
+ * Real per-platform retail box art (front scans), fetched from
+ * libretro-thumbnails and cached locally. imageId null = confirmed miss.
+ */
+export const gameBoxArt = pgTable(
+  "game_box_art",
+  {
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    platformId: uuid("platform_id")
+      .notNull()
+      .references(() => platforms.id, { onDelete: "cascade" }),
+    imageId: uuid("image_id").references(() => images.id),
+    source: text("source").notNull(), // libretro | miss
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.platformId] })],
+);
+
 /** App-wide key/value settings (IGDB credentials, registration toggle, etc.). */
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),

@@ -56,8 +56,8 @@ export async function cacheRemoteImage(
 export async function saveUploadedImage(
   buffer: Buffer,
   mime: string,
-  kind: "custom_cover" | "shelf_photo" | "background",
-  ownerUserId: string,
+  kind: "cover" | "custom_cover" | "shelf_photo" | "background",
+  ownerUserId: string | null,
 ): Promise<string> {
   await ensureImageDir();
   const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";

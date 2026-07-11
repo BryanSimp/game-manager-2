@@ -397,12 +397,14 @@ export function GameDetailPage() {
               <BoxViewer3D
                 title={e.game.title}
                 coverSrc={e.game.coverSrc}
+                boxArtSrc={e.platforms.find((p) => p.name === boxPlatform)?.boxArtSrc}
+                boxArtW={e.platforms.find((p) => p.name === boxPlatform)?.boxArtW}
+                boxArtH={e.platforms.find((p) => p.name === boxPlatform)?.boxArtH}
                 platformName={boxPlatform}
                 family={
                   e.platforms.find((p) => p.name === boxPlatform)?.family ?? "other"
                 }
                 summary={e.game.summary}
-                size={360}
               />
             </div>
           </div>

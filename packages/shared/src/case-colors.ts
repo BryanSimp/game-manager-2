@@ -53,7 +53,8 @@ export interface BoxSpec {
 const BOX_SPECS: Record<string, BoxSpec> = {
   NES: { w: 127, h: 178, d: 25, style: "cardboard", wordmark: null },
   "Super Nintendo": { w: 178, h: 127, d: 32, style: "cardboard", wordmark: null },
-  "Nintendo 64": { w: 145, h: 190, d: 23, style: "cardboard", wordmark: null },
+  // N64 retail boxes are landscape — wider than tall, like SNES
+  "Nintendo 64": { w: 190, h: 137, d: 30, style: "cardboard", wordmark: null },
   "Game Boy": { w: 102, h: 127, d: 22, style: "cardboard", wordmark: null },
   "Game Boy Color": { w: 102, h: 127, d: 22, style: "cardboard", wordmark: null },
   "Game Boy Advance": { w: 127, h: 127, d: 22, style: "cardboard", wordmark: null },

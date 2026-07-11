@@ -148,8 +148,8 @@ function ShelfRowView({
       </div>
 
       <div
-        className="flex gap-3 overflow-x-auto rounded-xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-4 pb-2"
-        style={{ boxShadow: "inset 0 -14px 18px -14px rgba(0,0,0,0.9)" }}
+        className="flex items-end gap-3 overflow-x-auto rounded-xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-4 pb-2"
+        style={{ boxShadow: "inset 0 -14px 18px -14px rgba(0,0,0,0.9)", minHeight: 175 }}
       >
         {entries.map((entry) => (
           <GameBox
@@ -175,7 +175,7 @@ function ShelfRowView({
   );
 }
 
-const SHELF_BOX_H = 118; // px — every box on a shelf row is this tall; width/depth follow real ratios
+const PX_PER_MM = 0.68; // global scale — a Wii case (190mm) is genuinely taller than a GameCube case (146mm)
 
 function GameBox({
   entry,
@@ -194,14 +194,22 @@ function GameBox({
 }) {
   const physical = entry.format === "physical";
   const spec = boxSpecFor(platformName);
-  // real retail proportions: SNES boxes come out landscape, Switch cases slim & tall
-  const boxW = Math.round(SHELF_BOX_H * (spec.w / spec.h));
-  const boxD = Math.max(7, Math.round(SHELF_BOX_H * (spec.d / spec.h)));
+  // true retail size at a shared scale — boxes differ across consoles like real shelves
+  const boxH = Math.round(spec.h * PX_PER_MM);
+  let boxW = Math.round(spec.w * PX_PER_MM);
+  const boxD = Math.max(6, Math.round(spec.d * PX_PER_MM));
   const lightCase = caseColorIsLight(caseColor);
+  // a real scan already carries the platform banner, logos, and ratings
+  const frontSrc = (physical ? entry.boxArtSrc : null) ?? entry.coverSrc;
+  const realScan = physical && !!entry.boxArtSrc;
+  // match the scan's aspect exactly so real art is never stretched
+  if (realScan && entry.boxArtW && entry.boxArtH) {
+    boxW = Math.round(boxH * Math.max(0.45, Math.min(2.1, entry.boxArtW / entry.boxArtH)));
+  }
 
-  const cover = entry.coverSrc ? (
+  const cover = frontSrc ? (
     <img
-      src={entry.coverSrc}
+      src={frontSrc}
       alt={entry.title}
       loading="lazy"
       draggable={false}
@@ -232,22 +240,22 @@ function GameBox({
       style={{ width: physical ? boxW : 90 }}
     >
       {physical ? (
-        // real 3D case at the platform's retail proportions; straightens on hover
+        // real 3D case at true retail size; straightens on hover
         <div className="case-scene">
           <div
             className="case3d"
             style={{
               width: boxW,
-              height: SHELF_BOX_H,
+              height: boxH,
               filter: "drop-shadow(4px 6px 6px rgba(0,0,0,0.55))",
             }}
           >
             <div className="case3d-front bg-zinc-800">
-              {spec.style !== "cardboard" && spec.wordmark && (
+              {!realScan && spec.style !== "cardboard" && spec.wordmark && (
                 <div
                   className="absolute inset-x-0 top-0 z-10 flex items-center justify-center overflow-hidden font-extrabold"
                   style={{
-                    height: Math.round(SHELF_BOX_H * 0.08),
+                    height: Math.round(boxH * 0.08),
                     backgroundColor: caseColor,
                     color: lightCase ? "rgba(0,0,0,0.8)" : "rgba(255,255,255,0.92)",
                     fontSize: 6,
@@ -286,7 +294,7 @@ function GameBox({
       ) : (
         <div
           className="relative overflow-hidden rounded-lg bg-zinc-800 opacity-90 transition group-hover:-translate-y-1"
-          style={{ height: SHELF_BOX_H, boxShadow: "0 2px 4px rgba(0,0,0,0.4)" }}
+          style={{ height: 112, boxShadow: "0 2px 4px rgba(0,0,0,0.4)" }}
         >
           {cover}
           <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px]">💾</span>

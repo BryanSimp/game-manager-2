@@ -69,7 +69,7 @@ function ShelfRowView({ row }: { row: ShelfRow }) {
         keyExtractor={(e) => `${e.userGameId}-${e.format}`}
         showsHorizontalScrollIndicator={false}
         style={styles.rowBg}
-        contentContainerStyle={{ padding: 10, gap: 10 }}
+        contentContainerStyle={{ padding: 10, gap: 10, alignItems: "flex-end", minHeight: 140 }}
         renderItem={({ item }) => (
           <GameBox entry={item} caseColor={color} platformName={row.platform.name} />
         )}
@@ -79,7 +79,7 @@ function ShelfRowView({ row }: { row: ShelfRow }) {
   );
 }
 
-const SHELF_BOX_H = 100;
+const PX_PER_MM = 0.58; // shared scale so consoles' boxes size correctly relative to each other
 
 function GameBox({
   entry,
@@ -92,9 +92,14 @@ function GameBox({
 }) {
   const router = useRouter();
   const physical = entry.format === "physical";
-  const cover = resolveImage(entry.coverSrc);
   const spec = boxSpecFor(platformName);
-  const boxW = physical ? Math.round(SHELF_BOX_H * (spec.w / spec.h)) : 72;
+  // real scans carry the actual banner/logos — prefer them for physical boxes
+  const cover = resolveImage((physical ? entry.boxArtSrc : null) ?? entry.coverSrc);
+  const boxH = physical ? Math.round(spec.h * PX_PER_MM) : 96;
+  let boxW = physical ? Math.round(spec.w * PX_PER_MM) : 72;
+  if (physical && entry.boxArtSrc && entry.boxArtW && entry.boxArtH) {
+    boxW = Math.round(boxH * Math.max(0.45, Math.min(2.1, entry.boxArtW / entry.boxArtH)));
+  }
   return (
     <TouchableOpacity
       style={{ width: boxW }}
@@ -103,10 +108,10 @@ function GameBox({
       <View
         style={[
           styles.box,
-          { height: SHELF_BOX_H },
+          { height: boxH },
           physical
             ? {
-                borderLeftWidth: Math.max(4, Math.round(SHELF_BOX_H * (spec.d / spec.h) * 0.6)),
+                borderLeftWidth: Math.max(3, Math.round(spec.d * PX_PER_MM * 0.55)),
                 borderLeftColor: caseColor,
                 borderRadius: 4,
               }

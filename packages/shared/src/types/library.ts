@@ -19,6 +19,10 @@ export interface OwnedPlatform {
   abbreviation: string | null;
   family: PlatformFamily;
   format: OwnershipFormat;
+  /** real retail box scan for this platform, when found */
+  boxArtSrc?: string | null;
+  boxArtW?: number | null;
+  boxArtH?: number | null;
 }
 
 export interface Tag {
@@ -149,6 +153,10 @@ export interface ShelfEntry {
   gameId: string;
   title: string;
   coverSrc: string | null;
+  /** real retail box scan for this shelf's platform, when found */
+  boxArtSrc: string | null;
+  boxArtW?: number | null;
+  boxArtH?: number | null;
   format: OwnershipFormat;
   status: GameStatus;
   rating: number | null;

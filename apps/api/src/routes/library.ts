@@ -1,10 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { GAME_STATUSES, OWNERSHIP_FORMATS } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { createManualGame, upsertGameFromIgdb } from "../services/catalog.js";
+
+const boxArtImage = alias(schema.images, "box_art_image");
 
 const addSchema = z
   .object({
@@ -89,15 +92,32 @@ async function entryPlatforms(userGameIds: string[]) {
       abbreviation: schema.platforms.abbreviation,
       family: schema.platforms.family,
       format: schema.userGamePlatforms.format,
+      boxArtImageId: schema.gameBoxArt.imageId,
+      boxArtW: boxArtImage.width,
+      boxArtH: boxArtImage.height,
     })
     .from(schema.userGamePlatforms)
     .innerJoin(schema.platforms, eq(schema.userGamePlatforms.platformId, schema.platforms.id))
+    .innerJoin(schema.userGames, eq(schema.userGamePlatforms.userGameId, schema.userGames.id))
+    .leftJoin(
+      schema.gameBoxArt,
+      and(
+        eq(schema.gameBoxArt.gameId, schema.userGames.gameId),
+        eq(schema.gameBoxArt.platformId, schema.platforms.id),
+      ),
+    )
+    .leftJoin(boxArtImage, eq(schema.gameBoxArt.imageId, boxArtImage.id))
     .where(inArray(schema.userGamePlatforms.userGameId, userGameIds));
   const map = new Map<string, unknown[]>();
   for (const row of rows) {
-    const { userGameId, ...rest } = row;
+    const { userGameId, boxArtImageId, boxArtW, boxArtH, ...rest } = row;
     if (!map.has(userGameId)) map.set(userGameId, []);
-    map.get(userGameId)!.push(rest);
+    map.get(userGameId)!.push({
+      ...rest,
+      boxArtSrc: boxArtImageId ? `/api/images/${boxArtImageId}` : null,
+      boxArtW,
+      boxArtH,
+    });
   }
   return map;
 }

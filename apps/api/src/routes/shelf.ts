@@ -1,8 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
+import { boxArtSupported, ensureBoxArt } from "../services/boxart.js";
+
+const boxArtImage = alias(schema.images, "box_art_image");
 
 const orderSchema = z.object({
   orderedUserGameIds: z.array(z.string().uuid()).min(1).max(500),
@@ -32,11 +36,23 @@ export function registerShelfRoutes(app: FastifyInstance): void {
         coverImageId: schema.games.coverImageId,
         coverUrl: schema.games.coverUrl,
         releaseDate: schema.games.releaseDate,
+        boxArtImageId: schema.gameBoxArt.imageId,
+        boxArtSource: schema.gameBoxArt.source,
+        boxArtW: boxArtImage.width,
+        boxArtH: boxArtImage.height,
       })
       .from(schema.userGamePlatforms)
       .innerJoin(schema.userGames, eq(schema.userGamePlatforms.userGameId, schema.userGames.id))
       .innerJoin(schema.platforms, eq(schema.userGamePlatforms.platformId, schema.platforms.id))
       .innerJoin(schema.games, eq(schema.userGames.gameId, schema.games.id))
+      .leftJoin(
+        schema.gameBoxArt,
+        and(
+          eq(schema.gameBoxArt.gameId, schema.games.id),
+          eq(schema.gameBoxArt.platformId, schema.platforms.id),
+        ),
+      )
+      .leftJoin(boxArtImage, eq(schema.gameBoxArt.imageId, boxArtImage.id))
       .where(eq(schema.userGames.userId, user.id))
       .orderBy(
         asc(schema.platforms.sortOrder),
@@ -79,6 +95,9 @@ export function registerShelfRoutes(app: FastifyInstance): void {
           : row.coverImageId
             ? `/api/images/${row.coverImageId}`
             : row.coverUrl,
+        boxArtSrc: row.boxArtImageId ? `/api/images/${row.boxArtImageId}` : null,
+        boxArtW: row.boxArtW,
+        boxArtH: row.boxArtH,
         format: row.format,
         status: row.status,
         rating: row.rating ? Number(row.rating) : null,
@@ -86,6 +105,21 @@ export function registerShelfRoutes(app: FastifyInstance): void {
         position: row.position,
       });
     }
+
+    // kick off real box-art lookups for physical games that haven't been tried
+    let queued = 0;
+    for (const row of rows) {
+      if (queued >= 6) break;
+      if (
+        row.format === "physical" &&
+        row.boxArtSource == null &&
+        boxArtSupported(row.platformName)
+      ) {
+        void ensureBoxArt(row.gameId, row.platformId, row.title, row.platformName);
+        queued++;
+      }
+    }
+
     return [...shelves.values()];
   });
 

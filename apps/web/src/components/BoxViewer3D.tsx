@@ -9,11 +9,15 @@ import {
 interface Props {
   title: string;
   coverSrc: string | null;
+  /** real retail box scan — used verbatim (it already carries banner/logos/ratings) */
+  boxArtSrc?: string | null;
+  boxArtW?: number | null;
+  boxArtH?: number | null;
   platformName: string;
   family: PlatformFamily;
   summary?: string | null;
-  /** rendered box height in px */
-  size?: number;
+  /** px per real-world mm — boxes render at true relative size */
+  pxPerMm?: number;
 }
 
 /** Darken a hex color by a factor (0..1). */
@@ -29,15 +33,32 @@ function shade(hex: string, factor: number): string {
  * A real 3D game box built from six CSS faces at the platform's actual
  * retail proportions. Drag to spin it around.
  */
-export function BoxViewer3D({ title, coverSrc, platformName, family, summary, size = 320 }: Props) {
+export function BoxViewer3D({
+  title,
+  coverSrc,
+  boxArtSrc,
+  boxArtW,
+  boxArtH,
+  platformName,
+  family,
+  summary,
+  pxPerMm = 2.1,
+}: Props) {
   const spec = boxSpecFor(platformName);
   const color = caseColorFor(platformName, family);
   const lightCase = caseColorIsLight(color);
   const ink = lightCase ? "rgba(0,0,0,0.82)" : "rgba(255,255,255,0.92)";
 
-  const H = size;
-  const W = (spec.w / spec.h) * size;
-  const D = Math.max(8, (spec.d / spec.h) * size);
+  // true retail dimensions: an N64 box renders taller and deeper than a Switch case
+  const H = spec.h * pxPerMm;
+  let W = spec.w * pxPerMm;
+  const D = Math.max(8, spec.d * pxPerMm);
+  const frontSrc = boxArtSrc ?? coverSrc;
+  const realScan = !!boxArtSrc;
+  // real scans define the exact front shape — never stretch the art
+  if (realScan && boxArtW && boxArtH) {
+    W = H * Math.max(0.45, Math.min(2.1, boxArtW / boxArtH));
+  }
 
   const [rot, setRot] = useState({ x: -8, y: -28 });
   const drag = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
@@ -59,7 +80,7 @@ export function BoxViewer3D({ title, coverSrc, platformName, family, summary, si
   }
 
   const banner =
-    spec.style !== "cardboard" && spec.wordmark ? (
+    !realScan && spec.style !== "cardboard" && spec.wordmark ? (
       <div
         className="absolute inset-x-0 top-0 z-10 flex items-center justify-center"
         style={{
@@ -113,12 +134,12 @@ export function BoxViewer3D({ title, coverSrc, platformName, family, summary, si
           })}
         >
           {banner}
-          {coverSrc ? (
+          {frontSrc ? (
             <img
-              src={coverSrc}
+              src={frontSrc}
               alt={title}
               draggable={false}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              style={{ width: "100%", height: "100%", objectFit: realScan ? "fill" : "cover" }}
             />
           ) : (
             <div className="flex h-full items-center justify-center p-4 text-center font-bold text-zinc-400">
