@@ -47,6 +47,13 @@ Phase 0–8 roadmap — read it before making design decisions.
   (Dice bigram similarity = confidence).
 - **jsonb only for display config** (dashboard layout, status colors) — everything else
   that v1 stored as JSON strings is normalized tables here.
+- **Real box art** (`services/boxart.ts`): physical games fetch genuine retail box-front
+  scans from libretro-thumbnails (21 retro platforms; validated repo names). Dedup
+  pointer files are followed; PNG dims parsed from IHDR; misses recorded in
+  `game_box_art` so they aren't retried. Boxes render at true retail mm dimensions
+  (`BOX_SPECS` in `packages/shared/src/case-colors.ts` — N64 is landscape!) and adopt
+  the scan's exact aspect. Modern platforms (Switch, PS4+, Xbox One+) have no scan
+  archive → synthesized banner case. 3D spin viewer: `apps/web/src/components/BoxViewer3D.tsx`.
 
 ## Commands
 
