@@ -34,6 +34,8 @@ export const userGames = pgTable(
     ttbEnabled: boolean("ttb_enabled").notNull().default(true),
     // synced from Steam (GetOwnedGames playtime_forever)
     steamPlaytimeMinutes: integer("steam_playtime_minutes"),
+    // "100% completed" sub-state of finished (all collectibles/endings/etc.)
+    completed100: boolean("completed_100").notNull().default(false),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

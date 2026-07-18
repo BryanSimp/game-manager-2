@@ -4,19 +4,26 @@ import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 import { StarRating } from "./StarRating.js";
 
-export function GameCard({ entry }: { entry: LibraryEntry }) {
+export function GameCard({
+  entry,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
+}: {
+  entry: LibraryEntry;
+  /** selection mode: clicking toggles instead of navigating */
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}) {
   const prefs = usePreferences();
   const chip = statusChip(entry.status, prefs);
   const ttb = formatHours(entry.game.ttbMain);
   const showTime = prefs?.showTimeBadge ?? true;
   const showPlatforms = prefs?.showPlatformBadge ?? true;
 
-  return (
-    <Link
-      to="/game/$id"
-      params={{ id: entry.id }}
-      className="group overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 transition hover:border-zinc-600"
-    >
+  const body = (
+    <>
       <div className="relative aspect-[3/4] bg-zinc-800">
         {entry.game.coverSrc ? (
           <img
@@ -30,13 +37,34 @@ export function GameCard({ entry }: { entry: LibraryEntry }) {
             {entry.game.title}
           </div>
         )}
-        <span
-          className={`absolute left-2 top-2 rounded-full border px-2 py-0.5 text-xs font-medium ${chip.className}`}
-          style={chip.style}
-        >
-          {STATUS_META[entry.status].label}
+        <span className="absolute left-2 top-2 flex items-center gap-1">
+          <span
+            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${chip.className}`}
+            style={chip.style}
+          >
+            {STATUS_META[entry.status].label}
+          </span>
+          {entry.completed100 && (
+            <span
+              title="100% completed"
+              className="rounded-full border border-amber-500/60 bg-amber-950/80 px-1.5 py-0.5 text-xs"
+            >
+              💯
+            </span>
+          )}
         </span>
-        {showTime && ttb && entry.ttbEnabled && (
+        {selectable && (
+          <span
+            className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 text-xs font-bold ${
+              selected
+                ? "border-indigo-400 bg-indigo-500 text-white"
+                : "border-zinc-400 bg-black/50 text-transparent"
+            }`}
+          >
+            ✓
+          </span>
+        )}
+        {!selectable && showTime && ttb && entry.ttbEnabled && (
           <span className="absolute right-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-xs text-zinc-200">
             {ttb}
           </span>
@@ -67,6 +95,25 @@ export function GameCard({ entry }: { entry: LibraryEntry }) {
           )}
         </div>
       </div>
+    </>
+  );
+
+  const frame = `group overflow-hidden rounded-xl border bg-zinc-900 transition ${
+    selected
+      ? "border-indigo-500 ring-2 ring-indigo-500/60"
+      : "border-zinc-800 hover:border-zinc-600"
+  }`;
+
+  if (selectable) {
+    return (
+      <button type="button" onClick={onToggleSelect} className={`${frame} text-left`}>
+        {body}
+      </button>
+    );
+  }
+  return (
+    <Link to="/game/$id" params={{ id: entry.id }} className={frame}>
+      {body}
     </Link>
   );
 }

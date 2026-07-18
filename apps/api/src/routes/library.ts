@@ -25,7 +25,19 @@ const updateSchema = z.object({
   rating: z.number().min(0.5).max(5).multipleOf(0.5).nullable().optional(),
   notes: z.string().max(10_000).nullable().optional(),
   ttbEnabled: z.boolean().optional(),
+  completed100: z.boolean().optional(),
 });
+
+const bulkUpdateSchema = z
+  .object({
+    ids: z.array(z.string().uuid()).min(1).max(500),
+    status: z.enum(GAME_STATUSES).optional(),
+    ttbEnabled: z.boolean().optional(),
+    completed100: z.boolean().optional(),
+  })
+  .refine((v) => v.status !== undefined || v.ttbEnabled !== undefined || v.completed100 !== undefined, {
+    message: "Nothing to update",
+  });
 
 const platformsSchema = z.object({
   platforms: z
@@ -161,6 +173,7 @@ function entryToJson(
     rating: entry.rating ? Number(entry.rating) : null,
     notes: entry.notes,
     ttbEnabled: entry.ttbEnabled,
+    completed100: entry.completed100,
     startedAt: entry.startedAt,
     finishedAt: entry.finishedAt,
     createdAt: entry.createdAt,
@@ -304,7 +317,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!existing) return reply.status(404).send({ message: "Not found" });
 
     const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
-    const { status, rating, notes, ttbEnabled } = parsed.data;
+    const { status, rating, notes, ttbEnabled, completed100 } = parsed.data;
     if (status !== undefined) {
       patch.status = status;
       // auto-stamp progress dates on first transition
@@ -314,9 +327,45 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (rating !== undefined) patch.rating = rating === null ? null : String(rating);
     if (notes !== undefined) patch.notes = notes;
     if (ttbEnabled !== undefined) patch.ttbEnabled = ttbEnabled;
+    if (completed100 !== undefined) patch.completed100 = completed100;
 
     await db.update(schema.userGames).set(patch).where(eq(schema.userGames.id, existing.id));
     return { ok: true };
+  });
+
+  // Bulk edit: same fields as PATCH minus notes/rating, across many entries
+  app.post("/api/library/bulk-update", async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return;
+    const parsed = bulkUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+    }
+    const { ids, status, ttbEnabled, completed100 } = parsed.data;
+
+    const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
+    if (status !== undefined) patch.status = status;
+    if (ttbEnabled !== undefined) patch.ttbEnabled = ttbEnabled;
+    if (completed100 !== undefined) patch.completed100 = completed100;
+
+    const updated = await db
+      .update(schema.userGames)
+      .set(patch)
+      .where(and(inArray(schema.userGames.id, ids), eq(schema.userGames.userId, user.id)))
+      .returning({ id: schema.userGames.id, startedAt: schema.userGames.startedAt, finishedAt: schema.userGames.finishedAt });
+
+    // auto-stamp progress dates on first transition, matching single PATCH
+    if (status === "playing" || status === "finished") {
+      const column = status === "playing" ? "startedAt" : "finishedAt";
+      const missing = updated.filter((r) => r[column] === null).map((r) => r.id);
+      if (missing.length > 0) {
+        await db
+          .update(schema.userGames)
+          .set(status === "playing" ? { startedAt: new Date() } : { finishedAt: new Date() })
+          .where(inArray(schema.userGames.id, missing));
+      }
+    }
+    return { updated: updated.length };
   });
 
   app.put<{ Params: { id: string } }>("/api/library/:id/platforms", async (request, reply) => {

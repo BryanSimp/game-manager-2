@@ -43,6 +43,13 @@
       "when": 1783996122146,
       "tag": "0005_abandoned_vampiro",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784406591473,
+      "tag": "0006_dazzling_night_thrasher",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "user_games" ADD COLUMN "completed_100" boolean DEFAULT false NOT NULL;
