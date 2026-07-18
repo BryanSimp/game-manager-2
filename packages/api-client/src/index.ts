@@ -4,6 +4,7 @@ import type {
   BarcodeLookupResult,
   BulkAddItem,
   BulkAddResult,
+  BulkUpdateInput,
   ChecklistDetail,
   GameAchievements,
   GameChecklists,
@@ -138,6 +139,13 @@ export class ApiClient {
     return this.request("/api/library/bulk", {
       method: "POST",
       body: JSON.stringify({ items, platforms }),
+    });
+  }
+
+  bulkUpdateEntries(input: BulkUpdateInput): Promise<{ updated: number }> {
+    return this.request("/api/library/bulk-update", {
+      method: "POST",
+      body: JSON.stringify(input),
     });
   }
 

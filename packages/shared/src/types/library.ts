@@ -38,6 +38,7 @@ export interface LibraryEntry {
   rating: number | null;
   notes: string | null;
   ttbEnabled: boolean;
+  completed100: boolean;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
@@ -83,6 +84,14 @@ export interface UpdateEntryInput {
   rating?: number | null;
   notes?: string | null;
   ttbEnabled?: boolean;
+  completed100?: boolean;
+}
+
+export interface BulkUpdateInput {
+  ids: string[];
+  status?: GameStatus;
+  ttbEnabled?: boolean;
+  completed100?: boolean;
 }
 
 export interface BulkAddItem {
