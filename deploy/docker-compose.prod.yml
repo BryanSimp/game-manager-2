@@ -1,18 +1,22 @@
-# Production on the home server, behind the existing Traefik proxy.
-#   Run from the repo root:
-#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+# Production stack for the Ubuntu/Portainer server, behind the existing
+# Traefik proxy (websecure entrypoint + cloudflare cert resolver, same as v1).
 #
-# Set GM_HOST (e.g. gm.example.com) and secrets in .env at the repo root.
-# To pull prebuilt images from a registry instead of building, replace the
-# `build:` blocks with `image: <registry>/<user>/gm2-api:latest` etc.
+# Paste this into a Portainer stack (or run: docker compose -f deploy/docker-compose.prod.yml up -d)
+# and set the environment variables listed in deploy/README.md.
+#
+# Images are built by GitHub Actions on every push to main
+# (ghcr.io/bryansimp/gm2-api|gm2-web). GHCR packages are private, so the
+# server needs a one-time `docker login ghcr.io` with a read:packages PAT —
+# see the README. Watchtower then auto-updates on new pushes.
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?set in .env}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?set in stack env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in stack env}
       POSTGRES_DB: ${POSTGRES_DB:-gamemanager}
+      TZ: ${TZ:-America/Chicago}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,23 +28,25 @@ services:
       - internal
 
   api:
-    build:
-      context: ..
-      dockerfile: apps/api/Dockerfile
+    image: ghcr.io/bryansimp/gm2-api:latest
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gamemanager}
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set in .env}
-      BETTER_AUTH_URL: https://${GM_HOST:?set in .env}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set in stack env}
+      BETTER_AUTH_URL: https://${GM_HOST:-games.brysimp.com}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
       API_PORT: "3001"
       API_HOST: 0.0.0.0
-      CORS_ORIGINS: https://${GM_HOST}
+      CORS_ORIGINS: https://${GM_HOST:-games.brysimp.com}
+      # optional — all of these can instead be set later in the app's Settings UI
       IGDB_CLIENT_ID: ${IGDB_CLIENT_ID:-}
       IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET:-}
+      STEAM_API_KEY: ${STEAM_API_KEY:-}
+      # Claude vision OCR for shelf photos (tesseract-only without it)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       IMAGE_DIR: /data/images
       TZ: ${TZ:-America/Chicago}
     volumes:
@@ -50,16 +56,16 @@ services:
       - proxy
     labels:
       - traefik.enable=true
-      - traefik.http.routers.gm2-api.rule=Host(`${GM_HOST}`) && PathPrefix(`/api`)
+      - traefik.docker.network=proxy
+      - traefik.http.routers.gm2-api.rule=Host(`${GM_HOST:-games.brysimp.com}`) && PathPrefix(`/api`)
       - traefik.http.routers.gm2-api.priority=20
       - traefik.http.routers.gm2-api.entrypoints=websecure
       - traefik.http.routers.gm2-api.tls.certresolver=cloudflare
       - traefik.http.services.gm2-api.loadbalancer.server.port=3001
+      - com.centurylinklabs.watchtower.enable=true
 
   web:
-    build:
-      context: ..
-      dockerfile: apps/web/Dockerfile
+    image: ghcr.io/bryansimp/gm2-web:latest
     restart: unless-stopped
     depends_on:
       - api
@@ -67,15 +73,35 @@ services:
       - proxy
     labels:
       - traefik.enable=true
-      - traefik.http.routers.gm2-web.rule=Host(`${GM_HOST}`)
+      - traefik.docker.network=proxy
+      - traefik.http.routers.gm2-web.rule=Host(`${GM_HOST:-games.brysimp.com}`)
       - traefik.http.routers.gm2-web.priority=10
       - traefik.http.routers.gm2-web.entrypoints=websecure
       - traefik.http.routers.gm2-web.tls.certresolver=cloudflare
       - traefik.http.services.gm2-web.loadbalancer.server.port=80
+      - com.centurylinklabs.watchtower.enable=true
+
+  # Auto-deploy: polls GHCR every 5 minutes and restarts api/web when a new
+  # :latest lands (pushed by CI on every push to main). Only touches
+  # containers carrying the watchtower.enable label above.
+  watchtower:
+    image: containrrr/watchtower:latest
+    restart: unless-stopped
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: "300"
+      TZ: ${TZ:-America/Chicago}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # host's registry login so private GHCR pulls work
+      - /root/.docker/config.json:/config.json:ro
 
 volumes:
   pgdata:
+    name: gm2-pgdata
   images:
+    name: gm2-images
 
 networks:
   internal:

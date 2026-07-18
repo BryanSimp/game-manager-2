@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -18,10 +19,19 @@ import { authClient } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { resolveImage, STATUS_COLORS } from "@/lib/ui";
 
+const SORTS = [
+  { key: "added", label: "Recent" },
+  { key: "title", label: "A–Z" },
+  { key: "rating", label: "Rating" },
+] as const;
+type SortKey = (typeof SORTS)[number]["key"];
+
 export default function LibraryScreen() {
   const router = useRouter();
   const { data: session, isPending } = authClient.useSession();
   const [statusFilter, setStatusFilter] = useState<GameStatus | "all">("all");
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortKey>("added");
 
   const library = useQuery({
     queryKey: ["library"],
@@ -29,9 +39,15 @@ export default function LibraryScreen() {
     enabled: !!session,
   });
 
-  const entries = (library.data ?? []).filter(
-    (e) => statusFilter === "all" || e.status === statusFilter,
-  );
+  const needle = search.trim().toLowerCase();
+  const entries = (library.data ?? [])
+    .filter((e) => statusFilter === "all" || e.status === statusFilter)
+    .filter((e) => !needle || e.game.title.toLowerCase().includes(needle))
+    .sort((a, b) => {
+      if (sort === "title") return a.game.title.localeCompare(b.game.title);
+      if (sort === "rating") return (b.rating ?? -1) - (a.rating ?? -1);
+      return b.createdAt.localeCompare(a.createdAt);
+    });
 
   if (isPending) {
     return (
@@ -44,6 +60,27 @@ export default function LibraryScreen() {
 
   return (
     <View style={styles.screen}>
+      <View style={styles.searchRow}>
+        <TextInput
+          style={styles.search}
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search library…"
+          placeholderTextColor="#71717a"
+          autoCapitalize="none"
+        />
+        {SORTS.map((s) => (
+          <TouchableOpacity
+            key={s.key}
+            style={[styles.sortBtn, sort === s.key && styles.sortActive]}
+            onPress={() => setSort(s.key)}
+          >
+            <Text style={[styles.sortText, sort === s.key && styles.sortTextActive]}>
+              {s.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -158,6 +195,34 @@ function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => vo
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#101014" },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  search: {
+    flex: 1,
+    backgroundColor: "#27272a",
+    borderWidth: 1,
+    borderColor: "#3f3f46",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    color: "#fafafa",
+    fontSize: 14,
+  },
+  sortBtn: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#3f3f46",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  sortActive: { backgroundColor: "#312e81", borderColor: "#818cf8" },
+  sortText: { color: "#a1a1aa", fontSize: 11, fontWeight: "600" },
+  sortTextActive: { color: "#c7d2fe" },
   filterBar: { flexGrow: 0, paddingVertical: 10 },
   filterChip: {
     borderRadius: 999,

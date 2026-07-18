@@ -1,69 +1,92 @@
-# Deploying Game Manager 2
+# Deploying Game Manager 2 (Ubuntu + Portainer + Traefik)
 
-## Option A — build on the server (simplest)
+The flow: **push to main → GitHub Actions builds `ghcr.io/bryansimp/gm2-api` and
+`gm2-web` → Watchtower on the server pulls the new images within 5 minutes.**
+After the first-time setup below, deploys are fully automatic.
 
-```bash
-git clone <repo url> game-manager-2 && cd game-manager-2
-cp .env.example .env
-# edit .env: set GM_HOST, POSTGRES_PASSWORD, BETTER_AUTH_SECRET (openssl rand -base64 32)
-docker compose -f deploy/docker-compose.prod.yml up -d --build
-```
+## One-time server prep
 
-Updates:
+1. **GHCR credentials** (the packages are private). Create a GitHub PAT
+   (classic) with only the `read:packages` scope
+   (github.com → Settings → Developer settings → Personal access tokens), then
+   on the server:
 
-```bash
-git pull
-docker compose -f deploy/docker-compose.prod.yml up -d --build
-```
+   ```bash
+   docker login ghcr.io -u BryanSimp
+   # paste the PAT as the password
+   ```
 
-Requires the external `proxy` Docker network used by your existing Traefik setup
-(`docker network create proxy` if it doesn't exist). Traefik labels assume the
-`websecure` entrypoint and `cloudflare` cert resolver from the v1 setup — adjust
-if yours differ.
+   This stores credentials in `/root/.docker/config.json` (run as root/sudo),
+   which both Docker pulls and the Watchtower container use.
 
-## Option B — pull prebuilt images from a registry
+2. **Portainer registry** (so Portainer's own image pulls work too):
+   Portainer → Registries → Add registry → Custom →
+   URL `ghcr.io`, username `BryanSimp`, password = the same PAT.
 
-The GitHub Actions workflow in `.github/workflows/docker.yml` builds and pushes
-`gm2-api` and `gm2-web` images on every push to `main`.
+3. The external `proxy` network already exists from the v1 setup. The Traefik
+   labels assume the `websecure` entrypoint and `cloudflare` cert resolver —
+   same conventions as v1's compose file.
 
-- **GitHub Container Registry (default, zero setup):** images publish to
-  `ghcr.io/<your-github-user>/gm2-api:latest` and `gm2-web:latest` automatically.
-- **Docker Hub (optional):** create repo secrets `DOCKERHUB_USERNAME` and
-  `DOCKERHUB_TOKEN` in the GitHub repo settings, and the workflow also pushes
-  `docker.io/<user>/gm2-api` and `gm2-web`.
+## Deploy the stack
 
-On the server, replace the `build:` blocks in `docker-compose.prod.yml` with:
+Portainer → Stacks → Add stack → name `game-manager-2` → paste
+`deploy/docker-compose.prod.yml` (or point Portainer's Git option at the repo,
+path `deploy/docker-compose.prod.yml`). Set these environment variables in the
+stack editor:
 
-```yaml
-  api:
-    image: ghcr.io/<your-github-user>/gm2-api:latest
-  web:
-    image: ghcr.io/<your-github-user>/gm2-web:latest
-```
-
-Updates then become:
-
-```bash
-docker compose -f deploy/docker-compose.prod.yml pull
-docker compose -f deploy/docker-compose.prod.yml up -d
-```
-
-## Env vars (root .env)
-
-| Var | Purpose |
+| Var | Value |
 |---|---|
-| `GM_HOST` | Public hostname, e.g. `gm.example.com` |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Database credentials |
-| `BETTER_AUTH_SECRET` | Session signing secret — generate fresh, never commit |
-| `ALLOW_REGISTRATION` | `true` until your household has accounts, then `false` |
-| `IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET` | Twitch dev app for IGDB (Phase 1) |
-| `TZ` | Server timezone |
+| `GM_HOST` | `games.brysimp.com` (already the default) |
+| `POSTGRES_USER` | e.g. `gm` |
+| `POSTGRES_PASSWORD` | generate one |
+| `BETTER_AUTH_SECRET` | `openssl rand -base64 32` — never reuse v1's |
+| `ALLOW_REGISTRATION` | `true` until accounts exist, then redeploy with `false` |
+| `IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET` | optional — can be pasted into web Settings instead |
+| `STEAM_API_KEY` | optional — same, Settings UI works |
+| `ANTHROPIC_API_KEY` | optional — enables Claude-vision OCR for shelf photos |
+| `TZ` | `America/Chicago` |
 
-## Backups
+The API container applies DB migrations automatically on boot.
+
+## Cutover from v1 (same URL)
+
+Both stacks claim ``Host(`games.brysimp.com`)``, so don't run them side by side:
+
+1. Back up v1 first (its SQLite file lives in the `gamedata` volume):
+   ```bash
+   docker run --rm -v gamedata:/data -v "$PWD":/backup alpine \
+     cp /data/app.db /backup/gm1-app-$(date +%F).db
+   ```
+2. Stop the v1 stack in Portainer (stop, don't delete — keep the volume until
+   you're happy with v2).
+3. Deploy the `game-manager-2` stack. Traefik picks up the new labels within
+   seconds; the URL now serves v2.
+4. Open https://games.brysimp.com, register — **the first account becomes
+   admin** — then paste IGDB credentials in Settings and set
+   `ALLOW_REGISTRATION=false` once the household is on board.
+
+v1's data stays untouched in the `gamedata` volume. v2 starts empty (fresh
+schema, different data model); rebuild the library via IGDB search, Steam
+import, or the OCR importer. A one-off v1→v2 data migration script is possible
+later if wanted — the volume backup keeps that option open.
+
+## How auto-update works
+
+- `.github/workflows/docker.yml` builds+pushes both images on every push to
+  `main` (≈3–5 min).
+- The `watchtower` service in the stack polls GHCR every 5 minutes for
+  containers labeled `com.centurylinklabs.watchtower.enable=true` (only
+  gm2-api and gm2-web — it won't touch other containers on the server), pulls
+  new `:latest` images, restarts the containers, and prunes old images.
+- Net effect: a push lands on games.brysimp.com in under ~10 minutes with no
+  manual step. To skip auto-updates for a while, stop the watchtower container;
+  manual update = Portainer → stack → "Pull and redeploy".
+
+## Backups (v2)
 
 ```bash
-docker compose -f deploy/docker-compose.prod.yml exec postgres \
-  pg_dump -U "$POSTGRES_USER" gamemanager > backup-$(date +%F).sql
-docker run --rm -v deploy_images:/data -v "$PWD":/backup alpine \
-  tar czf /backup/images-$(date +%F).tar.gz -C /data .
+docker exec $(docker ps -qf name=postgres -f name=game-manager-2) \
+  pg_dump -U "$POSTGRES_USER" gamemanager > gm2-backup-$(date +%F).sql
+docker run --rm -v gm2-images:/data -v "$PWD":/backup alpine \
+  tar czf /backup/gm2-images-$(date +%F).tar.gz -C /data .
 ```

@@ -24,7 +24,13 @@ export const auth = betterAuth({
     requireEmailVerification: false,
     disableSignUp: !env.ALLOW_REGISTRATION,
   },
-  trustedOrigins: [...env.CORS_ORIGINS, "gamemanager://"],
+  // exp:// covers Expo Go dev sessions (the expo plugin only auto-trusts it
+  // when NODE_ENV=development, which the tsx dev script never sets)
+  trustedOrigins: [
+    ...env.CORS_ORIGINS,
+    "gamemanager://",
+    ...(env.NODE_ENV !== "production" ? ["exp://"] : []),
+  ],
   plugins: [admin(), bearer(), expo()],
   databaseHooks: {
     user: {

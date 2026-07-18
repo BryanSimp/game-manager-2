@@ -25,8 +25,8 @@ export async function processImportJob(jobId: string): Promise<void> {
   if (!job) return;
 
   try {
-    if (job.source === "text_paste") {
-      // text jobs arrive with items pre-created — skip straight to matching
+    if (job.source === "text_paste" || job.source === "steam") {
+      // these jobs arrive with items pre-created — skip straight to matching
       await setStatus(jobId, "matching");
     } else {
       if (!job.imageId) throw new Error("Import job has no image");

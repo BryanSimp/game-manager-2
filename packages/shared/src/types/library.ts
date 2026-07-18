@@ -100,6 +100,7 @@ export interface BulkAddResult {
 export interface AdminSettings {
   igdbConfigured: boolean;
   igdbClientId: string | null;
+  steamConfigured: boolean;
 }
 
 export interface TagInput {
@@ -115,7 +116,7 @@ export interface Preferences {
   showTimeBadge: boolean;
 }
 
-export type ImportSource = "screenshot" | "shelf_photo" | "text_paste";
+export type ImportSource = "screenshot" | "shelf_photo" | "text_paste" | "steam";
 export type ImportJobStatus = "pending" | "ocr" | "matching" | "review" | "done" | "failed";
 export type ImportItemResolution = "pending" | "auto" | "manual" | "skipped";
 
@@ -213,6 +214,81 @@ export interface CollectionDetail {
 export interface CollectionLayoutInput {
   nodes: Array<{ gameId: string; x: number; y: number }>;
   links: Array<{ fromGameId: string; toGameId: string; label?: string | null }>;
+}
+
+// ---- completionist checklists (Phase 7) ----
+
+export interface ChecklistSummary {
+  id: string;
+  title: string;
+  isPublic: boolean;
+  /** author display name — set on public templates from other users */
+  authorName: string | null;
+  mine: boolean;
+  itemCount: number;
+  doneCount: number;
+}
+
+export interface ChecklistItemView {
+  id: string;
+  position: number;
+  text: string;
+  category: string | null;
+  completedAt: string | null;
+}
+
+export interface ChecklistDetail {
+  id: string;
+  gameId: string;
+  title: string;
+  isPublic: boolean;
+  mine: boolean;
+  authorName: string | null;
+  items: ChecklistItemView[];
+}
+
+export interface GameChecklists {
+  mine: ChecklistSummary[];
+  public: ChecklistSummary[];
+}
+
+// ---- Steam (Phase 8) ----
+
+export interface SteamStatus {
+  configured: boolean; // server has an API key
+  linked: boolean;
+  steamId: string | null;
+  personaName: string | null;
+  lastImportAt: string | null;
+  lastSyncAt: string | null;
+  importing: boolean;
+  syncing: boolean;
+}
+
+export interface AchievementView {
+  id: string;
+  name: string;
+  description: string | null;
+  iconUrl: string | null;
+  iconGrayUrl: string | null;
+  unlockedAt: string | null;
+  unlocked: boolean;
+}
+
+export interface GameAchievements {
+  total: number;
+  unlocked: number;
+  achievements: AchievementView[];
+  steamPlaytimeMinutes: number | null;
+}
+
+export interface BarcodeLookupResult {
+  found: boolean;
+  product: string | null;
+  query: string | null;
+  platformHint: { id: string; name: string; abbreviation: string | null } | null;
+  candidates: ImportCandidate[];
+  confidence: number;
 }
 
 export interface DashboardData {

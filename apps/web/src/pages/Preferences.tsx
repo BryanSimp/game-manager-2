@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GAME_STATUSES, type GameStatus, type Preferences } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
+import { SteamCard } from "../components/SteamCard.js";
 import { STATUS_META } from "../lib/format.js";
 
 const DEFAULT_HEX: Record<GameStatus, string> = {
@@ -30,6 +31,8 @@ export function PreferencesPage() {
   return (
     <Shell>
       <h1 className="mb-6 text-xl font-bold">Preferences</h1>
+
+      <SteamCard />
 
       <section className="mb-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
         <h2 className="text-lg font-semibold">Status colors</h2>

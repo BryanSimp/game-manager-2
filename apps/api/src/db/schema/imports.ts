@@ -16,6 +16,7 @@ export const importSourceEnum = pgEnum("import_source", [
   "screenshot",
   "shelf_photo",
   "text_paste",
+  "steam",
 ]);
 
 export const importJobStatusEnum = pgEnum("import_job_status", [
@@ -65,6 +66,8 @@ export const importItems = pgTable(
     candidates: jsonb("candidates"),
     confidence: real("confidence"),
     resolution: importItemResolutionEnum("resolution").notNull().default("pending"),
+    // steam imports: the appid behind this row, for dedup on later re-imports
+    steamAppId: integer("steam_app_id"),
   },
   (t) => [index("import_items_job_idx").on(t.jobId)],
 );

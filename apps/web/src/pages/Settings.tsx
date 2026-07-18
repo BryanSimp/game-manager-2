@@ -9,6 +9,21 @@ export function SettingsPage() {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [steamKey, setSteamKey] = useState("");
+  const [steamMessage, setSteamMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(
+    null,
+  );
+
+  const saveSteam = useMutation({
+    mutationFn: () => api.saveSteamApiKey(steamKey.trim()),
+    onSuccess: () => {
+      setSteamKey("");
+      setSteamMessage({ kind: "ok", text: "Steam API key saved — users can now link accounts in Preferences." });
+      queryClient.invalidateQueries({ queryKey: ["admin-settings"] });
+    },
+    onError: (err) =>
+      setSteamMessage({ kind: "err", text: err instanceof Error ? err.message : "Save failed" }),
+  });
 
   const save = useMutation({
     mutationFn: () => api.saveIgdbCredentials(clientId.trim(), clientSecret.trim()),
@@ -120,6 +135,61 @@ export function SettingsPage() {
               }`}
             >
               {message.text}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="mt-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <h2 className="text-lg font-semibold">Steam Web API</h2>
+        <p className="mt-1 text-sm text-zinc-400">
+          Powers Steam library import, playtime, and achievement sync. Status:{" "}
+          {settings.data?.steamConfigured ? (
+            <span className="font-medium text-emerald-400">configured</span>
+          ) : (
+            <span className="font-medium text-amber-400">not configured</span>
+          )}
+        </p>
+        <ol className="mt-4 list-inside list-decimal space-y-1 rounded-lg bg-zinc-950 p-4 text-sm text-zinc-400">
+          <li>
+            Go to{" "}
+            <a
+              href="https://steamcommunity.com/dev/apikey"
+              target="_blank"
+              rel="noreferrer"
+              className="text-indigo-400 hover:underline"
+            >
+              steamcommunity.com/dev/apikey
+            </a>{" "}
+            (any Steam account works, it's free)
+          </li>
+          <li>Domain name: anything (e.g. localhost)</li>
+          <li>Copy the key and paste it here</li>
+        </ol>
+        <div className="mt-4 space-y-3">
+          <input
+            value={steamKey}
+            onChange={(e) => setSteamKey(e.target.value)}
+            placeholder="Steam Web API key"
+            type="password"
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+          />
+          <button
+            onClick={() => saveSteam.mutate()}
+            disabled={!steamKey.trim() || saveSteam.isPending}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {saveSteam.isPending ? "Saving…" : "Save"}
+          </button>
+          {steamMessage && (
+            <p
+              className={`rounded-lg border px-3 py-2 text-sm ${
+                steamMessage.kind === "ok"
+                  ? "border-emerald-900 bg-emerald-950 text-emerald-300"
+                  : "border-red-900 bg-red-950 text-red-300"
+              }`}
+            >
+              {steamMessage.text}
             </p>
           )}
         </div>

@@ -15,6 +15,9 @@ import { registerDashboardRoutes } from "./routes/dashboard.js";
 import { registerImportRoutes } from "./routes/imports.js";
 import { registerShelfRoutes } from "./routes/shelf.js";
 import { registerCollectionRoutes } from "./routes/collections.js";
+import { registerLookupRoutes } from "./routes/lookup.js";
+import { registerChecklistRoutes } from "./routes/checklists.js";
+import { registerSteamRoutes } from "./routes/steam.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -89,6 +92,9 @@ export async function buildServer() {
   registerImportRoutes(app);
   registerShelfRoutes(app);
   registerCollectionRoutes(app);
+  registerLookupRoutes(app);
+  registerChecklistRoutes(app);
+  registerSteamRoutes(app);
 
   return app;
 }

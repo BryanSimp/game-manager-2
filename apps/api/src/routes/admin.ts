@@ -3,11 +3,14 @@ import { z } from "zod";
 import { requireAdmin } from "../plugins/auth.js";
 import { getIgdbCredentials, setSetting } from "../services/settings.js";
 import { igdbTest } from "../services/igdb.js";
+import { steamConfigured } from "../services/steam.js";
 
 const igdbSchema = z.object({
   clientId: z.string().min(1).max(200),
   clientSecret: z.string().min(1).max(200),
 });
+
+const steamSchema = z.object({ apiKey: z.string().min(1).max(200) });
 
 export function registerAdminRoutes(app: FastifyInstance): void {
   app.get("/api/admin/settings", async (request, reply) => {
@@ -17,7 +20,19 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     return {
       igdbConfigured: creds !== null,
       igdbClientId: creds ? `${creds.clientId.slice(0, 4)}…` : null,
+      steamConfigured: await steamConfigured(),
     };
+  });
+
+  app.put("/api/admin/settings/steam", async (request, reply) => {
+    const user = await requireAdmin(request, reply);
+    if (!user) return;
+    const parsed = steamSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+    }
+    await setSetting("steam_api_key", parsed.data.apiKey.trim());
+    return { ok: true };
   });
 
   app.put("/api/admin/settings/igdb", async (request, reply) => {

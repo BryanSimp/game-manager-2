@@ -32,6 +32,8 @@ export const userGames = pgTable(
     customCoverImageId: uuid("custom_cover_image_id").references(() => images.id),
     // false = "endless game", excluded from backlog-time math
     ttbEnabled: boolean("ttb_enabled").notNull().default(true),
+    // synced from Steam (GetOwnedGames playtime_forever)
+    steamPlaytimeMinutes: integer("steam_playtime_minutes"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

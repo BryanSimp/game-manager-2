@@ -27,6 +27,8 @@ export const images = pgTable("images", {
 export const games = pgTable("games", {
   id: uuid("id").defaultRandom().primaryKey(),
   igdbId: integer("igdb_id").unique(),
+  // set once a Steam import confidently matches this game — achievements sync key
+  steamAppId: integer("steam_app_id").unique(),
   title: text("title").notNull(),
   slug: text("slug"),
   summary: text("summary"),

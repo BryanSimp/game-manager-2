@@ -4,3 +4,5 @@ export * from "./catalog.js";
 export * from "./library.js";
 export * from "./imports.js";
 export * from "./collections.js";
+export * from "./checklists.js";
+export * from "./steam.js";

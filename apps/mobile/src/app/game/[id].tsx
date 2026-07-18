@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GAME_STATUSES, type UpdateEntryInput } from "@gm/shared";
+import { GAME_STATUSES, type ChecklistSummary, type UpdateEntryInput } from "@gm/shared";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, STATUS_COLORS } from "@/lib/ui";
 
@@ -181,6 +181,9 @@ export default function GameDetailScreen() {
         </TouchableOpacity>
       )}
 
+      <AchievementsSection entryId={id} />
+      <ChecklistsSection gameId={e.game.id} />
+
       <TouchableOpacity
         style={styles.deleteBtn}
         onPress={() =>
@@ -193,6 +196,154 @@ export default function GameDetailScreen() {
         <Text style={styles.deleteText}>Remove from library</Text>
       </TouchableOpacity>
     </ScrollView>
+  );
+}
+
+function AchievementsSection({ entryId }: { entryId: string }) {
+  const achievements = useQuery({
+    queryKey: ["achievements", entryId],
+    queryFn: () => api.getEntryAchievements(entryId),
+  });
+  const data = achievements.data;
+  if (!data || (data.total === 0 && data.steamPlaytimeMinutes == null)) return null;
+  const pct = data.total > 0 ? Math.round((data.unlocked / data.total) * 100) : 0;
+
+  return (
+    <>
+      <Text style={styles.section}>
+        Steam{" "}
+        {data.steamPlaytimeMinutes != null && data.steamPlaytimeMinutes > 0
+          ? `· ${Math.round((data.steamPlaytimeMinutes / 60) * 10) / 10}h played`
+          : ""}
+      </Text>
+      {data.total > 0 && (
+        <>
+          <Text style={styles.achievementCount}>
+            {data.unlocked}/{data.total} achievements ({pct}%)
+          </Text>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${pct}%` }]} />
+          </View>
+          <View style={styles.achievementGrid}>
+            {data.achievements.map((a) => {
+              const icon = a.unlocked ? a.iconUrl : (a.iconGrayUrl ?? a.iconUrl);
+              return (
+                <View
+                  key={a.id}
+                  style={[styles.achievementIcon, !a.unlocked && { opacity: 0.35 }]}
+                >
+                  {icon && (
+                    <Image
+                      source={{ uri: icon }}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode="cover"
+                    />
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        </>
+      )}
+    </>
+  );
+}
+
+function ChecklistsSection({ gameId }: { gameId: string }) {
+  const queryClient = useQueryClient();
+  const lists = useQuery({
+    queryKey: ["checklists", gameId],
+    queryFn: () => api.getGameChecklists(gameId),
+  });
+  const adopt = useMutation({
+    mutationFn: (id: string) => api.adoptChecklist(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklists", gameId] }),
+  });
+
+  const data = lists.data;
+  if (!data || (data.mine.length === 0 && data.public.length === 0)) return null;
+
+  return (
+    <>
+      <Text style={styles.section}>Checklists</Text>
+      {data.mine.map((c) => (
+        <ChecklistCard key={c.id} summary={c} gameId={gameId} />
+      ))}
+      {data.public.map((c) => (
+        <View key={c.id} style={styles.checklistCard}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.checklistTitle} numberOfLines={1}>
+              {c.title}
+            </Text>
+            <Text style={styles.checklistMeta}>
+              {c.itemCount} items{c.authorName ? ` · by ${c.authorName}` : ""}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.adoptBtn}
+            disabled={adopt.isPending}
+            onPress={() => adopt.mutate(c.id)}
+          >
+            <Text style={styles.adoptText}>Adopt</Text>
+          </TouchableOpacity>
+        </View>
+      ))}
+    </>
+  );
+}
+
+function ChecklistCard({ summary, gameId }: { summary: ChecklistSummary; gameId: string }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const detail = useQuery({
+    queryKey: ["checklist", summary.id],
+    queryFn: () => api.getChecklist(summary.id),
+    enabled: open,
+  });
+  const check = useMutation({
+    mutationFn: ({ itemId, completed }: { itemId: string; completed: boolean }) =>
+      api.checkChecklistItem(itemId, completed),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["checklist", summary.id] });
+      queryClient.invalidateQueries({ queryKey: ["checklists", gameId] });
+    },
+  });
+  const pct = summary.itemCount > 0 ? Math.round((summary.doneCount / summary.itemCount) * 100) : 0;
+
+  return (
+    <View style={styles.checklistCardCol}>
+      <TouchableOpacity style={styles.checklistHeader} onPress={() => setOpen(!open)}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.checklistTitle} numberOfLines={1}>
+            {summary.title}
+          </Text>
+          <Text style={styles.checklistMeta}>
+            {summary.doneCount}/{summary.itemCount}
+          </Text>
+        </View>
+        <View style={[styles.progressTrack, { width: 72, marginTop: 0 }]}>
+          <View style={[styles.progressFill, { width: `${pct}%` }]} />
+        </View>
+        <Text style={styles.chevron}>{open ? "▾" : "▸"}</Text>
+      </TouchableOpacity>
+      {open &&
+        (detail.data?.items ?? []).map((item) => (
+          <TouchableOpacity
+            key={item.id}
+            style={styles.checkRow}
+            onPress={() => check.mutate({ itemId: item.id, completed: !item.completedAt })}
+          >
+            <Text style={styles.checkBox}>{item.completedAt ? "☑" : "☐"}</Text>
+            <Text
+              style={[styles.checkText, item.completedAt ? styles.checkTextDone : null]}
+              numberOfLines={2}
+            >
+              {item.category ? `${item.category} · ` : ""}
+              {item.text}
+            </Text>
+          </TouchableOpacity>
+        ))}
+    </View>
   );
 }
 
@@ -250,4 +401,56 @@ const styles = StyleSheet.create({
     marginTop: 28,
   },
   deleteText: { color: "#f87171", fontWeight: "600" },
+  achievementCount: { color: "#a1a1aa", fontSize: 12, marginBottom: 6 },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#27272a",
+    overflow: "hidden",
+    marginTop: 2,
+  },
+  progressFill: { height: 6, borderRadius: 3, backgroundColor: "#10b981" },
+  achievementGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10 },
+  achievementIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    backgroundColor: "#27272a",
+    overflow: "hidden",
+  },
+  checklistCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#18181b",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#27272a",
+    padding: 12,
+    marginBottom: 8,
+  },
+  checklistCardCol: {
+    backgroundColor: "#18181b",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#27272a",
+    padding: 12,
+    marginBottom: 8,
+  },
+  checklistHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  checklistTitle: { color: "#fafafa", fontSize: 14, fontWeight: "600" },
+  checklistMeta: { color: "#71717a", fontSize: 11, marginTop: 2 },
+  adoptBtn: {
+    borderWidth: 1,
+    borderColor: "#818cf8",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  adoptText: { color: "#a5b4fc", fontSize: 12, fontWeight: "600" },
+  chevron: { color: "#52525b", fontSize: 16 },
+  checkRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
+  checkBox: { color: "#818cf8", fontSize: 16 },
+  checkText: { color: "#d4d4d8", fontSize: 13, flex: 1 },
+  checkTextDone: { color: "#52525b", textDecorationLine: "line-through" },
 });

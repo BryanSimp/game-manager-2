@@ -27,13 +27,21 @@
       "expo-router",
       "expo-secure-store",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Game Manager uses the camera to scan game barcodes and photograph your shelf."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#101014",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

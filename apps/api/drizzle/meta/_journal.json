@@ -36,6 +36,13 @@
       "when": 1783791100388,
       "tag": "0004_groovy_machine_man",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783996122146,
+      "tag": "0005_abandoned_vampiro",
+      "breakpoints": true
     }
   ]
 }

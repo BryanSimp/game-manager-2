@@ -1,8 +1,13 @@
 import type {
   AddGameInput,
   AdminSettings,
+  BarcodeLookupResult,
   BulkAddItem,
   BulkAddResult,
+  ChecklistDetail,
+  GameAchievements,
+  GameChecklists,
+  SteamStatus,
   CollectionDetail,
   CollectionLayoutInput,
   CollectionSummary,
@@ -104,6 +109,12 @@ export class ApiClient {
 
   getPlatforms(): Promise<Platform[]> {
     return this.request<Platform[]>("/api/platforms");
+  }
+
+  lookupBarcode(code: string): Promise<BarcodeLookupResult> {
+    return this.request<BarcodeLookupResult>(
+      `/api/lookup/barcode/${encodeURIComponent(code)}`,
+    );
   }
 
   // ---- library ----
@@ -274,6 +285,105 @@ export class ApiClient {
     return this.request(`/api/imports/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ status: "done" }),
+    });
+  }
+
+  // ---- checklists ----
+
+  getGameChecklists(gameId: string): Promise<GameChecklists> {
+    return this.request<GameChecklists>(`/api/games/${gameId}/checklists`);
+  }
+
+  createChecklist(gameId: string, title: string): Promise<{ id: string }> {
+    return this.request(`/api/games/${gameId}/checklists`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    });
+  }
+
+  getChecklist(id: string): Promise<ChecklistDetail> {
+    return this.request<ChecklistDetail>(`/api/checklists/${id}`);
+  }
+
+  updateChecklist(
+    id: string,
+    input: Partial<{ title: string; isPublic: boolean }>,
+  ): Promise<{ ok: true }> {
+    return this.request(`/api/checklists/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+
+  deleteChecklist(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/checklists/${id}`, { method: "DELETE" });
+  }
+
+  adoptChecklist(id: string): Promise<{ id: string }> {
+    return this.request(`/api/checklists/${id}/adopt`, { method: "POST" });
+  }
+
+  addChecklistItem(
+    checklistId: string,
+    input: { text: string; category?: string | null },
+  ): Promise<{ id: string; position: number }> {
+    return this.request(`/api/checklists/${checklistId}/items`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  updateChecklistItem(
+    itemId: string,
+    input: Partial<{ text: string; category: string | null; position: number }>,
+  ): Promise<{ ok: true }> {
+    return this.request(`/api/checklists/items/${itemId}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+
+  deleteChecklistItem(itemId: string): Promise<{ ok: true }> {
+    return this.request(`/api/checklists/items/${itemId}`, { method: "DELETE" });
+  }
+
+  checkChecklistItem(itemId: string, completed: boolean): Promise<{ ok: true }> {
+    return this.request(`/api/checklists/items/${itemId}/check`, {
+      method: "PUT",
+      body: JSON.stringify({ completed }),
+    });
+  }
+
+  // ---- Steam ----
+
+  getSteamStatus(): Promise<SteamStatus> {
+    return this.request<SteamStatus>("/api/steam");
+  }
+
+  linkSteam(steamId: string): Promise<{ ok: true; steamId: string; personaName: string | null }> {
+    return this.request("/api/steam", { method: "PUT", body: JSON.stringify({ steamId }) });
+  }
+
+  unlinkSteam(): Promise<{ ok: true }> {
+    return this.request("/api/steam", { method: "DELETE" });
+  }
+
+  startSteamImport(): Promise<{ queued: true }> {
+    return this.request("/api/steam/import", { method: "POST" });
+  }
+
+  startSteamSync(): Promise<{ queued: true }> {
+    return this.request("/api/steam/sync", { method: "POST" });
+  }
+
+  getEntryAchievements(entryId: string): Promise<GameAchievements> {
+    return this.request<GameAchievements>(`/api/library/${entryId}/achievements`);
+  }
+
+  saveSteamApiKey(apiKey: string): Promise<{ ok: true }> {
+    return this.request("/api/admin/settings/steam", {
+      method: "PUT",
+      body: JSON.stringify({ apiKey }),
     });
   }
 

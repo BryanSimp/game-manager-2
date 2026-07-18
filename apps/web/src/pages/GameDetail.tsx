@@ -12,6 +12,8 @@ import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { StarRating } from "../components/StarRating.js";
 import { BoxViewer3D } from "../components/BoxViewer3D.js";
+import { ChecklistPanel } from "../components/ChecklistPanel.js";
+import { AchievementsPanel } from "../components/AchievementsPanel.js";
 import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 
@@ -359,6 +361,9 @@ export function GameDetailPage() {
               </button>
             )}
           </div>
+
+          <AchievementsPanel entryId={id} />
+          <ChecklistPanel gameId={e.game.id} />
 
           <div className="mt-10 border-t border-zinc-800 pt-4">
             <button

@@ -11,11 +11,24 @@ Phase 0–8 roadmap — read it before making design decisions.
 - **Monorepo**: pnpm workspaces + Turborepo. `.npmrc` uses `node-linker=hoisted` (required by Expo/Metro).
 - **apps/api**: Fastify 5 + Drizzle ORM + PostgreSQL 16 + better-auth. Runs via `tsx` (no build step).
 - **apps/web**: Vite + React 19 + TanStack Router (code-based routes in `main.tsx`, not file-based) + TanStack Query + Tailwind v4. Dark zinc/indigo theme.
-- **apps/mobile**: Expo SDK 57 + Expo Router (`src/app/`), plain StyleSheet (no NativeWind).
+- **apps/mobile**: **Expo SDK 54 — pinned, do not upgrade.** Bryan's iPhone runs the
+  SDK 54 build of Expo Go (the App Store version on his iOS hasn't updated), so the
+  project must stay on SDK 54 until his Expo Go updates. Expo Router (`src/app/`),
+  plain StyleSheet (no NativeWind). Note SDK 54 API differences: navigation themes
+  import from `@react-navigation/native` (not re-exported by expo-router v6).
 - **packages/shared**: Zod schemas + TS types, exported as TS source (`./src/index.ts`), consumers transpile.
 - **packages/api-client**: typed fetch wrapper. Web uses same-origin cookies; mobile attaches the better-auth session cookie from SecureStore via `getHeaders`.
 - **Jobs**: pg-boss (rides on the same Postgres, in-process worker started in `apps/api/src/index.ts`).
 - Versions pinned by better-auth 1.6 peers: **zod ^4**, **drizzle-orm ^0.45**.
+- Mobile versions pinned by the Expo SDK 54 requirement (see apps/mobile above):
+  react 19.1, react-native 0.81, expo-router ~6, expo-camera ~17. `expo install --fix`
+  realigns them if they drift.
+- **React must be the same exact version in every workspace package** (web is pinned
+  to 19.1.0 to match Expo). If web and mobile diverge, pnpm's hoisted linker nests a
+  second react under better-auth/use-sync-external-store and the native app crashes
+  with "Invalid hook call". Also beware stale lockfile peer graphs after Expo SDK
+  changes: apps/api's `@better-auth/expo` keeps old expo/react peer pins until you
+  `pnpm remove` + re-`add` it (symptom: react-native 0.86 entries linger in the lock).
 
 ## Key architecture decisions & why
 
@@ -91,10 +104,15 @@ Migrations are plain SQL in `apps/api/drizzle/`, applied by `src/db/migrate.ts`
 | 2 customization | `f3f1086` | Tags (colors/groups), library filters+sort, custom cover upload, preferences (status colors, badges), dashboard (stat tiles, backlog hours, random pick) |
 | 3 OCR import | `69a66cf`, `b0eb5c0` | pg-boss pipeline, tesseract + Claude vision providers, noise filter (hardened on a real Steam screenshot), confidence-scored review UI on web+mobile, camera capture on mobile |
 | 4 shelf + collections | see git log | Virtual shelf (per-console rows, physical boxes with console-colored spines vs digital tiles, sort modes + drag-to-reorder persisted in `user_game_platforms.position`); collections with SVG play-order graph editor (drag nodes, connect mode, click-edge-to-delete, status rings), roll-up stats; mobile shelf screen |
+| 5 mobile polish + camera | see git log | Barcode scanning: `expo-camera` scan screen → `GET /api/lookup/barcode/:code` (`services/upc.ts`: UPCitemdb trial tier, platform hint parsed out of the retail product title, then the OCR matcher for IGDB candidates; in-memory result cache since the tier is ~100/day). Offline caching: AsyncStorage persister + `PersistQueryClientProvider` (7-day maxAge; search/barcode queries excluded); better-auth's expo client already serves its SecureStore session cache offline. Parity screens: dashboard, collections list/detail (play-order graph flattened to a list), tag manager, account hub with sign-out, library search+sort. `metro.config.js` resolver shim retries `.js` specifiers as `.ts` — **mobile bundling was broken without it** |
+| 7 checklists | see git log | `checklist_templates`/`checklist_items`/`user_checklist_items` (migration 0005); routes in `routes/checklists.ts` — CRUD, granular item ops, `PUT items/:id/check` toggles per-user progress (only on templates you author), publish flag, **adopt = private copy** (`adopted_from_id` provenance), admin can delete public templates. Web: `ChecklistPanel` on GameDetail (progress bars, category grouping, publish toggle, adopt). Mobile: track/adopt on game detail (authoring is web-first). Verified live with both dev accounts incl. permission boundaries |
+| 8 Steam | see git log | `steam_accounts`, `achievements`, `user_achievements`, `games.steam_app_id`, `user_games.steam_playtime_minutes`; `services/steam.ts` (official Web API, key DB-first/`STEAM_API_KEY` fallback, ~250ms throttle, vanity-URL resolve); two pg-boss queues in `jobs/steam.ts`: **import** (owned games → ≥0.85 matcher confidence auto-adds with appid+playtime, leftovers become a `source='steam'` import job for the normal review UI; `import_items.steam_app_id` dedups re-imports) and **sync** (per linked appid: schema achievements upsert + player unlock state). Web: `SteamCard` on Preferences (link/import/sync, polls while jobs run), Steam key section on admin Settings, `AchievementsPanel` on GameDetail (icon grid + playtime). Mobile: read-only achievements + checklists on game detail |
 
-**Next: Phase 5** — mobile polish + barcode scanning (`expo-camera` UPC lookup) +
-offline caching (TanStack Query persistence). Then Phase 6 (email, export, randomizer,
-admin panel), 7 (completionist checklists), 8 (Steam achievements + library import).
+**Next: Phase 6 (skipped for now, still open)** — email verification/password reset
+(better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
+filters, admin panel (users, password resets, registration toggle, settings).
+**Deployment to Bryan's Ubuntu/Portainer server is the current focus** (v1's compose
+file to be provided for reference).
 
 ## Deferred / known gaps
 
@@ -106,3 +124,15 @@ admin panel), 7 (completionist checklists), 8 (Steam achievements + library impo
   UI's re-search covers it.
 - Orphaned image cleanup job not yet written (images accumulate on the volume).
 - `import_jobs.status='done'` cleanup/pruning not implemented.
+- Barcode scan flow verified end-to-end at the API level (real BOTW/GoW barcodes) but
+  the camera screen itself needs an on-device Expo Go run — simulators have no camera.
+- Play-order graph *editing* is web-only; mobile flattens the graph to an ordered list.
+- UPCitemdb trial tier is ~100 lookups/day per IP (results cached in-process); a paid
+  key or alternate provider is the upgrade path if scanning whole shelves.
+- Steam import leftovers resolved through the review UI don't get `steam_app_id`
+  linked (review's bulk-add path has no item context) — those games won't sync
+  achievements until matched confidently on a later import.
+- Steam achievements sync needs the profile's "Game details" privacy set to Public;
+  the whole flow is untested against a real Steam account (needs a key + linked
+  account — endpoints verified with mocked-level checks only).
+- Checklist authoring is web-only on mobile (tracking + adopting work).

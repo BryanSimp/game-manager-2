@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   FlatList,
@@ -15,6 +16,7 @@ import { api } from "@/lib/api";
 import { resolveImage } from "@/lib/ui";
 
 export default function AddGameScreen() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
@@ -53,6 +55,9 @@ export default function AddGameScreen() {
         autoFocus
         autoCapitalize="none"
       />
+      <TouchableOpacity style={styles.scanBtn} onPress={() => router.replace("/scan")}>
+        <Text style={styles.scanText}>🏷️  Scan a barcode instead</Text>
+      </TouchableOpacity>
       {search.isLoading && <ActivityIndicator style={{ marginTop: 24 }} />}
       {search.data && !search.data.igdb && (
         <Text style={styles.warning}>
@@ -112,6 +117,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   warning: { color: "#fcd34d", fontSize: 12, marginHorizontal: 16, marginBottom: 4 },
+  scanBtn: {
+    marginHorizontal: 12,
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: "#3f3f46",
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  scanText: { color: "#a1a1aa", fontSize: 13, fontWeight: "600" },
   row: {
     flexDirection: "row",
     alignItems: "center",
