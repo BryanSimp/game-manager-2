@@ -48,6 +48,12 @@ export async function processSteamImport(userId: string): Promise<void> {
 
     const owned = (await getOwnedGames(account.steamId)).filter((g) => !isNoiseApp(g.name));
 
+    // every Steam game is a digital PC copy — mark ownership automatically
+    const [pcPlatform] = await db
+      .select({ id: schema.platforms.id })
+      .from(schema.platforms)
+      .where(eq(schema.platforms.igdbPlatformId, 6));
+
     // what's already linked by appid → just refresh playtime
     const appIds = owned.map((g) => g.appid);
     const linked = appIds.length
@@ -98,18 +104,31 @@ export async function processSteamImport(userId: string): Promise<void> {
         .select({ id: schema.userGames.id })
         .from(schema.userGames)
         .where(and(eq(schema.userGames.userId, userId), eq(schema.userGames.gameId, gameId)));
+      let userGameId: string;
       if (existing) {
+        userGameId = existing.id;
         await db
           .update(schema.userGames)
           .set({ steamPlaytimeMinutes: steamGame.playtime_forever, updatedAt: new Date() })
           .where(eq(schema.userGames.id, existing.id));
       } else {
-        await db.insert(schema.userGames).values({
-          userId,
-          gameId,
-          status: "backlog",
-          steamPlaytimeMinutes: steamGame.playtime_forever,
-        });
+        const [inserted] = await db
+          .insert(schema.userGames)
+          .values({
+            userId,
+            gameId,
+            status: "backlog",
+            steamPlaytimeMinutes: steamGame.playtime_forever,
+          })
+          .returning({ id: schema.userGames.id });
+        userGameId = inserted!.id;
+      }
+
+      if (pcPlatform) {
+        await db
+          .insert(schema.userGamePlatforms)
+          .values({ userGameId, platformId: pcPlatform.id, format: "digital" })
+          .onConflictDoNothing();
       }
     }
 
