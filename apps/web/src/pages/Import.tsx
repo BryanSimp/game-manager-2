@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { BulkAddResult, ImportCandidate, ImportItem } from "@gm/shared";
+import {
+  GAME_STATUSES,
+  type BulkAddResult,
+  type GameStatus,
+  type ImportCandidate,
+  type ImportItem,
+} from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
+import { STATUS_META, statusChip } from "../lib/format.js";
+import { usePreferences } from "../lib/prefs.js";
 
 interface ReviewItem {
   id: string;
@@ -12,6 +20,7 @@ interface ReviewItem {
   selected: ImportCandidate | null; // null = add manually by title
   confidence: number | null;
   skipped: boolean;
+  status: GameStatus;
 }
 
 type Stage = "input" | "processing" | "review" | "done";
@@ -24,6 +33,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 export function ImportPage() {
   const queryClient = useQueryClient();
+  const prefs = usePreferences();
   const [stage, setStage] = useState<Stage>("input");
   const [jobId, setJobId] = useState<string | null>(null);
   const [text, setText] = useState("");
@@ -59,6 +69,7 @@ export function ImportPage() {
           selected: it.candidates[0] ?? null,
           confidence: it.confidence,
           skipped: false,
+          status: "backlog" as const,
         })),
       );
       setStage("review");
@@ -93,8 +104,8 @@ export function ImportPage() {
           .filter((it) => !it.skipped)
           .map((it) =>
             it.selected?.igdbId
-              ? { igdbId: it.selected.igdbId }
-              : { title: it.selected?.title ?? it.cleaned },
+              ? { igdbId: it.selected.igdbId, status: it.status }
+              : { title: it.selected?.title ?? it.cleaned, status: it.status },
           ),
         ownPlatformId ? [{ platformId: ownPlatformId, format: ownFormat }] : undefined,
       );
@@ -316,6 +327,25 @@ export function ImportPage() {
                       No match — will be added manually as "{it.cleaned}"
                     </p>
                   )}
+                </div>
+                <div className="flex flex-none flex-wrap items-center gap-1">
+                  {GAME_STATUSES.map((s: GameStatus) => {
+                    const chip = statusChip(s, prefs);
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => setItem(it.id, { status: s })}
+                        className={`rounded-full border px-2 py-0.5 text-xs font-medium transition ${
+                          it.status === s
+                            ? chip.className
+                            : "border-zinc-700 text-zinc-500 hover:border-zinc-500 hover:text-zinc-300"
+                        }`}
+                        style={it.status === s ? chip.style : undefined}
+                      >
+                        {STATUS_META[s].label}
+                      </button>
+                    );
+                  })}
                 </div>
                 <button
                   onClick={() => research(it)}

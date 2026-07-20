@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SearchResult } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 
 export function AddGamePage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
@@ -31,17 +33,20 @@ export function AddGamePage() {
             ? { gameId: result.gameId }
             : { title: result.title },
       ),
-    onSuccess: (_data, result) => {
+    onSuccess: (data, result) => {
       setAddedTitles((prev) => new Set(prev).add(result.title));
       queryClient.invalidateQueries({ queryKey: ["library"] });
+      // straight to the new entry so status/platforms can be set right away
+      navigate({ to: "/game/$id", params: { id: data.id } });
     },
   });
 
   const addManual = useMutation({
     mutationFn: (title: string) => api.addToLibrary({ title }),
-    onSuccess: (_data, title) => {
+    onSuccess: (data, title) => {
       setAddedTitles((prev) => new Set(prev).add(title));
       queryClient.invalidateQueries({ queryKey: ["library"] });
+      navigate({ to: "/game/$id", params: { id: data.id } });
     },
   });
 

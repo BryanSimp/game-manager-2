@@ -38,9 +38,11 @@ export default function AddGameScreen() {
       api.addToLibrary(
         r.igdbId ? { igdbId: r.igdbId } : r.gameId ? { gameId: r.gameId } : { title: r.title },
       ),
-    onSuccess: (_d, r) => {
+    onSuccess: (d, r) => {
       setAdded((prev) => new Set(prev).add(r.title));
       queryClient.invalidateQueries({ queryKey: ["library"] });
+      // straight to the new entry so status/platforms can be set right away
+      router.push(`/game/${d.id}`);
     },
   });
 
