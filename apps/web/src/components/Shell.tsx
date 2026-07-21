@@ -4,6 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { authClient } from "../lib/auth.js";
 import { api } from "../lib/api.js";
 
+// stamped by CI via the APP_VERSION docker build-arg (short commit sha)
+const APP_VERSION: string = import.meta.env.VITE_APP_VERSION || "dev";
+
 /** Authenticated app shell: nav header + content. Redirects to /login when signed out. */
 export function Shell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
@@ -79,6 +82,12 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+      <span
+        title="Deployed build"
+        className="pointer-events-none fixed right-2 bottom-1.5 z-20 text-[10px] text-zinc-600 select-none"
+      >
+        v{APP_VERSION}
+      </span>
     </div>
   );
 }

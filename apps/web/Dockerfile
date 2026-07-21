@@ -14,6 +14,9 @@ COPY apps/web/package.json ./apps/web/package.json
 COPY apps/mobile/package.json ./apps/mobile/package.json
 RUN pnpm install --frozen-lockfile --filter @gm/web...
 COPY apps/web ./apps/web
+# short commit sha from CI; surfaces as the version badge in the app shell
+ARG APP_VERSION=dev
+ENV VITE_APP_VERSION=$APP_VERSION
 RUN pnpm --filter @gm/web build
 
 FROM nginx:alpine
