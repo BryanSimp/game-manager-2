@@ -24,13 +24,10 @@ export const auth = betterAuth({
     requireEmailVerification: false,
     disableSignUp: !env.ALLOW_REGISTRATION,
   },
-  // exp:// covers Expo Go dev sessions (the expo plugin only auto-trusts it
-  // when NODE_ENV=development, which the tsx dev script never sets)
-  trustedOrigins: [
-    ...env.CORS_ORIGINS,
-    "gamemanager://",
-    ...(env.NODE_ENV !== "production" ? ["exp://"] : []),
-  ],
+  // exp:// covers Expo Go sessions — a supported client in production too
+  // (the server-hosted Metro bundler serves the app to Expo Go, which then
+  // signs in against this API), so it stays trusted in every environment
+  trustedOrigins: [...env.CORS_ORIGINS, "gamemanager://", "exp://"],
   plugins: [admin(), bearer(), expo()],
   databaseHooks: {
     user: {

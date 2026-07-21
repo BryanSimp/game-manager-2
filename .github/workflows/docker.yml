@@ -27,6 +27,8 @@ jobs:
             dockerfile: apps/api/Dockerfile
           - name: gm2-web
             dockerfile: apps/web/Dockerfile
+          - name: gm2-mobile
+            dockerfile: apps/mobile/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
