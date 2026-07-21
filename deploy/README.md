@@ -81,6 +81,15 @@ later if wanted — the volume backup keeps that option open.
 - Net effect: a push lands on games.brysimp.com in under ~10 minutes with no
   manual step. To skip auto-updates for a while, stop the watchtower container;
   manual update = Portainer → stack → "Pull and redeploy".
+- The web app shows the deployed build's short commit sha bottom-right once
+  signed in — compare it against the latest commit on `main` to confirm a
+  deploy actually landed.
+- If updates stop, check `docker logs --since 1h watchtower`. Known failure:
+  `client version 1.25 is too old` on every poll — watchtower's docker client
+  botches version negotiation against modern daemons; the stack pins
+  `DOCKER_API_VERSION: "1.44"` to prevent it. If the daemon ever rejects that
+  pin after an upgrade ("client version newer than server"), adjust it to a
+  version the daemon lists under `docker version`.
 
 ## Backups (v2)
 
