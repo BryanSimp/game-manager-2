@@ -19,6 +19,23 @@ After the first-time setup below, deploys are fully automatic.
    This stores credentials in `/root/.docker/config.json` (run as root/sudo),
    which both Docker pulls and the Watchtower container use.
 
+   **Snap-docker gotcha (this server):** Docker is snap-installed, so
+   `sudo docker login` writes to `/root/snap/docker/<rev>/.docker/config.json`
+   instead — but the stack mounts `/root/.docker/config.json` into Watchtower.
+   Copy it into place *before* (re)deploying the stack:
+
+   ```bash
+   sudo mkdir -p /root/.docker
+   sudo cp /root/snap/docker/*/.docker/config.json /root/.docker/config.json
+   ```
+
+   Order matters: if the file is missing when a container with that mount
+   starts, Docker silently creates the path as an **empty directory** and
+   Watchtower fails every pull with `/config.json: is a directory`. If that
+   happens: remove the watchtower container, `sudo rm -rf` the directory,
+   copy the file, then redeploy. The copy is a static snapshot — after
+   rotating the PAT, redo both the login and the copy.
+
 2. **Portainer registry** (so Portainer's own image pulls work too):
    Portainer → Registries → Add registry → Custom →
    URL `ghcr.io`, username `BryanSimp`, password = the same PAT.
