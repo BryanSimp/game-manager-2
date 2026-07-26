@@ -18,7 +18,10 @@ export function GameCard({
 }) {
   const prefs = usePreferences();
   const chip = statusChip(entry.status, prefs);
-  const ttb = formatHours(entry.game.ttbMain);
+  // once a game has a mission list, the badge counts down rather than showing
+  // the same full length whatever your progress
+  const estimating = entry.estimatedRemainingSeconds !== null;
+  const ttb = formatHours(entry.estimatedRemainingSeconds ?? entry.game.ttbMain);
   const showTime = prefs?.showTimeBadge ?? true;
   const showPlatforms = prefs?.showPlatformBadge ?? true;
 

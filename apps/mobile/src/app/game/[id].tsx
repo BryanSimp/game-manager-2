@@ -181,6 +181,7 @@ export default function GameDetailScreen() {
         </TouchableOpacity>
       )}
 
+      <ProgressSection entryId={id} gameId={e.game.id} />
       <AchievementsSection entryId={id} />
       <ChecklistsSection gameId={e.game.id} />
 
@@ -196,6 +197,40 @@ export default function GameDetailScreen() {
         <Text style={styles.deleteText}>Remove from library</Text>
       </TouchableOpacity>
     </ScrollView>
+  );
+}
+
+/**
+ * Mission progress + estimated time left. Read-only apart from ticking
+ * missions off — building the list is web-first, like checklist authoring.
+ */
+function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string }) {
+  const progress = useQuery({
+    queryKey: ["progress", entryId],
+    queryFn: () => api.getEntryProgress(entryId),
+  });
+  const lists = useQuery({
+    queryKey: ["checklists", gameId],
+    queryFn: () => api.getGameChecklists(gameId),
+  });
+
+  const p = progress.data;
+  if (!p || p.total === 0) return null;
+  const missionList = lists.data?.mine.find((c) => c.id === p.checklistId);
+  const remaining = formatHours(p.remainingSeconds);
+
+  return (
+    <>
+      <Text style={styles.section}>Progress</Text>
+      <Text style={styles.achievementCount}>
+        {remaining ? `${remaining} left · ` : ""}
+        {p.done}/{p.total} missions ({p.percent}%)
+      </Text>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${p.percent}%` }]} />
+      </View>
+      {missionList && <ChecklistCard summary={missionList} gameId={gameId} />}
+    </>
   );
 }
 
@@ -261,15 +296,18 @@ function ChecklistsSection({ gameId }: { gameId: string }) {
   });
 
   const data = lists.data;
-  if (!data || (data.mine.length === 0 && data.public.length === 0)) return null;
+  // mission lists render in ProgressSection alongside their time estimate
+  const mine = data?.mine.filter((c) => c.kind === "completion") ?? [];
+  const shared = data?.public.filter((c) => c.kind === "completion") ?? [];
+  if (mine.length === 0 && shared.length === 0) return null;
 
   return (
     <>
       <Text style={styles.section}>Checklists</Text>
-      {data.mine.map((c) => (
+      {mine.map((c) => (
         <ChecklistCard key={c.id} summary={c} gameId={gameId} />
       ))}
-      {data.public.map((c) => (
+      {shared.map((c) => (
         <View key={c.id} style={styles.checklistCard}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.checklistTitle} numberOfLines={1}>
@@ -306,6 +344,8 @@ function ChecklistCard({ summary, gameId }: { summary: ChecklistSummary; gameId:
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["checklist", summary.id] });
       queryClient.invalidateQueries({ queryKey: ["checklists", gameId] });
+      // ticking a mission moves the time-remaining estimate
+      queryClient.invalidateQueries({ queryKey: ["progress"] });
     },
   });
   const pct = summary.itemCount > 0 ? Math.round((summary.doneCount / summary.itemCount) * 100) : 0;

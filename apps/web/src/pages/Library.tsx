@@ -8,7 +8,7 @@ import { GameCard } from "../components/GameCard.js";
 import { STATUS_META, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 
-type SortKey = "title" | "rating" | "release" | "added" | "ttb";
+type SortKey = "title" | "rating" | "release" | "added" | "ttb" | "estimated";
 
 const SORTS: Array<{ key: SortKey; label: string }> = [
   { key: "title", label: "Title A–Z" },
@@ -16,6 +16,7 @@ const SORTS: Array<{ key: SortKey; label: string }> = [
   { key: "release", label: "Newest release" },
   { key: "added", label: "Recently added" },
   { key: "ttb", label: "Shortest first" },
+  { key: "estimated", label: "Estimated shortest" },
 ];
 
 function sortEntries(entries: LibraryEntry[], sort: SortKey): LibraryEntry[] {
@@ -32,6 +33,14 @@ function sortEntries(entries: LibraryEntry[], sort: SortKey): LibraryEntry[] {
     case "ttb":
       return list.sort(
         (a, b) => (a.game.ttbMain ?? Number.MAX_SAFE_INTEGER) - (b.game.ttbMain ?? Number.MAX_SAFE_INTEGER),
+      );
+    case "estimated":
+      // games you've part-finished float up; anything without a mission list
+      // has no estimate and sinks, rather than pretending to be 0h
+      return list.sort(
+        (a, b) =>
+          (a.estimatedRemainingSeconds ?? Number.MAX_SAFE_INTEGER) -
+          (b.estimatedRemainingSeconds ?? Number.MAX_SAFE_INTEGER),
       );
   }
 }

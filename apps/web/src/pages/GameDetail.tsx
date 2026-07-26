@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   GAME_STATUSES,
   PLATFORM_FAMILIES,
+  PROGRESS_BASIS_LABELS,
   type GameStatus,
   type OwnershipFormat,
   type UpdateEntryInput,
@@ -12,10 +13,16 @@ import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { StarRating } from "../components/StarRating.js";
 import { BoxViewer3D } from "../components/BoxViewer3D.js";
-import { ChecklistPanel } from "../components/ChecklistPanel.js";
-import { AchievementsPanel } from "../components/AchievementsPanel.js";
+import { ProgressPanel } from "../components/ProgressPanel.js";
 import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
+
+type Tab = "overview" | "progress";
+
+const TABS: Array<{ key: Tab; label: string }> = [
+  { key: "overview", label: "Overview" },
+  { key: "progress", label: "Progress" },
+];
 
 const FAMILY_LABELS: Record<string, string> = {
   nintendo: "Nintendo",
@@ -40,6 +47,7 @@ export function GameDetailPage() {
   const [notes, setNotes] = useState("");
   const [notesDirty, setNotesDirty] = useState(false);
   const [boxPlatform, setBoxPlatform] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("overview");
   useEffect(() => {
     if (entry.data && !notesDirty) setNotes(entry.data.notes ?? "");
   }, [entry.data, notesDirty]);
@@ -197,6 +205,17 @@ export function GameDetailPage() {
               <Ttb label="Main story" value={formatHours(e.game.ttbMain)} />
               <Ttb label="Main + extras" value={formatHours(e.game.ttbMainExtra)} />
               <Ttb label="Completionist" value={formatHours(e.game.ttbCompletionist)} />
+              {e.estimatedRemainingSeconds !== null && (
+                <div className="mt-2 flex justify-between border-t border-zinc-800 pt-2">
+                  <span className="text-indigo-300">Estimated left</span>
+                  <span
+                    className="font-semibold text-indigo-300"
+                    title={`${e.missionsDone}/${e.missionsTotal} missions done · based on ${PROGRESS_BASIS_LABELS[e.progressBasis].toLowerCase()}`}
+                  >
+                    {formatHours(e.estimatedRemainingSeconds) ?? "0h"}
+                  </span>
+                </div>
+              )}
               <label className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
                 <input
                   type="checkbox"
@@ -375,8 +394,7 @@ export function GameDetailPage() {
             )}
           </div>
 
-          <AchievementsPanel entryId={id} />
-          <ChecklistPanel gameId={e.game.id} />
+          </div>
 
           <div className="mt-10 border-t border-zinc-800 pt-4">
             <button

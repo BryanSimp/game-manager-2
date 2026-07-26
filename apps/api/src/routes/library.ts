@@ -1,8 +1,14 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { GAME_STATUSES, OWNERSHIP_FORMATS } from "@gm/shared";
+import {
+  GAME_STATUSES,
+  OWNERSHIP_FORMATS,
+  PROGRESS_BASES,
+  estimateProgress,
+  ttbForBasis,
+} from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { createManualGame, upsertGameFromIgdb } from "../services/catalog.js";
@@ -156,17 +162,75 @@ async function entryTags(userGameIds: string[]) {
   return map;
 }
 
+export interface MissionCounts {
+  total: number;
+  done: number;
+}
+
+/**
+ * Mission-list counts for every game the user tracks, keyed by game id.
+ * Computed in one query so the library list doesn't fan out per entry.
+ * Where a game has several mission lists the oldest wins, matching
+ * GET /api/library/:id/progress.
+ */
+async function missionCountsByGame(userId: string): Promise<Map<string, MissionCounts>> {
+  const rows = await db
+    .select({
+      gameId: schema.checklistTemplates.gameId,
+      createdAt: schema.checklistTemplates.createdAt,
+      total: sql<number>`count(${schema.checklistItems.id})::int`,
+      done: sql<number>`count(${schema.userChecklistItems.userId})::int`,
+    })
+    .from(schema.checklistTemplates)
+    .leftJoin(
+      schema.checklistItems,
+      eq(schema.checklistItems.templateId, schema.checklistTemplates.id),
+    )
+    .leftJoin(
+      schema.userChecklistItems,
+      and(
+        eq(schema.userChecklistItems.itemId, schema.checklistItems.id),
+        eq(schema.userChecklistItems.userId, userId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.checklistTemplates.authorUserId, userId),
+        eq(schema.checklistTemplates.kind, "missions"),
+      ),
+    )
+    .groupBy(
+      schema.checklistTemplates.id,
+      schema.checklistTemplates.gameId,
+      schema.checklistTemplates.createdAt,
+    )
+    .orderBy(asc(schema.checklistTemplates.createdAt));
+
+  const map = new Map<string, MissionCounts>();
+  for (const row of rows) {
+    // oldest first, so the first one seen for a game is the one that counts
+    if (!map.has(row.gameId)) map.set(row.gameId, { total: row.total, done: row.done });
+  }
+  return map;
+}
+
 function entryToJson(
   entry: typeof schema.userGames.$inferSelect,
   game: typeof schema.games.$inferSelect,
   platforms: unknown[],
   tags: unknown[] = [],
+  missions?: MissionCounts,
 ) {
   const gameJson = gameToJson(game);
   // a user-uploaded cover overrides the catalog cover
   if (entry.customCoverImageId) {
     gameJson.coverSrc = `/api/images/${entry.customCoverImageId}`;
   }
+  const estimate = estimateProgress({
+    total: missions?.total ?? 0,
+    done: missions?.done ?? 0,
+    totalSeconds: ttbForBasis(game, entry.progressBasis),
+  });
   return {
     id: entry.id,
     status: entry.status,
@@ -197,12 +261,14 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     const ids = rows.map((r) => r.user_games.id);
     const platformMap = await entryPlatforms(ids);
     const tagMap = await entryTags(ids);
+    const missionMap = await missionCountsByGame(user.id);
     return rows.map((r) =>
       entryToJson(
         r.user_games,
         r.games,
         platformMap.get(r.user_games.id) ?? [],
         tagMap.get(r.user_games.id) ?? [],
+        missionMap.get(r.games.id),
       ),
     );
   });
@@ -295,12 +361,76 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!row) return reply.status(404).send({ message: "Not found" });
     const platformMap = await entryPlatforms([row.user_games.id]);
     const tagMap = await entryTags([row.user_games.id]);
+    const missionMap = await missionCountsByGame(user.id);
     return entryToJson(
       row.user_games,
       row.games,
       platformMap.get(row.user_games.id) ?? [],
       tagMap.get(row.user_games.id) ?? [],
+      missionMap.get(row.games.id),
     );
+  });
+
+  /**
+   * Time-remaining estimate: the user's mission checklist for this game,
+   * with the chosen how-long-to-beat figure spread across its missions.
+   */
+  app.get<{ Params: { id: string } }>("/api/library/:id/progress", async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return;
+    const [row] = await db
+      .select()
+      .from(schema.userGames)
+      .innerJoin(schema.games, eq(schema.userGames.gameId, schema.games.id))
+      .where(and(eq(schema.userGames.id, request.params.id), eq(schema.userGames.userId, user.id)));
+    if (!row) return reply.status(404).send({ message: "Not found" });
+
+    const basis = row.user_games.progressBasis;
+    const totalSeconds = ttbForBasis(row.games, basis);
+
+    // the user's own mission list for this game — oldest first, so adding a
+    // second one doesn't silently move the estimate
+    const [list] = await db
+      .select({
+        id: schema.checklistTemplates.id,
+        title: schema.checklistTemplates.title,
+        total: sql<number>`count(${schema.checklistItems.id})::int`,
+        done: sql<number>`count(${schema.userChecklistItems.userId})::int`,
+      })
+      .from(schema.checklistTemplates)
+      .leftJoin(
+        schema.checklistItems,
+        eq(schema.checklistItems.templateId, schema.checklistTemplates.id),
+      )
+      .leftJoin(
+        schema.userChecklistItems,
+        and(
+          eq(schema.userChecklistItems.itemId, schema.checklistItems.id),
+          eq(schema.userChecklistItems.userId, user.id),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.checklistTemplates.gameId, row.games.id),
+          eq(schema.checklistTemplates.authorUserId, user.id),
+          eq(schema.checklistTemplates.kind, "missions"),
+        ),
+      )
+      .groupBy(schema.checklistTemplates.id, schema.checklistTemplates.createdAt)
+      .orderBy(asc(schema.checklistTemplates.createdAt))
+      .limit(1);
+
+    const estimate = estimateProgress({
+      total: list?.total ?? 0,
+      done: list?.done ?? 0,
+      totalSeconds,
+    });
+    return {
+      basis,
+      checklistId: list?.id ?? null,
+      checklistTitle: list?.title ?? null,
+      ...estimate,
+    };
   });
 
   app.patch<{ Params: { id: string } }>("/api/library/:id", async (request, reply) => {
