@@ -17,12 +17,13 @@ import { useQuery } from "@tanstack/react-query";
 import { GAME_STATUSES, type GameStatus, type LibraryEntry } from "@gm/shared";
 import { authClient } from "@/lib/auth";
 import { api } from "@/lib/api";
-import { resolveImage, STATUS_COLORS } from "@/lib/ui";
+import { formatHours, resolveImage, STATUS_COLORS } from "@/lib/ui";
 
 const SORTS = [
   { key: "added", label: "Recent" },
   { key: "title", label: "A–Z" },
   { key: "rating", label: "Rating" },
+  { key: "ttb", label: "Time" },
 ] as const;
 type SortKey = (typeof SORTS)[number]["key"];
 
@@ -46,6 +47,11 @@ export default function LibraryScreen() {
     .sort((a, b) => {
       if (sort === "title") return a.game.title.localeCompare(b.game.title);
       if (sort === "rating") return (b.rating ?? -1) - (a.rating ?? -1);
+      // shortest main story first; games without a time-to-beat sink to the bottom
+      if (sort === "ttb")
+        return (
+          (a.game.ttbMain ?? Number.MAX_SAFE_INTEGER) - (b.game.ttbMain ?? Number.MAX_SAFE_INTEGER)
+        );
       return b.createdAt.localeCompare(a.createdAt);
     });
 
@@ -167,6 +173,7 @@ function FilterChip({
 function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => void }) {
   const status = STATUS_COLORS[entry.status];
   const cover = resolveImage(entry.game.coverSrc);
+  const ttb = formatHours(entry.game.ttbMain);
   return (
     <Pressable style={styles.row} onPress={onPress}>
       <View style={styles.cover}>
@@ -181,6 +188,7 @@ function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => vo
             <Text style={[styles.badgeText, { color: status.text }]}>{status.label}</Text>
           </View>
           {entry.rating != null && <Text style={styles.rating}>★ {entry.rating}</Text>}
+          {ttb && <Text style={styles.ttb}>⏱ {ttb}</Text>}
         </View>
         {entry.platforms.length > 0 && (
           <Text style={styles.platforms} numberOfLines={1}>
@@ -256,6 +264,7 @@ const styles = StyleSheet.create({
   badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
   badgeText: { fontSize: 11, fontWeight: "600" },
   rating: { color: "#fbbf24", fontSize: 12 },
+  ttb: { color: "#a1a1aa", fontSize: 12 },
   platforms: { color: "#71717a", fontSize: 11, marginTop: 3 },
   chevron: { color: "#52525b", fontSize: 24, paddingLeft: 4 },
   empty: { alignItems: "center", marginTop: 64 },
