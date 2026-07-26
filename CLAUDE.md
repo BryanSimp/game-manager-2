@@ -148,6 +148,16 @@ file to be provided for reference).
   prefers returning nothing over returning a wrong list.
 - Time estimate divides the TTB figure evenly across missions — real missions vary
   a lot, and no source gives per-mission timings.
+- Mission lists can't be **published/adopted** yet, unlike completion checklists:
+  `ChecklistPanel` filters to `kind='completion'`, so a public mission list would
+  have nowhere to be adopted from. The tables support it (`is_public`,
+  `adopted_from_id`) — it needs UI on both sides. This matters more than it
+  sounds: sharing was the reason mission lists were built on checklists at all,
+  so scraping is currently repeated per user.
+- Mission list *editing* (rename/reorder/add/delete) is web-only; mobile ticks
+  missions off but can't change them. Reordering swaps the two rows' stored
+  positions rather than renumbering the list, so it relies on positions being
+  distinct — true for imported lists.
 - The Progress tab's estimate uses the *oldest* mission checklist for a game if
   several exist; there's no picker. `missionCountsByGame` in `routes/library.ts`
   applies the same rule for the list payload — keep the two in step.

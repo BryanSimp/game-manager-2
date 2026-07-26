@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   PROGRESS_BASES,
   PROGRESS_BASIS_LABELS,
+  type ChecklistDetail,
   type LibraryEntry,
   type MissionSuggestion,
   type ProgressBasis,
@@ -136,6 +137,7 @@ function MissionSection({
   const [review, setReview] = useState<MissionSuggestion | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["progress", entryId] });
@@ -174,7 +176,7 @@ function MissionSection({
         <p className="text-sm font-semibold text-zinc-300">
           {checklistTitle ?? "Missions & chapters"}
         </p>
-        {!checklistId && (
+        {!checklistId ? (
           <div className="flex gap-2">
             <button
               onClick={() => suggest.mutate(undefined)}
@@ -190,6 +192,17 @@ function MissionSection({
               Add manually
             </button>
           </div>
+        ) : (
+          <button
+            onClick={() => setEditing((v) => !v)}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+              editing
+                ? "border-indigo-500 bg-indigo-600/20 text-indigo-300"
+                : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+            }`}
+          >
+            {editing ? "✓ Done editing" : "✎ Edit list"}
+          </button>
         )}
       </div>
 
@@ -224,7 +237,18 @@ function MissionSection({
         />
       )}
 
-      {checklistId && (
+      {checklistId && editing && detail.data && (
+        <MissionEditor
+          detail={detail.data}
+          onChanged={invalidate}
+          onDeleted={() => {
+            setEditing(false);
+            invalidate();
+          }}
+        />
+      )}
+
+      {checklistId && !editing && (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
           {(detail.data?.items ?? []).map((item, i) => (
             <label key={item.id} className="flex cursor-pointer items-center gap-2 py-0.5">
@@ -259,6 +283,232 @@ function MissionSection({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Edit an existing mission list: rename it, fix or reorder entries, add ones
+ * the wiki missed, drop the ones it invented, or delete the list outright.
+ * Scraped lists are rarely perfect first time, so this is the repair bench.
+ */
+function MissionEditor({
+  detail,
+  onChanged,
+  onDeleted,
+}: {
+  detail: ChecklistDetail;
+  onChanged: () => void;
+  onDeleted: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [title, setTitle] = useState(detail.title);
+  const [newMission, setNewMission] = useState("");
+
+  const items = detail.items;
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["checklist", detail.id] });
+    onChanged();
+  };
+
+  const rename = useMutation({
+    mutationFn: (next: string) => api.updateChecklist(detail.id, { title: next }),
+    onSuccess: refresh,
+  });
+  const addItem = useMutation({
+    mutationFn: (text: string) => api.addChecklistItem(detail.id, { text }),
+    onSuccess: () => {
+      setNewMission("");
+      refresh();
+    },
+  });
+  const editItem = useMutation({
+    mutationFn: ({ itemId, text }: { itemId: string; text: string }) =>
+      api.updateChecklistItem(itemId, { text }),
+    onSuccess: refresh,
+  });
+  const removeItem = useMutation({
+    mutationFn: (itemId: string) => api.deleteChecklistItem(itemId),
+    onSuccess: refresh,
+  });
+  const removeList = useMutation({
+    mutationFn: () => api.deleteChecklist(detail.id),
+    onSuccess: onDeleted,
+  });
+
+  /**
+   * Reorder by swapping the two items' stored positions, rather than
+   * renumbering the whole list — a 70-mission list would otherwise be 70
+   * requests per nudge. Imported lists always have distinct positions.
+   */
+  const move = useMutation({
+    mutationFn: async ({ index, delta }: { index: number; delta: -1 | 1 }) => {
+      const a = items[index];
+      const b = items[index + delta];
+      if (!a || !b || a.position === b.position) return;
+      await api.updateChecklistItem(a.id, { position: b.position });
+      await api.updateChecklistItem(b.id, { position: a.position });
+    },
+    onSuccess: refresh,
+  });
+
+  return (
+    <div className="rounded-lg border border-indigo-900/60 bg-zinc-900 p-3">
+      <label className="block text-xs text-zinc-500">
+        List name
+        <input
+          value={title}
+          onChange={(ev) => setTitle(ev.target.value)}
+          onBlur={() => {
+            const next = title.trim();
+            if (next && next !== detail.title) rename.mutate(next);
+            else if (!next) setTitle(detail.title);
+          }}
+          className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+        />
+      </label>
+
+      <div className="mt-3 max-h-96 overflow-y-auto">
+        {items.map((item, i) => (
+          <MissionRow
+            key={item.id}
+            index={i}
+            text={item.text}
+            done={!!item.completedAt}
+            canMoveUp={i > 0}
+            canMoveDown={i < items.length - 1}
+            onSave={(text) => editItem.mutate({ itemId: item.id, text })}
+            onDelete={() => removeItem.mutate(item.id)}
+            onMove={(delta) => move.mutate({ index: i, delta })}
+          />
+        ))}
+        {items.length === 0 && (
+          <p className="py-3 text-center text-xs text-zinc-600">
+            No missions left — add one below, or delete the list.
+          </p>
+        )}
+      </div>
+
+      <form
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          if (newMission.trim()) addItem.mutate(newMission.trim());
+        }}
+        className="mt-2 flex gap-2 border-t border-zinc-800 pt-2"
+      >
+        <input
+          value={newMission}
+          onChange={(ev) => setNewMission(ev.target.value)}
+          placeholder="+ add a mission"
+          className="min-w-0 flex-1 rounded-lg border border-dashed border-zinc-700 bg-transparent px-3 py-1.5 text-sm outline-none placeholder:text-zinc-600 focus:border-indigo-500"
+        />
+        {newMission.trim() && (
+          <button
+            type="submit"
+            disabled={addItem.isPending}
+            className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold hover:bg-indigo-500"
+          >
+            Add
+          </button>
+        )}
+      </form>
+
+      <div className="mt-3 flex items-center justify-between border-t border-zinc-800/60 pt-2">
+        <span className="text-xs text-zinc-600">
+          {items.length} missions · edits update the time estimate
+        </span>
+        <button
+          onClick={() => {
+            if (
+              confirm(
+                `Delete the mission list "${detail.title}"? Your ticked-off progress goes with it.`,
+              )
+            ) {
+              removeList.mutate();
+            }
+          }}
+          className="text-xs text-zinc-500 hover:text-red-400"
+        >
+          Delete list
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** One editable row. Text commits on blur so every keystroke isn't a request. */
+function MissionRow({
+  index,
+  text,
+  done,
+  canMoveUp,
+  canMoveDown,
+  onSave,
+  onDelete,
+  onMove,
+}: {
+  index: number;
+  text: string;
+  done: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onSave: (text: string) => void;
+  onDelete: () => void;
+  onMove: (delta: -1 | 1) => void;
+}) {
+  const [draft, setDraft] = useState(text);
+  // pick up edits made elsewhere (reorder refetches the list)
+  const [lastText, setLastText] = useState(text);
+  if (text !== lastText) {
+    setLastText(text);
+    setDraft(text);
+  }
+
+  const commit = () => {
+    const next = draft.trim();
+    if (!next) return setDraft(text); // empty isn't a rename, it's a mistake
+    if (next !== text) onSave(next);
+  };
+
+  return (
+    <div className="group flex items-center gap-1 py-0.5">
+      <span className="w-6 shrink-0 text-right text-xs text-zinc-600">{index + 1}.</span>
+      <input
+        value={draft}
+        onChange={(ev) => setDraft(ev.target.value)}
+        onBlur={commit}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") ev.currentTarget.blur();
+          if (ev.key === "Escape") setDraft(text);
+        }}
+        title={done ? "Already ticked off" : undefined}
+        className={`min-w-0 flex-1 rounded border border-transparent bg-transparent px-1.5 py-0.5 text-sm outline-none hover:border-zinc-700 focus:border-indigo-500 ${
+          done ? "text-zinc-500" : "text-zinc-200"
+        }`}
+      />
+      <button
+        onClick={() => onMove(-1)}
+        disabled={!canMoveUp}
+        title="Move up"
+        className="shrink-0 px-1 text-xs text-zinc-600 hover:text-zinc-300 disabled:opacity-20 disabled:hover:text-zinc-600"
+      >
+        ▲
+      </button>
+      <button
+        onClick={() => onMove(1)}
+        disabled={!canMoveDown}
+        title="Move down"
+        className="shrink-0 px-1 text-xs text-zinc-600 hover:text-zinc-300 disabled:opacity-20 disabled:hover:text-zinc-600"
+      >
+        ▼
+      </button>
+      <button
+        onClick={onDelete}
+        title="Delete mission"
+        className="shrink-0 px-1 text-xs text-zinc-600 hover:text-red-400"
+      >
+        ✕
+      </button>
     </div>
   );
 }
