@@ -27,12 +27,22 @@ export const USER_ROLES = ["admin", "user"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 /**
- * Checklist flavour. 'missions' lists are the ordered main-story beats
- * (missions/chapters/episodes) and are what the time-remaining estimate
- * divides up; 'completion' is the free-form collectibles/endings kind.
+ * Checklist flavour.
+ *  - 'missions'     — ordered main-story beats, optionally grouped into
+ *                     chapters. The only kind the time estimate divides up.
+ *  - 'side_quests'  — optional content, tracked but deliberately untimed:
+ *                     how much side content you do is up to you, so pinning
+ *                     an estimate to it would be inventing a number.
+ *  - 'completion'   — free-form collectibles/endings lists.
  */
-export const CHECKLIST_KINDS = ["completion", "missions"] as const;
+export const CHECKLIST_KINDS = ["completion", "missions", "side_quests"] as const;
 export type ChecklistKind = (typeof CHECKLIST_KINDS)[number];
+
+/** Lists shown on the Progress tab, in order, with their headings. */
+export const MISSION_LIST_KINDS = [
+  { kind: "missions" as const, label: "Main story", timed: true },
+  { kind: "side_quests" as const, label: "Side quests", timed: false },
+];
 
 /** Which how-long-to-beat figure the remaining-time estimate is based on. */
 export const PROGRESS_BASES = ["main", "main_extra", "completionist"] as const;

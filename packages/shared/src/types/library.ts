@@ -313,6 +313,8 @@ export interface ImportMissionsInput {
   title: string;
   missions: string[];
   sourceUrl?: string | null;
+  /** defaults to 'missions' (the timed main-story list) */
+  kind?: Extract<ChecklistKind, "missions" | "side_quests">;
 }
 
 /** Time-remaining estimate for one library entry. */

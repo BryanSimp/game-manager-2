@@ -215,21 +215,28 @@ function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string 
   });
 
   const p = progress.data;
-  if (!p || p.total === 0) return null;
-  const missionList = lists.data?.mine.find((c) => c.id === p.checklistId);
-  const remaining = formatHours(p.remainingSeconds);
+  const missionList = lists.data?.mine.find((c) => c.kind === "missions");
+  // side quests are tracked but untimed, so they show up even with no estimate
+  const sideList = lists.data?.mine.find((c) => c.kind === "side_quests");
+  if (!missionList && !sideList) return null;
+  const remaining = p ? formatHours(p.remainingSeconds) : null;
 
   return (
     <>
       <Text style={styles.section}>Progress</Text>
-      <Text style={styles.achievementCount}>
-        {remaining ? `${remaining} left · ` : ""}
-        {p.done}/{p.total} missions ({p.percent}%)
-      </Text>
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${p.percent}%` }]} />
-      </View>
+      {p && p.total > 0 && (
+        <>
+          <Text style={styles.achievementCount}>
+            {remaining ? `${remaining} left · ` : ""}
+            {p.done}/{p.total} missions ({p.percent}%)
+          </Text>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${p.percent}%` }]} />
+          </View>
+        </>
+      )}
       {missionList && <ChecklistCard summary={missionList} gameId={gameId} />}
+      {sideList && <ChecklistCard summary={sideList} gameId={gameId} />}
     </>
   );
 }
