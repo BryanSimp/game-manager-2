@@ -1,4 +1,10 @@
-import type { GameStatus, OwnershipFormat, PlatformFamily } from "../constants.js";
+import type {
+  ChecklistKind,
+  GameStatus,
+  OwnershipFormat,
+  PlatformFamily,
+  ProgressBasis,
+} from "../constants.js";
 
 export interface GameSummary {
   id: string;
@@ -38,6 +44,8 @@ export interface LibraryEntry {
   rating: number | null;
   notes: string | null;
   ttbEnabled: boolean;
+  /** which how-long-to-beat figure the remaining-time estimate divides up */
+  progressBasis: ProgressBasis;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
@@ -83,6 +91,7 @@ export interface UpdateEntryInput {
   rating?: number | null;
   notes?: string | null;
   ttbEnabled?: boolean;
+  progressBasis?: ProgressBasis;
 }
 
 export interface BulkAddItem {
@@ -221,7 +230,10 @@ export interface CollectionLayoutInput {
 export interface ChecklistSummary {
   id: string;
   title: string;
+  kind: ChecklistKind;
   isPublic: boolean;
+  /** wiki page a scraped mission list came from — attribution, CC-BY-SA */
+  sourceUrl: string | null;
   /** author display name — set on public templates from other users */
   authorName: string | null;
   mine: boolean;
@@ -241,7 +253,9 @@ export interface ChecklistDetail {
   id: string;
   gameId: string;
   title: string;
+  kind: ChecklistKind;
   isPublic: boolean;
+  sourceUrl: string | null;
   mine: boolean;
   authorName: string | null;
   items: ChecklistItemView[];
@@ -250,6 +264,52 @@ export interface ChecklistDetail {
 export interface GameChecklists {
   mine: ChecklistSummary[];
   public: ChecklistSummary[];
+}
+
+// ---- mission progress + time remaining ----
+
+/** One wiki page that looks like it holds a mission/chapter list. */
+export interface MissionSourceCandidate {
+  wikiName: string;
+  /** e.g. "metalgear.fandom.com" */
+  domain: string;
+  pageTitle: string;
+  url: string;
+}
+
+/**
+ * A parsed mission list, returned for review. Nothing is saved until the
+ * user confirms — wiki parsing is heuristic and picks up stray rows.
+ */
+export interface MissionSuggestion {
+  sourceUrl: string;
+  wikiName: string;
+  pageTitle: string;
+  /** heading the list was pulled from, e.g. "Main missions" */
+  sectionTitle: string | null;
+  missions: string[];
+  /** other pages worth trying if this one parsed badly */
+  alternatives: MissionSourceCandidate[];
+}
+
+export interface ImportMissionsInput {
+  title: string;
+  missions: string[];
+  sourceUrl?: string | null;
+}
+
+/** Time-remaining estimate for one library entry. */
+export interface GameProgress {
+  basis: ProgressBasis;
+  /** the mission checklist driving the estimate, if any */
+  checklistId: string | null;
+  checklistTitle: string | null;
+  total: number;
+  done: number;
+  percent: number;
+  totalSeconds: number | null;
+  perItemSeconds: number | null;
+  remainingSeconds: number | null;
 }
 
 // ---- Steam (Phase 8) ----

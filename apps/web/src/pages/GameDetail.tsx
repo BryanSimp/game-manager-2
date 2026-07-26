@@ -12,10 +12,16 @@ import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { StarRating } from "../components/StarRating.js";
 import { BoxViewer3D } from "../components/BoxViewer3D.js";
-import { ChecklistPanel } from "../components/ChecklistPanel.js";
-import { AchievementsPanel } from "../components/AchievementsPanel.js";
+import { ProgressPanel } from "../components/ProgressPanel.js";
 import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
+
+type Tab = "overview" | "progress";
+
+const TABS: Array<{ key: Tab; label: string }> = [
+  { key: "overview", label: "Overview" },
+  { key: "progress", label: "Progress" },
+];
 
 const FAMILY_LABELS: Record<string, string> = {
   nintendo: "Nintendo",
@@ -40,6 +46,7 @@ export function GameDetailPage() {
   const [notes, setNotes] = useState("");
   const [notesDirty, setNotesDirty] = useState(false);
   const [boxPlatform, setBoxPlatform] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("overview");
   useEffect(() => {
     if (entry.data && !notesDirty) setNotes(entry.data.notes ?? "");
   }, [entry.data, notesDirty]);
@@ -215,6 +222,25 @@ export function GameDetailPage() {
             <p className="mt-1 text-sm text-zinc-500">Released {e.game.releaseDate}</p>
           )}
 
+          <div className="mt-4 flex gap-1 border-b border-zinc-800">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+                  tab === t.key
+                    ? "border-indigo-500 text-indigo-300"
+                    : "border-transparent text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {tab === "progress" && <ProgressPanel entry={e} />}
+
+          <div className={tab === "overview" ? "" : "hidden"}>
           <div className="mt-4 flex flex-wrap gap-2">
             {GAME_STATUSES.map((s: GameStatus) => {
               const chip = statusChip(s, prefs);
@@ -362,8 +388,7 @@ export function GameDetailPage() {
             )}
           </div>
 
-          <AchievementsPanel entryId={id} />
-          <ChecklistPanel gameId={e.game.id} />
+          </div>
 
           <div className="mt-10 border-t border-zinc-800 pt-4">
             <button

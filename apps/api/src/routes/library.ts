@@ -1,8 +1,14 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { GAME_STATUSES, OWNERSHIP_FORMATS } from "@gm/shared";
+import {
+  GAME_STATUSES,
+  OWNERSHIP_FORMATS,
+  PROGRESS_BASES,
+  estimateProgress,
+  ttbForBasis,
+} from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { createManualGame, upsertGameFromIgdb } from "../services/catalog.js";
@@ -25,6 +31,7 @@ const updateSchema = z.object({
   rating: z.number().min(0.5).max(5).multipleOf(0.5).nullable().optional(),
   notes: z.string().max(10_000).nullable().optional(),
   ttbEnabled: z.boolean().optional(),
+  progressBasis: z.enum(PROGRESS_BASES).optional(),
 });
 
 const platformsSchema = z.object({
@@ -161,6 +168,7 @@ function entryToJson(
     rating: entry.rating ? Number(entry.rating) : null,
     notes: entry.notes,
     ttbEnabled: entry.ttbEnabled,
+    progressBasis: entry.progressBasis,
     startedAt: entry.startedAt,
     finishedAt: entry.finishedAt,
     createdAt: entry.createdAt,
@@ -290,6 +298,68 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     );
   });
 
+  /**
+   * Time-remaining estimate: the user's mission checklist for this game,
+   * with the chosen how-long-to-beat figure spread across its missions.
+   */
+  app.get<{ Params: { id: string } }>("/api/library/:id/progress", async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return;
+    const [row] = await db
+      .select()
+      .from(schema.userGames)
+      .innerJoin(schema.games, eq(schema.userGames.gameId, schema.games.id))
+      .where(and(eq(schema.userGames.id, request.params.id), eq(schema.userGames.userId, user.id)));
+    if (!row) return reply.status(404).send({ message: "Not found" });
+
+    const basis = row.user_games.progressBasis;
+    const totalSeconds = ttbForBasis(row.games, basis);
+
+    // the user's own mission list for this game — oldest first, so adding a
+    // second one doesn't silently move the estimate
+    const [list] = await db
+      .select({
+        id: schema.checklistTemplates.id,
+        title: schema.checklistTemplates.title,
+        total: sql<number>`count(${schema.checklistItems.id})::int`,
+        done: sql<number>`count(${schema.userChecklistItems.userId})::int`,
+      })
+      .from(schema.checklistTemplates)
+      .leftJoin(
+        schema.checklistItems,
+        eq(schema.checklistItems.templateId, schema.checklistTemplates.id),
+      )
+      .leftJoin(
+        schema.userChecklistItems,
+        and(
+          eq(schema.userChecklistItems.itemId, schema.checklistItems.id),
+          eq(schema.userChecklistItems.userId, user.id),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.checklistTemplates.gameId, row.games.id),
+          eq(schema.checklistTemplates.authorUserId, user.id),
+          eq(schema.checklistTemplates.kind, "missions"),
+        ),
+      )
+      .groupBy(schema.checklistTemplates.id, schema.checklistTemplates.createdAt)
+      .orderBy(asc(schema.checklistTemplates.createdAt))
+      .limit(1);
+
+    const estimate = estimateProgress({
+      total: list?.total ?? 0,
+      done: list?.done ?? 0,
+      totalSeconds,
+    });
+    return {
+      basis,
+      checklistId: list?.id ?? null,
+      checklistTitle: list?.title ?? null,
+      ...estimate,
+    };
+  });
+
   app.patch<{ Params: { id: string } }>("/api/library/:id", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
@@ -304,7 +374,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!existing) return reply.status(404).send({ message: "Not found" });
 
     const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
-    const { status, rating, notes, ttbEnabled } = parsed.data;
+    const { status, rating, notes, ttbEnabled, progressBasis } = parsed.data;
     if (status !== undefined) {
       patch.status = status;
       // auto-stamp progress dates on first transition
@@ -314,6 +384,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (rating !== undefined) patch.rating = rating === null ? null : String(rating);
     if (notes !== undefined) patch.notes = notes;
     if (ttbEnabled !== undefined) patch.ttbEnabled = ttbEnabled;
+    if (progressBasis !== undefined) patch.progressBasis = progressBasis;
 
     await db.update(schema.userGames).set(patch).where(eq(schema.userGames.id, existing.id));
     return { ok: true };

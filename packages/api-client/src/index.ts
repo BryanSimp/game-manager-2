@@ -5,8 +5,12 @@ import type {
   BulkAddItem,
   BulkAddResult,
   ChecklistDetail,
+  ChecklistKind,
   GameAchievements,
   GameChecklists,
+  GameProgress,
+  ImportMissionsInput,
+  MissionSuggestion,
   SteamStatus,
   CollectionDetail,
   CollectionLayoutInput,
@@ -294,11 +298,40 @@ export class ApiClient {
     return this.request<GameChecklists>(`/api/games/${gameId}/checklists`);
   }
 
-  createChecklist(gameId: string, title: string): Promise<{ id: string }> {
+  createChecklist(
+    gameId: string,
+    title: string,
+    kind: ChecklistKind = "completion",
+  ): Promise<{ id: string }> {
     return this.request(`/api/games/${gameId}/checklists`, {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, kind }),
     });
+  }
+
+  // ---- mission lists + time remaining ----
+
+  /** Parse a mission list off a wiki for review. Saves nothing. */
+  suggestMissions(gameId: string, url?: string): Promise<MissionSuggestion> {
+    return this.request<MissionSuggestion>(`/api/games/${gameId}/missions/suggest`, {
+      method: "POST",
+      body: JSON.stringify(url ? { url } : {}),
+    });
+  }
+
+  /** Save a reviewed mission list as a 'missions' checklist. */
+  importMissions(
+    gameId: string,
+    input: ImportMissionsInput,
+  ): Promise<{ id: string; count: number }> {
+    return this.request(`/api/games/${gameId}/missions`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  getEntryProgress(entryId: string): Promise<GameProgress> {
+    return this.request<GameProgress>(`/api/library/${entryId}/progress`);
   }
 
   getChecklist(id: string): Promise<ChecklistDetail> {

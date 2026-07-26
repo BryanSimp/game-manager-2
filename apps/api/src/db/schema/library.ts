@@ -11,7 +11,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
-import { gameStatusEnum, ownershipFormatEnum } from "./enums.js";
+import { gameStatusEnum, ownershipFormatEnum, progressBasisEnum } from "./enums.js";
 import { games, images, platforms } from "./catalog.js";
 import { user } from "./auth.js";
 
@@ -32,6 +32,8 @@ export const userGames = pgTable(
     customCoverImageId: uuid("custom_cover_image_id").references(() => images.id),
     // false = "endless game", excluded from backlog-time math
     ttbEnabled: boolean("ttb_enabled").notNull().default(true),
+    // which how-long-to-beat figure the mission time estimate divides up
+    progressBasis: progressBasisEnum("progress_basis").notNull().default("main"),
     // synced from Steam (GetOwnedGames playtime_forever)
     steamPlaytimeMinutes: integer("steam_playtime_minutes"),
     startedAt: timestamp("started_at", { withTimezone: true }),

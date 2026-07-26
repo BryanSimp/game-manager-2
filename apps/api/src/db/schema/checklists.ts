@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { games } from "./catalog.js";
 import { user } from "./auth.js";
+import { checklistKindEnum } from "./enums.js";
 
 /**
  * Completionist checklists (missions, collectibles, endings). No public API
@@ -28,6 +29,11 @@ export const checklistTemplates = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
+    // 'missions' lists are ordered story beats and drive the time-remaining
+    // estimate; 'completion' is the original free-form collectibles kind
+    kind: checklistKindEnum("kind").notNull().default("completion"),
+    // wiki page a scraped mission list came from (CC-BY-SA attribution)
+    sourceUrl: text("source_url"),
     isPublic: boolean("is_public").notNull().default(false),
     // provenance when adopted from someone else's public template
     adoptedFromId: uuid("adopted_from_id").references(

@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { normalizeTtb } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import {
   getIgdbGame,
@@ -23,6 +24,16 @@ export async function upsertGameFromIgdb(igdbId: number): Promise<string> {
   if (!igdb) throw new Error(`IGDB game ${igdbId} not found (or IGDB not configured)`);
 
   const ttb = await getIgdbTimeToBeat(igdbId);
+  // IGDB names these by play style, not by our column names: `hastily` is
+  // rushing the critical path (our main story), `normally` is a regular
+  // playthrough with some side content (our main + extras). Mapping them the
+  // other way round is what made Metal Gear Solid V report a 101h main story
+  // and a 49h main+extras. normalizeTtb is the belt-and-braces guard.
+  const ttbValues = normalizeTtb({
+    ttbMain: ttb?.hastily ?? null,
+    ttbMainExtra: ttb?.normally ?? null,
+    ttbCompletionist: ttb?.completely ?? null,
+  });
   const coverUrl = igdb.cover ? igdbCoverUrl(igdb.cover.image_id) : null;
 
   const [game] = await db
@@ -35,9 +46,7 @@ export async function upsertGameFromIgdb(igdbId: number): Promise<string> {
         ? new Date(igdb.first_release_date * 1000).toISOString().slice(0, 10)
         : null,
       coverUrl,
-      ttbMain: ttb?.normally ?? null,
-      ttbMainExtra: ttb?.hastily ?? null,
-      ttbCompletionist: ttb?.completely ?? null,
+      ...ttbValues,
       ttbSource: ttb ? "igdb" : null,
     })
     .onConflictDoUpdate({

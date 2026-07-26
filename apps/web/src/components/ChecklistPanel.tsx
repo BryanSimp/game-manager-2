@@ -39,12 +39,16 @@ export function ChecklistPanel({ gameId }: { gameId: string }) {
   const data = lists.data;
   if (!data) return null;
 
+  // mission lists are rendered by ProgressPanel with their time estimate
+  const mine = data.mine.filter((c) => c.kind === "completion");
+  const shared = data.public.filter((c) => c.kind === "completion");
+
   return (
     <div className="mt-6 max-w-2xl">
       <p className="mb-2 text-sm font-semibold text-zinc-300">Completionist checklists</p>
 
       <div className="space-y-2">
-        {data.mine.map((c) => (
+        {mine.map((c) => (
           <ChecklistCard
             key={c.id}
             summary={c}
@@ -78,12 +82,12 @@ export function ChecklistPanel({ gameId }: { gameId: string }) {
           )}
         </form>
 
-        {data.public.length > 0 && (
+        {shared.length > 0 && (
           <div className="mt-3">
             <p className="mb-1 text-xs uppercase tracking-wide text-zinc-600">
               Shared by other players
             </p>
-            {data.public.map((c) => (
+            {shared.map((c) => (
               <div
                 key={c.id}
                 className="mb-1.5 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
