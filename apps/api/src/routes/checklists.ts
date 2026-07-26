@@ -26,6 +26,8 @@ const importMissionsSchema = z.object({
   title: z.string().min(1).max(200),
   missions: z.array(z.string().min(1).max(500)).min(1).max(500),
   sourceUrl: z.string().url().max(500).nullable().optional(),
+  // only the main-story list feeds the time estimate; side quests are untimed
+  kind: z.enum(["missions", "side_quests"]).default("missions"),
 });
 const itemPatchSchema = z.object({
   text: z.string().min(1).max(500).optional(),
@@ -209,7 +211,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
           gameId: game.id,
           authorUserId: user.id,
           title: parsed.data.title.trim(),
-          kind: "missions",
+          kind: parsed.data.kind,
           sourceUrl: parsed.data.sourceUrl?.trim() || null,
         })
         .returning();
