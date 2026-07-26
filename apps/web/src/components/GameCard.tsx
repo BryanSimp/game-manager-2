@@ -68,8 +68,17 @@ export function GameCard({
           </span>
         )}
         {!selectable && showTime && ttb && entry.ttbEnabled && (
-          <span className="absolute right-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-xs text-zinc-200">
-            {ttb}
+          <span
+            title={
+              estimating
+                ? `~${ttb} left · ${entry.missionsDone}/${entry.missionsTotal} missions done`
+                : "How long to beat — main story"
+            }
+            className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-xs ${
+              estimating ? "bg-indigo-600/80 text-white" : "bg-black/70 text-zinc-200"
+            }`}
+          >
+            {estimating ? `~${ttb}` : ttb}
           </span>
         )}
         {entry.tags.length > 0 && (

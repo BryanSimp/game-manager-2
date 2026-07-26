@@ -32,6 +32,7 @@ const updateSchema = z.object({
   notes: z.string().max(10_000).nullable().optional(),
   ttbEnabled: z.boolean().optional(),
   completed100: z.boolean().optional(),
+  progressBasis: z.enum(PROGRESS_BASES).optional(),
 });
 
 const bulkUpdateSchema = z
@@ -238,6 +239,10 @@ function entryToJson(
     notes: entry.notes,
     ttbEnabled: entry.ttbEnabled,
     completed100: entry.completed100,
+    progressBasis: entry.progressBasis,
+    estimatedRemainingSeconds: estimate.remainingSeconds,
+    missionsTotal: estimate.total,
+    missionsDone: estimate.done,
     startedAt: entry.startedAt,
     finishedAt: entry.finishedAt,
     createdAt: entry.createdAt,
@@ -447,7 +452,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!existing) return reply.status(404).send({ message: "Not found" });
 
     const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
-    const { status, rating, notes, ttbEnabled, completed100 } = parsed.data;
+    const { status, rating, notes, ttbEnabled, completed100, progressBasis } = parsed.data;
     if (status !== undefined) {
       patch.status = status;
       // auto-stamp progress dates on first transition
@@ -458,6 +463,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (notes !== undefined) patch.notes = notes;
     if (ttbEnabled !== undefined) patch.ttbEnabled = ttbEnabled;
     if (completed100 !== undefined) patch.completed100 = completed100;
+    if (progressBasis !== undefined) patch.progressBasis = progressBasis;
 
     await db.update(schema.userGames).set(patch).where(eq(schema.userGames.id, existing.id));
     return { ok: true };
