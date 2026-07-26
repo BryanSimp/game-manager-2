@@ -81,7 +81,9 @@ pnpm --filter <pkg> typecheck       # per-package tsc
 ```
 
 Migrations are plain SQL in `apps/api/drizzle/`, applied by `src/db/migrate.ts`
-(programmatic, also runs on Docker boot). Never use `db push`.
+(programmatic, also runs on Docker boot **along with the idempotent platform
+seed** — production once shipped with an empty platforms table because seeding
+was dev-only). Never use `db push`.
 
 ## Environment gotchas (this dev machine)
 

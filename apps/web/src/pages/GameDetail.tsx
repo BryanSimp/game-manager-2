@@ -234,26 +234,7 @@ export function GameDetailPage() {
             <p className="mt-1 text-sm text-zinc-500">Released {e.game.releaseDate}</p>
           )}
 
-          <div className="mt-4 flex gap-1 border-b border-zinc-800">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
-                  tab === t.key
-                    ? "border-indigo-500 text-indigo-300"
-                    : "border-transparent text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {tab === "progress" && <ProgressPanel entry={e} />}
-
-          <div className={tab === "overview" ? "" : "hidden"}>
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             {GAME_STATUSES.map((s: GameStatus) => {
               const chip = statusChip(s, prefs);
               return (
@@ -271,6 +252,19 @@ export function GameDetailPage() {
                 </button>
               );
             })}
+            {e.status === "finished" && (
+              <button
+                onClick={() => update.mutate({ completed100: !e.completed100 })}
+                title="Everything done — collectibles, endings, the lot"
+                className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
+                  e.completed100
+                    ? "border-amber-500 bg-amber-950 text-amber-300"
+                    : "border-dashed border-zinc-700 text-zinc-500 hover:border-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                💯 100% completed
+              </button>
+            )}
           </div>
 
           <div className="mt-4">

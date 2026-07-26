@@ -13,7 +13,7 @@ import {
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ImportCandidate, ImportItem } from "@gm/shared";
+import { GAME_STATUSES, type GameStatus, type ImportCandidate, type ImportItem } from "@gm/shared";
 import { api } from "@/lib/api";
 
 interface ReviewItem {
@@ -24,7 +24,16 @@ interface ReviewItem {
   selected: ImportCandidate | null;
   confidence: number | null;
   skipped: boolean;
+  status: GameStatus;
 }
+
+const STATUS_CHIP: Record<GameStatus, { label: string; color: string }> = {
+  wishlist: { label: "Wishlist", color: "#38bdf8" },
+  backlog: { label: "Backlog", color: "#fbbf24" },
+  playing: { label: "Playing", color: "#818cf8" },
+  finished: { label: "Finished", color: "#34d399" },
+  dropped: { label: "Dropped", color: "#fb7185" },
+};
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Queued…",
@@ -66,6 +75,7 @@ export default function ImportScreen() {
           selected: it.candidates[0] ?? null,
           confidence: it.confidence,
           skipped: false,
+          status: "backlog" as const,
         })),
       );
       setStage("review");
@@ -100,8 +110,8 @@ export default function ImportScreen() {
           .filter((it) => !it.skipped)
           .map((it) =>
             it.selected?.igdbId
-              ? { igdbId: it.selected.igdbId }
-              : { title: it.selected?.title ?? it.cleaned },
+              ? { igdbId: it.selected.igdbId, status: it.status }
+              : { title: it.selected?.title ?? it.cleaned, status: it.status },
           ),
         ownPlatformId ? [{ platformId: ownPlatformId, format: ownFormat }] : undefined,
       );
@@ -195,6 +205,29 @@ export default function ImportScreen() {
                   {item.selected
                     ? `→ ${item.selected.title}${item.selected.releaseYear ? ` (${item.selected.releaseYear})` : ""}`
                     : `→ "${item.cleaned}" (manual)`}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.statusChip, { borderColor: `${STATUS_CHIP[item.status].color}66` }]}
+                onPress={() =>
+                  // tap cycles wishlist → backlog → playing → finished → dropped
+                  setItems((prev) =>
+                    prev.map((it) =>
+                      it.id === item.id
+                        ? {
+                            ...it,
+                            status:
+                              GAME_STATUSES[
+                                (GAME_STATUSES.indexOf(it.status) + 1) % GAME_STATUSES.length
+                              ]!,
+                          }
+                        : it,
+                    ),
+                  )
+                }
+              >
+                <Text style={[styles.statusChipText, { color: STATUS_CHIP[item.status].color }]}>
+                  {STATUS_CHIP[item.status].label}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -358,6 +391,13 @@ const styles = StyleSheet.create({
   cover: { width: 36, height: 48, borderRadius: 4, backgroundColor: "#27272a", overflow: "hidden" },
   raw: { color: "#71717a", fontSize: 11 },
   matched: { color: "#fafafa", fontSize: 14, fontWeight: "500", marginTop: 2 },
+  statusChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  statusChipText: { fontSize: 11, fontWeight: "600" },
   skipBtn: {
     width: 30,
     height: 30,

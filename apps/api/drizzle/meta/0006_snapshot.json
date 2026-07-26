@@ -1,5 +1,5 @@
 {
-  "id": "c7c2db55-362c-4286-ac24-bfcb2841b6ce",
+  "id": "0ae11205-62c9-4ff4-9438-c059a5f808a8",
   "prevId": "8ab549b9-8d80-4e7b-bba1-236d94e5dea0",
   "version": "7",
   "dialect": "postgresql",
@@ -1176,19 +1176,18 @@
           "notNull": true,
           "default": true
         },
-        "progress_basis": {
-          "name": "progress_basis",
-          "type": "progress_basis",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'main'"
-        },
         "steam_playtime_minutes": {
           "name": "steam_playtime_minutes",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
+        },
+        "completed_100": {
+          "name": "completed_100",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "started_at": {
           "name": "started_at",
@@ -1925,20 +1924,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "kind": {
-          "name": "kind",
-          "type": "checklist_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'completion'"
-        },
-        "source_url": {
-          "name": "source_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "is_public": {
           "name": "is_public",
           "type": "boolean",
@@ -2348,14 +2333,6 @@
     }
   },
   "enums": {
-    "public.checklist_kind": {
-      "name": "checklist_kind",
-      "schema": "public",
-      "values": [
-        "completion",
-        "missions"
-      ]
-    },
     "public.game_status": {
       "name": "game_status",
       "schema": "public",
@@ -2395,15 +2372,6 @@
         "pc",
         "sega",
         "other"
-      ]
-    },
-    "public.progress_basis": {
-      "name": "progress_basis",
-      "schema": "public",
-      "values": [
-        "main",
-        "main_extra",
-        "completionist"
       ]
     },
     "public.ttb_source": {

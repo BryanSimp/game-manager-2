@@ -5,6 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# one build at a time, newest commit wins — without this, delayed runs (e.g.
+# after a GitHub outage) can finish out of order and an older commit's image
+# ends up as :latest
+concurrency:
+  group: docker-images
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,6 +27,8 @@ jobs:
             dockerfile: apps/api/Dockerfile
           - name: gm2-web
             dockerfile: apps/web/Dockerfile
+          - name: gm2-mobile
+            dockerfile: apps/mobile/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +57,7 @@ jobs:
             TAGS="$TAGS,docker.io/$DOCKERHUB_USERNAME/${{ matrix.name }}:latest"
           fi
           echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -56,5 +66,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            APP_VERSION=${{ steps.tags.outputs.short_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

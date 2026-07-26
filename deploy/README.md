@@ -1,7 +1,8 @@
 # Deploying Game Manager 2 (Ubuntu + Portainer + Traefik)
 
-The flow: **push to main → GitHub Actions builds `ghcr.io/bryansimp/gm2-api` and
-`gm2-web` → Watchtower on the server pulls the new images within 5 minutes.**
+The flow: **push to main → GitHub Actions builds `ghcr.io/bryansimp/gm2-api`,
+`gm2-web`, and `gm2-mobile` → Watchtower on the server pulls the new images
+within 5 minutes.**
 After the first-time setup below, deploys are fully automatic.
 
 ## One-time server prep
@@ -18,6 +19,23 @@ After the first-time setup below, deploys are fully automatic.
 
    This stores credentials in `/root/.docker/config.json` (run as root/sudo),
    which both Docker pulls and the Watchtower container use.
+
+   **Snap-docker gotcha (this server):** Docker is snap-installed, so
+   `sudo docker login` writes to `/root/snap/docker/<rev>/.docker/config.json`
+   instead — but the stack mounts `/root/.docker/config.json` into Watchtower.
+   Copy it into place *before* (re)deploying the stack:
+
+   ```bash
+   sudo mkdir -p /root/.docker
+   sudo cp /root/snap/docker/*/.docker/config.json /root/.docker/config.json
+   ```
+
+   Order matters: if the file is missing when a container with that mount
+   starts, Docker silently creates the path as an **empty directory** and
+   Watchtower fails every pull with `/config.json: is a directory`. If that
+   happens: remove the watchtower container, `sudo rm -rf` the directory,
+   copy the file, then redeploy. The copy is a static snapshot — after
+   rotating the PAT, redo both the login and the copy.
 
 2. **Portainer registry** (so Portainer's own image pulls work too):
    Portainer → Registries → Add registry → Custom →
@@ -44,6 +62,7 @@ stack editor:
 | `IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET` | optional — can be pasted into web Settings instead |
 | `STEAM_API_KEY` | optional — same, Settings UI works |
 | `ANTHROPIC_API_KEY` | optional — enables Claude-vision OCR for shelf photos |
+| `SERVER_LAN_IP` | the server's LAN IP (e.g. `192.168.68.60`) — advertised by the Expo bundler so phones can reach it |
 | `TZ` | `America/Chicago` |
 
 The API container applies DB migrations automatically on boot.
@@ -70,17 +89,44 @@ schema, different data model); rebuild the library via IGDB search, Steam
 import, or the OCR importer. A one-off v1→v2 data migration script is possible
 later if wanted — the volume backup keeps that option open.
 
+## Mobile app (Expo Go)
+
+The `mobile` service runs the Expo/Metro bundler in a container and serves the
+app to phones over the LAN — same API, same database, same accounts as the web
+app.
+
+- On the phone (same wifi as the server): **Expo Go → "Enter URL manually" →
+  `exp://<SERVER_LAN_IP>:8081`**. Sign in with the same account as the website.
+- The first load after a container (re)start compiles the bundle on the server —
+  expect a minute or two; subsequent loads are fast until the next restart.
+- The phone's Expo Go must match the project's **pinned SDK 54** — don't upgrade
+  the `expo` package without upgrading Expo Go, or vice versa.
+- Port 8081 is plain http on the LAN only (not routed through Traefik); the app
+  itself talks to the API over https like the web app does.
+- Watchtower auto-updates this container too, so merged mobile changes reach the
+  phone on the next app reload after the image updates.
+
 ## How auto-update works
 
 - `.github/workflows/docker.yml` builds+pushes both images on every push to
   `main` (≈3–5 min).
 - The `watchtower` service in the stack polls GHCR every 5 minutes for
   containers labeled `com.centurylinklabs.watchtower.enable=true` (only
-  gm2-api and gm2-web — it won't touch other containers on the server), pulls
-  new `:latest` images, restarts the containers, and prunes old images.
+  gm2-api, gm2-web, and gm2-mobile — it won't touch other containers on the
+  server), pulls new `:latest` images, restarts the containers, and prunes old
+  images.
 - Net effect: a push lands on games.brysimp.com in under ~10 minutes with no
   manual step. To skip auto-updates for a while, stop the watchtower container;
   manual update = Portainer → stack → "Pull and redeploy".
+- The web app shows the deployed build's short commit sha bottom-right once
+  signed in — compare it against the latest commit on `main` to confirm a
+  deploy actually landed.
+- If updates stop, check `docker logs --since 1h watchtower`. Known failure:
+  `client version 1.25 is too old` on every poll — watchtower's docker client
+  botches version negotiation against modern daemons; the stack pins
+  `DOCKER_API_VERSION: "1.44"` to prevent it. If the daemon ever rejects that
+  pin after an upgrade ("client version newer than server"), adjust it to a
+  version the daemon lists under `docker version`.
 
 ## Backups (v2)
 

@@ -81,6 +81,22 @@ services:
       - traefik.http.services.gm2-web.loadbalancer.server.port=80
       - com.centurylinklabs.watchtower.enable=true
 
+  # Expo Go host: Metro bundler serving the mobile app over the LAN.
+  # On the phone (same wifi): Expo Go → enter URL → exp://<SERVER_LAN_IP>:8081
+  # No Traefik — Expo Go talks plain http on the local network; the app itself
+  # calls the API at https://${GM_HOST} like everyone else.
+  mobile:
+    image: ghcr.io/bryansimp/gm2-mobile:latest
+    restart: unless-stopped
+    environment:
+      EXPO_PUBLIC_API_URL: https://${GM_HOST:-games.brysimp.com}
+      REACT_NATIVE_PACKAGER_HOSTNAME: ${SERVER_LAN_IP:?LAN IP of this server, e.g. 192.168.68.60}
+      TZ: ${TZ:-America/Chicago}
+    ports:
+      - "8081:8081"
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
   # Auto-deploy: polls GHCR every 5 minutes and restarts api/web when a new
   # :latest lands (pushed by CI on every push to main). Only touches
   # containers carrying the watchtower.enable label above.
@@ -91,6 +107,10 @@ services:
       WATCHTOWER_LABEL_ENABLE: "true"
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_POLL_INTERVAL: "300"
+      # watchtower's bundled docker client falls back to API 1.25 when
+      # negotiation fails, which modern daemons reject ("client version 1.25
+      # is too old") — pin a supported version explicitly
+      DOCKER_API_VERSION: "1.44"
       TZ: ${TZ:-America/Chicago}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

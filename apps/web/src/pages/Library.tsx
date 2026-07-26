@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { GAME_STATUSES, type GameStatus, type LibraryEntry } from "@gm/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { GAME_STATUSES, type BulkUpdateInput, type GameStatus, type LibraryEntry } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { GameCard } from "../components/GameCard.js";
@@ -47,13 +47,37 @@ function sortEntries(entries: LibraryEntry[], sort: SortKey): LibraryEntry[] {
 
 export function LibraryPage() {
   const prefs = usePreferences();
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<GameStatus | "all">("all");
+  const [only100, setOnly100] = useState(false);
   const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [tagFilter, setTagFilter] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("title");
   const [search, setSearch] = useState("");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const library = useQuery({ queryKey: ["library"], queryFn: () => api.getLibrary() });
+
+  const bulkUpdate = useMutation({
+    mutationFn: (patch: Omit<BulkUpdateInput, "ids">) =>
+      api.bulkUpdateEntries({ ids: [...selected], ...patch }),
+    onSuccess: () => {
+      setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ["library"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["shelf"] });
+    },
+  });
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   // filter options derived from what's actually in the library
   const { platformOptions, tagOptions } = useMemo(() => {
@@ -72,6 +96,7 @@ export function LibraryPage() {
   const entries = useMemo(() => {
     const filtered = (library.data ?? []).filter((e) => {
       if (statusFilter !== "all" && e.status !== statusFilter) return false;
+      if (statusFilter === "finished" && only100 && !e.completed100) return false;
       if (platformFilter !== "all" && !e.platforms.some((p) => p.platformId === platformFilter))
         return false;
       if (tagFilter !== "all" && !e.tags.some((t) => t.id === tagFilter)) return false;
@@ -79,7 +104,7 @@ export function LibraryPage() {
       return true;
     });
     return sortEntries(filtered, sort);
-  }, [library.data, statusFilter, platformFilter, tagFilter, search, sort]);
+  }, [library.data, statusFilter, only100, platformFilter, tagFilter, search, sort]);
 
   const counts = new Map<string, number>();
   for (const e of library.data ?? []) {
@@ -142,6 +167,19 @@ export function LibraryPage() {
             </option>
           ))}
         </select>
+        <button
+          onClick={() => {
+            setSelectMode(!selectMode);
+            setSelected(new Set());
+          }}
+          className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+            selectMode
+              ? "border-indigo-500 bg-indigo-600/20 text-indigo-200"
+              : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+          }`}
+        >
+          {selectMode ? "Done selecting" : "Select"}
+        </button>
       </div>
 
       <div className="mb-6 flex flex-wrap gap-2">
@@ -153,21 +191,87 @@ export function LibraryPage() {
         {GAME_STATUSES.map((s) => {
           const chip = statusChip(s, prefs);
           return (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(statusFilter === s ? "all" : s)}
-              className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
-                statusFilter === s
-                  ? chip.className
-                  : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
-              }`}
-              style={statusFilter === s ? chip.style : undefined}
-            >
-              {STATUS_META[s].label} ({counts.get(s) ?? 0})
-            </button>
+            <span key={s} className="inline-flex items-center gap-1">
+              <button
+                onClick={() => {
+                  setStatusFilter(statusFilter === s ? "all" : s);
+                  setOnly100(false);
+                }}
+                className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
+                  statusFilter === s
+                    ? chip.className
+                    : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+                }`}
+                style={statusFilter === s ? chip.style : undefined}
+              >
+                {STATUS_META[s].label} ({counts.get(s) ?? 0})
+              </button>
+              {s === "finished" && statusFilter === "finished" && (
+                <button
+                  onClick={() => setOnly100(!only100)}
+                  title="Only games marked 100% completed"
+                  className={`rounded-full border px-2.5 py-1 text-sm font-medium transition ${
+                    only100
+                      ? "border-amber-500 bg-amber-950 text-amber-300"
+                      : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+                  }`}
+                >
+                  💯 ({(library.data ?? []).filter((e) => e.status === "finished" && e.completed100).length})
+                </button>
+              )}
+            </span>
           );
         })}
       </div>
+
+      {selectMode && (
+        <div className="mb-6 flex flex-wrap items-center gap-2 rounded-xl border border-indigo-900 bg-indigo-950/40 px-4 py-3">
+          <span className="text-sm font-semibold text-indigo-200">
+            {selected.size} selected
+          </span>
+          <button
+            onClick={() => setSelected(new Set(entries.map((e) => e.id)))}
+            className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+          >
+            Select all shown
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+          >
+            Clear
+          </button>
+          <span className="mx-1 h-5 w-px bg-zinc-700" />
+          <span className="text-xs text-zinc-400">Set status:</span>
+          {GAME_STATUSES.map((s) => (
+            <button
+              key={s}
+              disabled={selected.size === 0 || bulkUpdate.isPending}
+              onClick={() => bulkUpdate.mutate({ status: s })}
+              className="rounded-full border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:border-zinc-500 hover:text-white disabled:opacity-40"
+            >
+              {STATUS_META[s].label}
+            </button>
+          ))}
+          <span className="mx-1 h-5 w-px bg-zinc-700" />
+          <button
+            disabled={selected.size === 0 || bulkUpdate.isPending}
+            onClick={() => bulkUpdate.mutate({ ttbEnabled: false })}
+            title="Exclude from backlog-time math (multiplayer / endless games)"
+            className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:border-zinc-500 hover:text-white disabled:opacity-40"
+          >
+            ∞ Mark endless
+          </button>
+          <button
+            disabled={selected.size === 0 || bulkUpdate.isPending}
+            onClick={() => bulkUpdate.mutate({ completed100: true })}
+            className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:border-zinc-500 hover:text-white disabled:opacity-40"
+          >
+            💯 Mark 100%
+          </button>
+          {bulkUpdate.isPending && <span className="text-xs text-zinc-400">Saving…</span>}
+        </div>
+      )}
 
       {library.isLoading && <p className="text-zinc-500">Loading library…</p>}
 
@@ -196,7 +300,13 @@ export function LibraryPage() {
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {entries.map((entry) => (
-          <GameCard key={entry.id} entry={entry} />
+          <GameCard
+            key={entry.id}
+            entry={entry}
+            selectable={selectMode}
+            selected={selected.has(entry.id)}
+            onToggleSelect={() => toggleSelected(entry.id)}
+          />
         ))}
       </div>
 

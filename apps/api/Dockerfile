@@ -26,5 +26,5 @@ WORKDIR /app/apps/api
 ENV NODE_ENV=production
 EXPOSE 3001
 
-# Apply migrations, then start the server
-CMD ["sh", "-c", "pnpm db:migrate && pnpm start"]
+# Apply migrations and the idempotent platform seed, then start the server
+CMD ["sh", "-c", "pnpm db:migrate && pnpm db:seed && pnpm start"]
