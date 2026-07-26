@@ -45,6 +45,16 @@ export interface LibraryEntry {
   notes: string | null;
   ttbEnabled: boolean;
   completed100: boolean;
+  /** which how-long-to-beat figure the remaining-time estimate divides up */
+  progressBasis: ProgressBasis;
+  /**
+   * Play time left, from the mission checklist. null when the game has no
+   * mission list or no time for the chosen basis — the library sort treats
+   * that as "unknown" rather than "zero".
+   */
+  estimatedRemainingSeconds: number | null;
+  missionsTotal: number;
+  missionsDone: number;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
@@ -91,6 +101,7 @@ export interface UpdateEntryInput {
   notes?: string | null;
   ttbEnabled?: boolean;
   completed100?: boolean;
+  progressBasis?: ProgressBasis;
 }
 
 export interface BulkUpdateInput {

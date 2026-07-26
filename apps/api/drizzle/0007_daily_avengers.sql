@@ -9,14 +9,14 @@ ALTER TABLE "checklist_templates" ADD COLUMN "source_url" text;--> statement-bre
 -- services/catalog.ts stored IGDB's `normally` (a full normal playthrough) as
 -- ttb_main and `hastily` (rushing the critical path) as ttb_main_extra, which
 -- is backwards -- Metal Gear Solid V read 101h main story / 49h main+extras.
--- The statements below are conditional and idempotent, so re-running them is
--- a no-op and manually-corrected rows are left alone.
 --
--- Sort the three figures ascending in one pass. Pairwise swaps are not
--- enough: fixing main+extras against completionist can re-invert it against
--- main. Nulls drop out and the remaining values shift left, so a game with
--- only two known figures lands them in main and main+extras -- the same rule
--- normalizeTtb() applies in packages/shared/src/progress.ts.
+-- Sort the three figures ascending in one pass. Pairwise swaps are not enough:
+-- fixing main+extras against completionist can re-invert it against main.
+-- Nulls drop out and the remaining values shift left, so a game with only two
+-- known figures lands them in main and main+extras -- the same rule
+-- normalizeTtb() applies in packages/shared/src/progress.ts. Conditional and
+-- idempotent, so re-running is a no-op and hand-corrected rows are untouched.
+--
 UPDATE "games" AS g
 SET "ttb_main" = s.sorted[1],
     "ttb_main_extra" = s.sorted[2],
