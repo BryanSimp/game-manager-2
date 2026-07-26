@@ -147,4 +147,7 @@ file to be provided for reference).
 - Time estimate divides the TTB figure evenly across missions — real missions vary
   a lot, and no source gives per-mission timings.
 - The Progress tab's estimate uses the *oldest* mission checklist for a game if
-  several exist; there's no picker.
+  several exist; there's no picker. `missionCountsByGame` in `routes/library.ts`
+  applies the same rule for the list payload — keep the two in step.
+- Mobile's library has no "Estimated shortest" sort (web-only), though
+  `LibraryEntry.estimatedRemainingSeconds` is available to it.

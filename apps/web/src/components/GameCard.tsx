@@ -7,7 +7,10 @@ import { StarRating } from "./StarRating.js";
 export function GameCard({ entry }: { entry: LibraryEntry }) {
   const prefs = usePreferences();
   const chip = statusChip(entry.status, prefs);
-  const ttb = formatHours(entry.game.ttbMain);
+  // once a game has a mission list, the badge counts down rather than showing
+  // the same full length whatever your progress
+  const estimating = entry.estimatedRemainingSeconds !== null;
+  const ttb = formatHours(entry.estimatedRemainingSeconds ?? entry.game.ttbMain);
   const showTime = prefs?.showTimeBadge ?? true;
   const showPlatforms = prefs?.showPlatformBadge ?? true;
 
@@ -37,8 +40,17 @@ export function GameCard({ entry }: { entry: LibraryEntry }) {
           {STATUS_META[entry.status].label}
         </span>
         {showTime && ttb && entry.ttbEnabled && (
-          <span className="absolute right-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-xs text-zinc-200">
-            {ttb}
+          <span
+            title={
+              estimating
+                ? `~${ttb} left · ${entry.missionsDone}/${entry.missionsTotal} missions done`
+                : "How long to beat — main story"
+            }
+            className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-xs ${
+              estimating ? "bg-indigo-600/80 text-white" : "bg-black/70 text-zinc-200"
+            }`}
+          >
+            {estimating ? `~${ttb}` : ttb}
           </span>
         )}
         {entry.tags.length > 0 && (

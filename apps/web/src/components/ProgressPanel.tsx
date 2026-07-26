@@ -141,6 +141,10 @@ function MissionSection({
     queryClient.invalidateQueries({ queryKey: ["progress", entryId] });
     queryClient.invalidateQueries({ queryKey: ["checklists", gameId] });
     if (checklistId) queryClient.invalidateQueries({ queryKey: ["checklist", checklistId] });
+    // the entry carries the estimate for the "how long to beat" card, and the
+    // library list sorts on it
+    queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
+    queryClient.invalidateQueries({ queryKey: ["library"] });
   };
 
   const suggest = useMutation({
