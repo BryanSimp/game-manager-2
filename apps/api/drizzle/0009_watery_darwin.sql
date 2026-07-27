@@ -1,0 +1,1 @@
+ALTER TABLE "checklist_templates" ADD COLUMN "sequential" boolean DEFAULT false NOT NULL;

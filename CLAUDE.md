@@ -154,10 +154,25 @@ file to be provided for reference).
   `adopted_from_id`) — it needs UI on both sides. This matters more than it
   sounds: sharing was the reason mission lists were built on checklists at all,
   so scraping is currently repeated per user.
-- Mission list *editing* (rename/reorder/add/delete) is web-only; mobile ticks
-  missions off but can't change them. Reordering swaps the two rows' stored
+- Mission list *editing* (rename/reorder/add/delete/chapter) is web-only; mobile
+  ticks entries off but can't change them. Reordering swaps the two rows' stored
   positions rather than renumbering the list, so it relies on positions being
   distinct — true for imported lists.
+- **Two list kinds per game**: `kind='missions'` (main story, timed, groupable
+  into chapters) and `kind='side_quests'` (tracked, deliberately untimed — how
+  much side content you do is a choice, so an estimate would be invented).
+  Only `'missions'` feeds `missionCountsByGame` and the progress route.
+- **Chapters are `checklist_items.category`** — no separate table, and a chapter
+  exists only by being named on a mission, so there's no empty-chapter state to
+  keep in sync. Mission numbering stays continuous across chapters, and chapter
+  sections collapse with their own done/total count.
+- **`checklist_templates.sequential`** (main story only): ticking entry N also
+  ticks 1..N-1 in one `PUT /api/checklists/:id/items/check` call — 70 missions
+  would otherwise be 70 requests. Unticking clears *only* that entry, so a
+  skipped mission stays a gap; that asymmetry is deliberate, not a bug.
+- Wiki search is offered for the main story list only: `services/missions.ts`
+  denylists "side" sections, so pointing it at a side-quest list re-imports the
+  main story.
 - The Progress tab's estimate uses the *oldest* mission checklist for a game if
   several exist; there's no picker. `missionCountsByGame` in `routes/library.ts`
   applies the same rule for the list payload — keep the two in step.

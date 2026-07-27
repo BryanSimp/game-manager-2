@@ -251,6 +251,8 @@ export interface ChecklistSummary {
   isPublic: boolean;
   /** wiki page a scraped mission list came from — attribution, CC-BY-SA */
   sourceUrl: string | null;
+  /** played in order: ticking an entry implies everything before it */
+  sequential: boolean;
   /** author display name — set on public templates from other users */
   authorName: string | null;
   mine: boolean;
@@ -273,6 +275,7 @@ export interface ChecklistDetail {
   kind: ChecklistKind;
   isPublic: boolean;
   sourceUrl: string | null;
+  sequential: boolean;
   mine: boolean;
   authorName: string | null;
   items: ChecklistItemView[];
@@ -313,6 +316,8 @@ export interface ImportMissionsInput {
   title: string;
   missions: string[];
   sourceUrl?: string | null;
+  /** defaults to 'missions' (the timed main-story list) */
+  kind?: Extract<ChecklistKind, "missions" | "side_quests">;
 }
 
 /** Time-remaining estimate for one library entry. */

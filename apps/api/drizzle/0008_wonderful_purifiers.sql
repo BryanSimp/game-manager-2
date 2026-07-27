@@ -1,0 +1,1 @@
+ALTER TYPE "public"."checklist_kind" ADD VALUE 'side_quests';

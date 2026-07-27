@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  MISSION_LIST_KINDS,
   PROGRESS_BASES,
   PROGRESS_BASIS_LABELS,
   type ChecklistDetail,
+  type ChecklistItemView,
   type LibraryEntry,
   type MissionSuggestion,
   type ProgressBasis,
@@ -96,12 +98,20 @@ export function ProgressPanel({ entry }: { entry: LibraryEntry }) {
         )}
       </div>
 
-      <MissionSection
-        gameId={gameId}
-        entryId={entryId}
-        checklistId={p?.checklistId ?? null}
-        checklistTitle={p?.checklistTitle ?? null}
-      />
+      {MISSION_LIST_KINDS.map((l) => (
+        <MissionSection
+          key={l.kind}
+          gameId={gameId}
+          entryId={entryId}
+          kind={l.kind}
+          label={l.label}
+          // chapters group the story; side quests are a flat pile by nature
+          supportsChapters={l.kind === "missions"}
+          // the scraper hunts for main-mission sections and denylists "side",
+          // so pointing it at a side-quest list would just re-import the story
+          allowWikiSearch={l.kind === "missions"}
+        />
+      ))}
 
       <AchievementsPanel entryId={entryId} />
       <ChecklistPanel gameId={gameId} />
@@ -122,22 +132,71 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
 
 // ---- mission list ----
 
+type MissionListKind = (typeof MISSION_LIST_KINDS)[number]["kind"];
+
+type NumberedItem = ChecklistItemView & { displayIndex: number };
+
+/**
+ * Group missions under their chapter, preserving list order. Chapters are
+ * just `checklist_items.category` — a mission with none sorts into the
+ * leading unchaptered group, so a flat list still renders as a flat list.
+ * Numbering stays continuous across chapters so "mission 24" means the 24th.
+ */
+export function groupByChapter(items: ChecklistItemView[]): Array<[string, NumberedItem[]]> {
+  const groups: Array<[string, NumberedItem[]]> = [];
+  const byChapter = new Map<string, NumberedItem[]>();
+
+  items.forEach((item, i) => {
+    const chapter = item.category?.trim() || "";
+    let bucket = byChapter.get(chapter);
+    if (!bucket) {
+      bucket = [];
+      byChapter.set(chapter, bucket);
+      groups.push([chapter, bucket]);
+    }
+    bucket.push({ ...item, displayIndex: i + 1 });
+  });
+  return groups;
+}
+
 function MissionSection({
   gameId,
   entryId,
-  checklistId,
-  checklistTitle,
+  kind,
+  label,
+  supportsChapters,
+  allowWikiSearch,
 }: {
   gameId: string;
   entryId: string;
-  checklistId: string | null;
-  checklistTitle: string | null;
+  kind: MissionListKind;
+  label: string;
+  supportsChapters: boolean;
+  allowWikiSearch: boolean;
 }) {
   const queryClient = useQueryClient();
   const [review, setReview] = useState<MissionSuggestion | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+
+  const toggleChapter = (chapter: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(chapter)) next.add(chapter);
+      return next;
+    });
+
+  // `mine` comes back oldest-first, so this picks the same list the estimate
+  // uses when someone has somehow ended up with two
+  const lists = useQuery({
+    queryKey: ["checklists", gameId],
+    queryFn: () => api.getGameChecklists(gameId),
+  });
+  const summary = lists.data?.mine.find((c) => c.kind === kind) ?? null;
+  const checklistId = summary?.id ?? null;
+  const checklistTitle = summary?.title ?? null;
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["progress", entryId] });
@@ -164,9 +223,42 @@ function MissionSection({
     enabled: !!checklistId,
   });
 
+  const sequential = summary?.sequential ?? false;
+
+  const setSequential = useMutation({
+    mutationFn: (next: boolean) => api.updateChecklist(checklistId!, { sequential: next }),
+    onSuccess: invalidate,
+  });
+
+  /**
+   * Tick an entry. On a sequential list, checking mission 15 also fills in
+   * 1-14 — you can't have reached it otherwise. Unchecking only clears that
+   * one entry, so you can still mark a single mission you skipped.
+   */
   const check = useMutation({
-    mutationFn: ({ itemId, completed }: { itemId: string; completed: boolean }) =>
-      api.checkChecklistItem(itemId, completed),
+    mutationFn: async ({
+      itemId,
+      completed,
+      index,
+    }: {
+      itemId: string;
+      completed: boolean;
+      index: number;
+    }) => {
+      const items = detail.data?.items ?? [];
+      if (sequential && completed && checklistId) {
+        const through = items.slice(0, index + 1).filter((it) => !it.completedAt);
+        if (through.length > 1) {
+          await api.checkChecklistItems(
+            checklistId,
+            through.map((it) => it.id),
+            true,
+          );
+          return;
+        }
+      }
+      await api.checkChecklistItem(itemId, completed);
+    },
     onSuccess: invalidate,
   });
 
@@ -174,35 +266,58 @@ function MissionSection({
     <div className="mt-6">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold text-zinc-300">
-          {checklistTitle ?? "Missions & chapters"}
+          {label}
+          {checklistTitle && checklistTitle !== label && (
+            <span className="ml-2 font-normal text-zinc-500">{checklistTitle}</span>
+          )}
+          {!supportsChapters && (
+            <span className="ml-2 text-xs font-normal text-zinc-600">(not timed)</span>
+          )}
         </p>
         {!checklistId ? (
           <div className="flex gap-2">
-            <button
-              onClick={() => suggest.mutate(undefined)}
-              disabled={suggest.isPending}
-              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60"
-            >
-              {suggest.isPending ? "Searching Fandom…" : "Find missions on a wiki"}
-            </button>
+            {allowWikiSearch && (
+              <button
+                onClick={() => suggest.mutate(undefined)}
+                disabled={suggest.isPending}
+                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60"
+              >
+                {suggest.isPending ? "Searching Fandom…" : "Find missions on a wiki"}
+              </button>
+            )}
             <button
               onClick={() => setManualOpen((v) => !v)}
               className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
             >
-              Add manually
+              {allowWikiSearch ? "Add manually" : `Add ${label.toLowerCase()}`}
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => setEditing((v) => !v)}
-            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-              editing
-                ? "border-indigo-500 bg-indigo-600/20 text-indigo-300"
-                : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            }`}
-          >
-            {editing ? "✓ Done editing" : "✎ Edit list"}
-          </button>
+          <div className="flex items-center gap-3">
+            {supportsChapters && (
+              <label
+                className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400"
+                title="Story missions are played in order, so ticking one fills in everything before it. Untick a single mission if you skipped it."
+              >
+                <input
+                  type="checkbox"
+                  checked={sequential}
+                  onChange={(ev) => setSequential.mutate(ev.target.checked)}
+                />
+                Sequential
+              </label>
+            )}
+            <button
+              onClick={() => setEditing((v) => !v)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                editing
+                  ? "border-indigo-500 bg-indigo-600/20 text-indigo-300"
+                  : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              }`}
+            >
+              {editing ? "✓ Done editing" : "✎ Edit list"}
+            </button>
+          </div>
         )}
       </div>
 
@@ -215,6 +330,9 @@ function MissionSection({
       {manualOpen && !checklistId && (
         <ManualMissions
           gameId={gameId}
+          kind={kind}
+          label={label}
+          allowWikiUrl={allowWikiSearch}
           pending={suggest.isPending}
           onUseUrl={(url) => suggest.mutate(url)}
           onSaved={() => {
@@ -240,6 +358,7 @@ function MissionSection({
       {checklistId && editing && detail.data && (
         <MissionEditor
           detail={detail.data}
+          supportsChapters={supportsChapters}
           onChanged={invalidate}
           onDeleted={() => {
             setEditing(false);
@@ -250,23 +369,63 @@ function MissionSection({
 
       {checklistId && !editing && (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-          {(detail.data?.items ?? []).map((item, i) => (
-            <label key={item.id} className="flex cursor-pointer items-center gap-2 py-0.5">
-              <input
-                type="checkbox"
-                checked={!!item.completedAt}
-                onChange={() => check.mutate({ itemId: item.id, completed: !item.completedAt })}
-              />
-              <span className="w-6 shrink-0 text-right text-xs text-zinc-600">{i + 1}.</span>
-              <span
-                className={`min-w-0 flex-1 truncate text-sm ${
-                  item.completedAt ? "text-zinc-600 line-through" : "text-zinc-300"
-                }`}
-              >
-                {item.text}
-              </span>
-            </label>
+          {groupByChapter(detail.data?.items ?? []).map(([chapter, items]) => (
+            <div key={chapter || "_none"}>
+              {chapter && (
+                <button
+                  onClick={() => toggleChapter(chapter)}
+                  className="mb-0.5 mt-2 flex w-full items-center gap-2 text-left first:mt-0"
+                >
+                  <span className="w-3 shrink-0 text-xs text-zinc-600">
+                    {collapsed.has(chapter) ? "▸" : "▾"}
+                  </span>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-indigo-400/70">
+                    {chapter}
+                  </span>
+                  <span className="text-xs text-zinc-600">
+                    {items.filter((i) => i.completedAt).length}/{items.length}
+                  </span>
+                </button>
+              )}
+              {(!chapter || !collapsed.has(chapter)) &&
+                items.map((item) => (
+                  <label
+                    key={item.id}
+                    className={`flex cursor-pointer items-center gap-2 py-0.5 ${
+                      chapter ? "pl-5" : ""
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!item.completedAt}
+                      onChange={() =>
+                        check.mutate({
+                          itemId: item.id,
+                          completed: !item.completedAt,
+                          // displayIndex is 1-based and continuous across chapters
+                          index: item.displayIndex - 1,
+                        })
+                      }
+                    />
+                    <span className="w-6 shrink-0 text-right text-xs text-zinc-600">
+                      {item.displayIndex}.
+                    </span>
+                    <span
+                      className={`min-w-0 flex-1 truncate text-sm ${
+                        item.completedAt ? "text-zinc-600 line-through" : "text-zinc-300"
+                      }`}
+                    >
+                      {item.text}
+                    </span>
+                  </label>
+                ))}
+            </div>
           ))}
+          {detail.data?.items.length === 0 && (
+            <p className="py-2 text-center text-xs text-zinc-600">
+              Empty — use “Edit list” to add entries, or delete the list to start over.
+            </p>
+          )}
           {detail.data?.sourceUrl && (
             <p className="mt-2 border-t border-zinc-800/60 pt-2 text-xs text-zinc-600">
               List from{" "}
@@ -294,18 +453,26 @@ function MissionSection({
  */
 function MissionEditor({
   detail,
+  supportsChapters,
   onChanged,
   onDeleted,
 }: {
   detail: ChecklistDetail;
+  supportsChapters: boolean;
   onChanged: () => void;
   onDeleted: () => void;
 }) {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState(detail.title);
   const [newMission, setNewMission] = useState("");
+  const [newChapter, setNewChapter] = useState("");
 
   const items = detail.items;
+  // chapters exist by being named on a mission — no empty-chapter concept to
+  // keep in sync. This feeds the datalist so names stay consistent.
+  const chapters = [
+    ...new Set(items.map((i) => i.category?.trim()).filter((c): c is string => !!c)),
+  ];
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["checklist", detail.id] });
     onChanged();
@@ -316,7 +483,8 @@ function MissionEditor({
     onSuccess: refresh,
   });
   const addItem = useMutation({
-    mutationFn: (text: string) => api.addChecklistItem(detail.id, { text }),
+    mutationFn: ({ text, category }: { text: string; category: string | null }) =>
+      api.addChecklistItem(detail.id, { text, category }),
     onSuccess: () => {
       setNewMission("");
       refresh();
@@ -325,6 +493,12 @@ function MissionEditor({
   const editItem = useMutation({
     mutationFn: ({ itemId, text }: { itemId: string; text: string }) =>
       api.updateChecklistItem(itemId, { text }),
+    onSuccess: refresh,
+  });
+  /** Move a mission into a chapter, or clear it by saving an empty name. */
+  const setChapter = useMutation({
+    mutationFn: ({ itemId, category }: { itemId: string; category: string | null }) =>
+      api.updateChecklistItem(itemId, { category }),
     onSuccess: refresh,
   });
   const removeItem = useMutation({
@@ -368,16 +542,33 @@ function MissionEditor({
         />
       </label>
 
+      {supportsChapters && (
+        <p className="mt-2 text-xs text-zinc-600">
+          Chapters group the story. Type a name in a mission's chapter box — a new name
+          creates the chapter, and clearing it moves the mission out again.
+        </p>
+      )}
+
+      <datalist id={`chapters-${detail.id}`}>
+        {chapters.map((c) => (
+          <option key={c} value={c} />
+        ))}
+      </datalist>
+
       <div className="mt-3 max-h-96 overflow-y-auto">
         {items.map((item, i) => (
           <MissionRow
             key={item.id}
             index={i}
             text={item.text}
+            chapter={item.category}
+            showChapter={supportsChapters}
+            chapterListId={`chapters-${detail.id}`}
             done={!!item.completedAt}
             canMoveUp={i > 0}
             canMoveDown={i < items.length - 1}
             onSave={(text) => editItem.mutate({ itemId: item.id, text })}
+            onSaveChapter={(category) => setChapter.mutate({ itemId: item.id, category })}
             onDelete={() => removeItem.mutate(item.id)}
             onMove={(delta) => move.mutate({ index: i, delta })}
           />
@@ -392,16 +583,28 @@ function MissionEditor({
       <form
         onSubmit={(ev) => {
           ev.preventDefault();
-          if (newMission.trim()) addItem.mutate(newMission.trim());
+          if (newMission.trim()) {
+            addItem.mutate({ text: newMission.trim(), category: newChapter.trim() || null });
+          }
         }}
         className="mt-2 flex gap-2 border-t border-zinc-800 pt-2"
       >
         <input
           value={newMission}
           onChange={(ev) => setNewMission(ev.target.value)}
-          placeholder="+ add a mission"
+          placeholder="+ add an entry"
           className="min-w-0 flex-1 rounded-lg border border-dashed border-zinc-700 bg-transparent px-3 py-1.5 text-sm outline-none placeholder:text-zinc-600 focus:border-indigo-500"
         />
+        {supportsChapters && (
+          <input
+            value={newChapter}
+            onChange={(ev) => setNewChapter(ev.target.value)}
+            list={`chapters-${detail.id}`}
+            placeholder="chapter"
+            title="Leave blank for no chapter. A new name creates the chapter."
+            className="w-28 shrink-0 rounded-lg border border-dashed border-zinc-800 bg-transparent px-2 py-1.5 text-xs outline-none placeholder:text-zinc-700 focus:border-indigo-500"
+          />
+        )}
         {newMission.trim() && (
           <button
             type="submit"
@@ -440,28 +643,42 @@ function MissionEditor({
 function MissionRow({
   index,
   text,
+  chapter,
+  showChapter,
+  chapterListId,
   done,
   canMoveUp,
   canMoveDown,
   onSave,
+  onSaveChapter,
   onDelete,
   onMove,
 }: {
   index: number;
   text: string;
+  chapter: string | null;
+  showChapter: boolean;
+  chapterListId: string;
   done: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onSave: (text: string) => void;
+  onSaveChapter: (category: string | null) => void;
   onDelete: () => void;
   onMove: (delta: -1 | 1) => void;
 }) {
   const [draft, setDraft] = useState(text);
+  const [chapterDraft, setChapterDraft] = useState(chapter ?? "");
   // pick up edits made elsewhere (reorder refetches the list)
   const [lastText, setLastText] = useState(text);
   if (text !== lastText) {
     setLastText(text);
     setDraft(text);
+  }
+  const [lastChapter, setLastChapter] = useState(chapter);
+  if (chapter !== lastChapter) {
+    setLastChapter(chapter);
+    setChapterDraft(chapter ?? "");
   }
 
   const commit = () => {
@@ -486,6 +703,23 @@ function MissionRow({
           done ? "text-zinc-500" : "text-zinc-200"
         }`}
       />
+      {showChapter && (
+        <input
+          value={chapterDraft}
+          onChange={(ev) => setChapterDraft(ev.target.value)}
+          onBlur={() => {
+            const next = chapterDraft.trim();
+            if (next !== (chapter ?? "")) onSaveChapter(next || null);
+          }}
+          onKeyDown={(ev) => {
+            if (ev.key === "Enter") ev.currentTarget.blur();
+            if (ev.key === "Escape") setChapterDraft(chapter ?? "");
+          }}
+          list={chapterListId}
+          placeholder="chapter"
+          className="w-24 shrink-0 rounded border border-transparent bg-transparent px-1.5 py-0.5 text-xs text-indigo-300/80 outline-none hover:border-zinc-700 placeholder:text-zinc-700 focus:border-indigo-500"
+        />
+      )}
       <button
         onClick={() => onMove(-1)}
         disabled={!canMoveUp}
@@ -635,11 +869,17 @@ function MissionReview({
  */
 function ManualMissions({
   gameId,
+  kind,
+  label,
+  allowWikiUrl,
   pending,
   onUseUrl,
   onSaved,
 }: {
   gameId: string;
+  kind: MissionListKind;
+  label: string;
+  allowWikiUrl: boolean;
   pending: boolean;
   onUseUrl: (url: string) => void;
   onSaved: () => void;
@@ -650,7 +890,7 @@ function ManualMissions({
 
   const save = useMutation({
     mutationFn: (missions: string[]) =>
-      api.importMissions(gameId, { title: "Missions", missions, sourceUrl: null }),
+      api.importMissions(gameId, { title: label, missions, sourceUrl: null, kind }),
     onSuccess: onSaved,
   });
 
@@ -660,40 +900,47 @@ function ManualMissions({
     .filter(Boolean);
 
   const n = Number(count);
+  const slotName = kind === "missions" ? "Mission" : "Side quest";
   const numbered =
     Number.isInteger(n) && n > 0 && n <= 500
-      ? Array.from({ length: n }, (_, i) => `Mission ${i + 1}`)
+      ? Array.from({ length: n }, (_, i) => `${slotName} ${i + 1}`)
       : [];
 
   return (
     <div className="mb-3 rounded-xl border border-zinc-800 bg-zinc-900 p-3">
-      <p className="mb-1 text-xs text-zinc-500">
-        Point it at a specific Fandom page — more reliable than the automatic search.
-      </p>
-      <form
-        onSubmit={(ev) => {
-          ev.preventDefault();
-          if (url.trim()) onUseUrl(url.trim());
-        }}
-        className="flex gap-2"
-      >
-        <input
-          value={url}
-          onChange={(ev) => setUrl(ev.target.value)}
-          placeholder="https://gta.fandom.com/wiki/Missions_in_GTA_V"
-          className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
-        />
-        <button
-          type="submit"
-          disabled={!url.trim() || pending}
-          className="shrink-0 rounded-lg border border-indigo-500/50 px-3 py-1.5 text-sm font-semibold text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
-        >
-          {pending ? "Reading…" : "Read page"}
-        </button>
-      </form>
+      {allowWikiUrl && (
+        <>
+          <p className="mb-1 text-xs text-zinc-500">
+            Point it at a specific Fandom page — more reliable than the automatic search.
+          </p>
+          <form
+            onSubmit={(ev) => {
+              ev.preventDefault();
+              if (url.trim()) onUseUrl(url.trim());
+            }}
+            className="flex gap-2"
+          >
+            <input
+              value={url}
+              onChange={(ev) => setUrl(ev.target.value)}
+              placeholder="https://gta.fandom.com/wiki/Missions_in_GTA_V"
+              className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
+            />
+            <button
+              type="submit"
+              disabled={!url.trim() || pending}
+              className="shrink-0 rounded-lg border border-indigo-500/50 px-3 py-1.5 text-sm font-semibold text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
+            >
+              {pending ? "Reading…" : "Read page"}
+            </button>
+          </form>
+        </>
+      )}
 
-      <p className="mt-3 border-t border-zinc-800 pt-3 text-xs text-zinc-500">
-        Or paste a mission list (one per line), or just enter how many there are.
+      <p
+        className={`text-xs text-zinc-500 ${allowWikiUrl ? "mt-3 border-t border-zinc-800 pt-3" : ""}`}
+      >
+        Paste a list (one per line), or just enter how many there are.
       </p>
       <textarea
         value={text}

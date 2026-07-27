@@ -215,21 +215,28 @@ function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string 
   });
 
   const p = progress.data;
-  if (!p || p.total === 0) return null;
-  const missionList = lists.data?.mine.find((c) => c.id === p.checklistId);
-  const remaining = formatHours(p.remainingSeconds);
+  const missionList = lists.data?.mine.find((c) => c.kind === "missions");
+  // side quests are tracked but untimed, so they show up even with no estimate
+  const sideList = lists.data?.mine.find((c) => c.kind === "side_quests");
+  if (!missionList && !sideList) return null;
+  const remaining = p ? formatHours(p.remainingSeconds) : null;
 
   return (
     <>
       <Text style={styles.section}>Progress</Text>
-      <Text style={styles.achievementCount}>
-        {remaining ? `${remaining} left · ` : ""}
-        {p.done}/{p.total} missions ({p.percent}%)
-      </Text>
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${p.percent}%` }]} />
-      </View>
+      {p && p.total > 0 && (
+        <>
+          <Text style={styles.achievementCount}>
+            {remaining ? `${remaining} left · ` : ""}
+            {p.done}/{p.total} missions ({p.percent}%)
+          </Text>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${p.percent}%` }]} />
+          </View>
+        </>
+      )}
       {missionList && <ChecklistCard summary={missionList} gameId={gameId} />}
+      {sideList && <ChecklistCard summary={sideList} gameId={gameId} />}
     </>
   );
 }
@@ -338,9 +345,32 @@ function ChecklistCard({ summary, gameId }: { summary: ChecklistSummary; gameId:
     queryFn: () => api.getChecklist(summary.id),
     enabled: open,
   });
+  // same rule as web: on a sequential list, ticking an entry fills in the ones
+  // before it; unticking only clears the one you tapped
   const check = useMutation({
-    mutationFn: ({ itemId, completed }: { itemId: string; completed: boolean }) =>
-      api.checkChecklistItem(itemId, completed),
+    mutationFn: async ({
+      itemId,
+      completed,
+      index,
+    }: {
+      itemId: string;
+      completed: boolean;
+      index: number;
+    }) => {
+      const items = detail.data?.items ?? [];
+      if (summary.sequential && completed) {
+        const through = items.slice(0, index + 1).filter((it) => !it.completedAt);
+        if (through.length > 1) {
+          await api.checkChecklistItems(
+            summary.id,
+            through.map((it) => it.id),
+            true,
+          );
+          return;
+        }
+      }
+      await api.checkChecklistItem(itemId, completed);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["checklist", summary.id] });
       queryClient.invalidateQueries({ queryKey: ["checklists", gameId] });
@@ -367,11 +397,13 @@ function ChecklistCard({ summary, gameId }: { summary: ChecklistSummary; gameId:
         <Text style={styles.chevron}>{open ? "▾" : "▸"}</Text>
       </TouchableOpacity>
       {open &&
-        (detail.data?.items ?? []).map((item) => (
+        (detail.data?.items ?? []).map((item, i) => (
           <TouchableOpacity
             key={item.id}
             style={styles.checkRow}
-            onPress={() => check.mutate({ itemId: item.id, completed: !item.completedAt })}
+            onPress={() =>
+              check.mutate({ itemId: item.id, completed: !item.completedAt, index: i })
+            }
           >
             <Text style={styles.checkBox}>{item.completedAt ? "☑" : "☐"}</Text>
             <Text
