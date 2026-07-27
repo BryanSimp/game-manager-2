@@ -34,6 +34,9 @@ export const checklistTemplates = pgTable(
     kind: checklistKindEnum("kind").notNull().default("completion"),
     // wiki page a scraped mission list came from (CC-BY-SA attribution)
     sourceUrl: text("source_url"),
+    // story missions are played in order, so ticking #15 implies #1-14 are
+    // done too. Off by default — collectibles and side quests have no order.
+    sequential: boolean("sequential").notNull().default(false),
     isPublic: boolean("is_public").notNull().default(false),
     // provenance when adopted from someone else's public template
     adoptedFromId: uuid("adopted_from_id").references(

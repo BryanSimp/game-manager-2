@@ -164,7 +164,12 @@ file to be provided for reference).
   Only `'missions'` feeds `missionCountsByGame` and the progress route.
 - **Chapters are `checklist_items.category`** — no separate table, and a chapter
   exists only by being named on a mission, so there's no empty-chapter state to
-  keep in sync. Mission numbering stays continuous across chapters.
+  keep in sync. Mission numbering stays continuous across chapters, and chapter
+  sections collapse with their own done/total count.
+- **`checklist_templates.sequential`** (main story only): ticking entry N also
+  ticks 1..N-1 in one `PUT /api/checklists/:id/items/check` call — 70 missions
+  would otherwise be 70 requests. Unticking clears *only* that entry, so a
+  skipped mission stays a gap; that asymmetry is deliberate, not a bug.
 - Wiki search is offered for the main story list only: `services/missions.ts`
   denylists "side" sections, so pointing it at a side-quest list re-imports the
   main story.

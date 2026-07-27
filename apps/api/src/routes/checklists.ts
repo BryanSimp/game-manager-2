@@ -13,6 +13,7 @@ const titleSchema = z.object({
 const patchSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   isPublic: z.boolean().optional(),
+  sequential: z.boolean().optional(),
 });
 const itemSchema = z.object({
   text: z.string().min(1).max(500),
@@ -28,6 +29,10 @@ const importMissionsSchema = z.object({
   sourceUrl: z.string().url().max(500).nullable().optional(),
   // only the main-story list feeds the time estimate; side quests are untimed
   kind: z.enum(["missions", "side_quests"]).default("missions"),
+});
+const bulkCheckSchema = z.object({
+  itemIds: z.array(z.string().uuid()).min(1).max(1000),
+  completed: z.boolean(),
 });
 const itemPatchSchema = z.object({
   text: z.string().min(1).max(500).optional(),
@@ -84,6 +89,7 @@ async function summarize(
     title: t.title,
     kind: t.kind,
     sourceUrl: t.sourceUrl,
+    sequential: t.sequential,
     isPublic: t.isPublic,
     mine: t.authorUserId === user.id,
     authorName: t.authorUserId === user.id ? null : (authorNames.get(t.authorUserId) ?? null),
@@ -263,6 +269,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       title: tpl.title,
       kind: tpl.kind,
       sourceUrl: tpl.sourceUrl,
+      sequential: tpl.sequential,
       isPublic: tpl.isPublic,
       mine: tpl.authorUserId === user.id,
       authorName,
@@ -284,6 +291,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       .set({
         ...(parsed.data.title !== undefined ? { title: parsed.data.title.trim() } : {}),
         ...(parsed.data.isPublic !== undefined ? { isPublic: parsed.data.isPublic } : {}),
+        ...(parsed.data.sequential !== undefined ? { sequential: parsed.data.sequential } : {}),
         updatedAt: new Date(),
       })
       .where(eq(schema.checklistTemplates.id, tpl.id));
@@ -325,6 +333,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
         kind: tpl.kind,
         // the copy keeps pointing at the wiki the list was scraped from
         sourceUrl: tpl.sourceUrl,
+        sequential: tpl.sequential,
         isPublic: false,
         adoptedFromId: tpl.id,
       })
@@ -426,6 +435,57 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
   );
 
   // ---- progress (own templates only — adopt public ones first) ----
+
+  /**
+   * Tick several entries at once. Sequential lists need this: marking mission
+   * 70 done implies the 69 before it, and that shouldn't be 70 round trips.
+   * Items are re-checked against the template so a caller can't tick off
+   * someone else's list by guessing ids.
+   */
+  app.put<{ Params: { id: string } }>(
+    "/api/checklists/:id/items/check",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const tpl = await getTemplate(request.params.id);
+      if (!tpl || tpl.authorUserId !== user.id) {
+        return reply.status(404).send({ message: "Checklist not found" });
+      }
+      const parsed = bulkCheckSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ message: "Invalid input" });
+
+      const owned = await db
+        .select({ id: schema.checklistItems.id })
+        .from(schema.checklistItems)
+        .where(
+          and(
+            eq(schema.checklistItems.templateId, tpl.id),
+            inArray(schema.checklistItems.id, parsed.data.itemIds),
+          ),
+        );
+      if (owned.length === 0) return { ok: true, changed: 0 };
+
+      if (parsed.data.completed) {
+        await db
+          .insert(schema.userChecklistItems)
+          .values(owned.map((it) => ({ userId: user.id, itemId: it.id })))
+          .onConflictDoNothing();
+      } else {
+        await db
+          .delete(schema.userChecklistItems)
+          .where(
+            and(
+              eq(schema.userChecklistItems.userId, user.id),
+              inArray(
+                schema.userChecklistItems.itemId,
+                owned.map((it) => it.id),
+              ),
+            ),
+          );
+      }
+      return { ok: true, changed: owned.length };
+    },
+  );
 
   app.put<{ Params: { itemId: string } }>(
     "/api/checklists/items/:itemId/check",

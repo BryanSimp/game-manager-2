@@ -179,6 +179,14 @@ function MissionSection({
   const [error, setError] = useState<string | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+
+  const toggleChapter = (chapter: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(chapter)) next.add(chapter);
+      return next;
+    });
 
   // `mine` comes back oldest-first, so this picks the same list the estimate
   // uses when someone has somehow ended up with two
@@ -215,9 +223,42 @@ function MissionSection({
     enabled: !!checklistId,
   });
 
+  const sequential = summary?.sequential ?? false;
+
+  const setSequential = useMutation({
+    mutationFn: (next: boolean) => api.updateChecklist(checklistId!, { sequential: next }),
+    onSuccess: invalidate,
+  });
+
+  /**
+   * Tick an entry. On a sequential list, checking mission 15 also fills in
+   * 1-14 — you can't have reached it otherwise. Unchecking only clears that
+   * one entry, so you can still mark a single mission you skipped.
+   */
   const check = useMutation({
-    mutationFn: ({ itemId, completed }: { itemId: string; completed: boolean }) =>
-      api.checkChecklistItem(itemId, completed),
+    mutationFn: async ({
+      itemId,
+      completed,
+      index,
+    }: {
+      itemId: string;
+      completed: boolean;
+      index: number;
+    }) => {
+      const items = detail.data?.items ?? [];
+      if (sequential && completed && checklistId) {
+        const through = items.slice(0, index + 1).filter((it) => !it.completedAt);
+        if (through.length > 1) {
+          await api.checkChecklistItems(
+            checklistId,
+            through.map((it) => it.id),
+            true,
+          );
+          return;
+        }
+      }
+      await api.checkChecklistItem(itemId, completed);
+    },
     onSuccess: invalidate,
   });
 
@@ -252,16 +293,31 @@ function MissionSection({
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => setEditing((v) => !v)}
-            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-              editing
-                ? "border-indigo-500 bg-indigo-600/20 text-indigo-300"
-                : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            }`}
-          >
-            {editing ? "✓ Done editing" : "✎ Edit list"}
-          </button>
+          <div className="flex items-center gap-3">
+            {supportsChapters && (
+              <label
+                className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400"
+                title="Story missions are played in order, so ticking one fills in everything before it. Untick a single mission if you skipped it."
+              >
+                <input
+                  type="checkbox"
+                  checked={sequential}
+                  onChange={(ev) => setSequential.mutate(ev.target.checked)}
+                />
+                Sequential
+              </label>
+            )}
+            <button
+              onClick={() => setEditing((v) => !v)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                editing
+                  ? "border-indigo-500 bg-indigo-600/20 text-indigo-300"
+                  : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              }`}
+            >
+              {editing ? "✓ Done editing" : "✎ Edit list"}
+            </button>
+          </div>
         )}
       </div>
 
@@ -316,31 +372,53 @@ function MissionSection({
           {groupByChapter(detail.data?.items ?? []).map(([chapter, items]) => (
             <div key={chapter || "_none"}>
               {chapter && (
-                <p className="mb-0.5 mt-2 text-xs font-semibold uppercase tracking-wide text-indigo-400/70 first:mt-0">
-                  {chapter}
-                </p>
-              )}
-              {items.map((item) => (
-                <label key={item.id} className="flex cursor-pointer items-center gap-2 py-0.5">
-                  <input
-                    type="checkbox"
-                    checked={!!item.completedAt}
-                    onChange={() =>
-                      check.mutate({ itemId: item.id, completed: !item.completedAt })
-                    }
-                  />
-                  <span className="w-6 shrink-0 text-right text-xs text-zinc-600">
-                    {item.displayIndex}.
+                <button
+                  onClick={() => toggleChapter(chapter)}
+                  className="mb-0.5 mt-2 flex w-full items-center gap-2 text-left first:mt-0"
+                >
+                  <span className="w-3 shrink-0 text-xs text-zinc-600">
+                    {collapsed.has(chapter) ? "▸" : "▾"}
                   </span>
-                  <span
-                    className={`min-w-0 flex-1 truncate text-sm ${
-                      item.completedAt ? "text-zinc-600 line-through" : "text-zinc-300"
+                  <span className="text-xs font-semibold uppercase tracking-wide text-indigo-400/70">
+                    {chapter}
+                  </span>
+                  <span className="text-xs text-zinc-600">
+                    {items.filter((i) => i.completedAt).length}/{items.length}
+                  </span>
+                </button>
+              )}
+              {(!chapter || !collapsed.has(chapter)) &&
+                items.map((item) => (
+                  <label
+                    key={item.id}
+                    className={`flex cursor-pointer items-center gap-2 py-0.5 ${
+                      chapter ? "pl-5" : ""
                     }`}
                   >
-                    {item.text}
-                  </span>
-                </label>
-              ))}
+                    <input
+                      type="checkbox"
+                      checked={!!item.completedAt}
+                      onChange={() =>
+                        check.mutate({
+                          itemId: item.id,
+                          completed: !item.completedAt,
+                          // displayIndex is 1-based and continuous across chapters
+                          index: item.displayIndex - 1,
+                        })
+                      }
+                    />
+                    <span className="w-6 shrink-0 text-right text-xs text-zinc-600">
+                      {item.displayIndex}.
+                    </span>
+                    <span
+                      className={`min-w-0 flex-1 truncate text-sm ${
+                        item.completedAt ? "text-zinc-600 line-through" : "text-zinc-300"
+                      }`}
+                    >
+                      {item.text}
+                    </span>
+                  </label>
+                ))}
             </div>
           ))}
           {detail.data?.items.length === 0 && (
