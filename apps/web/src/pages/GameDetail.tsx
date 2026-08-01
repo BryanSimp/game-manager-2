@@ -325,12 +325,15 @@ export function GameDetailPage() {
                           <span key={p.id} className="inline-flex overflow-hidden rounded-lg border border-zinc-700">
                             <button
                               onClick={() => togglePlatform(p.id)}
+                              title={p.parentName ? `${p.parentName} storefront` : undefined}
                               className={`px-3 py-1 text-sm ${
                                 format
                                   ? "bg-indigo-600/30 text-indigo-200"
                                   : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
                               }`}
                             >
+                              {/* storefronts read as children of the platform above them */}
+                              {p.parentName ? "↳ " : ""}
                               {p.abbreviation ?? p.name}
                             </button>
                             {format && (

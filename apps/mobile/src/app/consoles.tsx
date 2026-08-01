@@ -66,7 +66,8 @@ function ConsoleCard({ row }: { row: ConsoleSummary }) {
   const router = useRouter();
   const p = row.platform;
   const released = formatReleaseDate(p.releaseDate);
-  const logo = resolveImage(p.logoUrl);
+  // your own art wins over the stock logo, same as on the web app
+  const logo = resolveImage(row.customImageSrc ?? p.logoUrl);
 
   return (
     <View style={styles.card}>
@@ -80,9 +81,11 @@ function ConsoleCard({ row }: { row: ConsoleSummary }) {
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.name}>{p.name}</Text>
+          {p.parentName && <Text style={styles.released}>{p.parentName} storefront</Text>}
           {released && <Text style={styles.released}>Released {released}</Text>}
           <Text style={styles.counts}>
             {row.gameCount} {row.gameCount === 1 ? "game" : "games"}
+            {row.storefrontCount > 0 && ` · 🛒 ${row.storefrontCount}`}
             {row.physicalCount > 0 && ` · 📦 ${row.physicalCount}`}
             {row.digitalCount > 0 && ` · 💾 ${row.digitalCount}`}
           </Text>

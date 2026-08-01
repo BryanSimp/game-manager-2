@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { eq, ilike } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { igdbConfigured, igdbCoverUrl, searchIgdb } from "../services/igdb.js";
@@ -74,6 +75,7 @@ export function registerGameRoutes(app: FastifyInstance): void {
     const user = await requireUser(request, reply);
     if (!user) return;
     const owned = await ownedConsoleIds(user.id);
+    const parentPlatform = alias(schema.platforms, "parent_platform");
     const rows = await db
       .select({
         id: schema.platforms.id,
@@ -84,8 +86,11 @@ export function registerGameRoutes(app: FastifyInstance): void {
         releaseDate: schema.platforms.releaseDate,
         summary: schema.platforms.summary,
         logoUrl: schema.platforms.logoUrl,
+        parentPlatformId: schema.platforms.parentPlatformId,
+        parentName: parentPlatform.name,
       })
       .from(schema.platforms)
+      .leftJoin(parentPlatform, eq(schema.platforms.parentPlatformId, parentPlatform.id))
       .orderBy(schema.platforms.sortOrder);
     return rows.map((p) => ({ ...p, owned: owned.has(p.id) }));
   });

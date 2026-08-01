@@ -12,9 +12,14 @@ export const FAMILY_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-/** All platforms, with the ones on your consoles list first. */
+/** All platforms, each flagged with whether it's on your consoles list. */
 export function usePlatforms() {
   return useQuery({ queryKey: ["platforms"], queryFn: () => api.getPlatforms() });
+}
+
+/** "Steam" reads better as "PC · Steam" anywhere the parent isn't obvious. */
+export function platformLabel(platform: Platform): string {
+  return platform.parentName ? `${platform.parentName} · ${platform.name}` : platform.name;
 }
 
 /**
@@ -82,8 +87,9 @@ export function AddConsoleControl({
           return (
             <optgroup key={family} label={FAMILY_LABELS[family]}>
               {inFamily.map((p) => (
+                // storefronts are indented under whatever they sell for
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {p.parentName ? `↳ ${p.name}` : p.name}
                 </option>
               ))}
             </optgroup>
@@ -103,8 +109,13 @@ export function AddConsoleControl({
 
 /**
  * Pick one console out of the ones you own, with an escape hatch to add one
- * you don't. Used by quick add and the library's bulk platform edit; the
- * game detail page has its own multi-select variant.
+ * you don't. Used by quick add, import, preferences and the library's bulk
+ * platform edit; the game detail page has its own multi-select variant.
+ *
+ * Two levels: picking a platform that has storefronts (PC) reveals a second
+ * dropdown for which store the copy lives in. The value handed back is the
+ * storefront's id when one is chosen and the platform's when it isn't —
+ * either way the game counts as a PC game, because Steam *is* PC here.
  */
 export function ConsoleSelect({
   value,
@@ -119,12 +130,18 @@ export function ConsoleSelect({
 }) {
   const platforms = usePlatforms();
   const all = platforms.data ?? [];
-  const owned = all.filter((p) => p.owned);
+  // the top-level select only ever shows platforms, never their stores
+  const owned = all.filter((p) => p.owned && !p.parentPlatformId);
+
+  const selected = all.find((p) => p.id === value) ?? null;
+  const parentId = selected?.parentPlatformId ?? selected?.id ?? "";
+  const stores = all.filter((p) => p.parentPlatformId === parentId);
+  const ownedStores = stores.filter((s) => s.owned);
 
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <select
-        value={value ?? ""}
+        value={parentId}
         onChange={(ev) => onChange(ev.target.value || null)}
         className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm outline-none focus:border-indigo-500"
       >
@@ -136,7 +153,28 @@ export function ConsoleSelect({
           </option>
         ))}
       </select>
-      <AddConsoleControl platforms={all} onAdded={(p) => onChange(p.id)} label="+ New console" />
+
+      {stores.length > 0 && (
+        <select
+          value={selected?.parentPlatformId ? selected.id : ""}
+          onChange={(ev) => onChange(ev.target.value || parentId)}
+          title="Which storefront this copy lives in"
+          className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm outline-none focus:border-indigo-500"
+        >
+          <option value="">No storefront</option>
+          {ownedStores.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      )}
+
+      <AddConsoleControl
+        platforms={all}
+        onAdded={(p) => onChange(p.id)}
+        label={stores.length > 0 ? "+ New console or store" : "+ New console"}
+      />
     </span>
   );
 }

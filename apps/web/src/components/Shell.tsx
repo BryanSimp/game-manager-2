@@ -31,17 +31,19 @@ export function Shell({ children }: { children: ReactNode }) {
     navigate({ to: "/login" });
   }
 
+  // small and non-wrapping: ten links plus the account controls have to sit on
+  // one row at 1152px without "Add game" folding onto two lines
   const link =
-    "rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 [&.active]:bg-zinc-800 [&.active]:text-white";
+    "shrink-0 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 [&.active]:bg-zinc-800 [&.active]:text-white";
 
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3">
-          <Link to="/" className="mr-4 text-lg font-bold tracking-tight">
+          <Link to="/" className="mr-2 shrink-0 text-base font-bold tracking-tight">
             🎮 Game Manager
           </Link>
-          <nav className="flex flex-1 items-center gap-1 overflow-x-auto">
+          <nav className="flex flex-1 items-center gap-0.5 overflow-x-auto">
             <Link to="/" className={link}>
               Library
             </Link>
@@ -75,10 +77,10 @@ export function Shell({ children }: { children: ReactNode }) {
               </Link>
             )}
           </nav>
-          <span className="hidden text-sm text-zinc-500 sm:inline">{session.user.name}</span>
+          <span className="hidden shrink-0 text-xs text-zinc-500 lg:inline">{session.user.name}</span>
           <button
             onClick={signOut}
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
+            className="shrink-0 rounded-lg border border-zinc-700 px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
           >
             Sign out
           </button>

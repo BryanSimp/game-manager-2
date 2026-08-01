@@ -23,12 +23,21 @@ export function ConsoleDetailPage() {
   const [format, setFormat] = useState<FormatFilter>("all");
 
   const platform = platforms.data?.find((p) => p.id === platformId);
+  const consoles = useQuery({ queryKey: ["consoles"], queryFn: () => api.getConsoles() });
+  const art =
+    consoles.data?.find((c) => c.platform.id === platformId)?.customImageSrc ??
+    platform?.logoUrl ??
+    null;
 
+  // a platform's page includes anything filed under its storefronts — the
+  // PC page is your whole PC library, Steam's page is just the Steam part
   const entries = useMemo(
     () =>
       (library.data ?? []).filter((e) =>
         e.platforms.some(
-          (p) => p.platformId === platformId && (format === "all" || p.format === format),
+          (p) =>
+            (p.platformId === platformId || p.parentPlatformId === platformId) &&
+            (format === "all" || p.format === format),
         ),
       ),
     [library.data, platformId, format],
@@ -52,10 +61,10 @@ export function ConsoleDetailPage() {
 
       <div className="mt-3 mb-6 flex flex-wrap gap-5 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
         <div className="flex h-28 w-40 flex-none items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-          {platform?.logoUrl ? (
+          {art ? (
             <img
-              src={platform.logoUrl}
-              alt={platform.name}
+              src={art}
+              alt={platform?.name ?? "Console"}
               className="max-h-full max-w-full object-contain"
             />
           ) : (
@@ -67,7 +76,9 @@ export function ConsoleDetailPage() {
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-bold">{platform?.name ?? "Console"}</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            {platform && FAMILY_LABELS[platform.family]}
+            {platform?.parentName
+              ? `${platform.parentName} storefront`
+              : platform && FAMILY_LABELS[platform.family]}
             {released && ` · released ${released}`}
             {!platform?.owned && " · not on your consoles list"}
           </p>

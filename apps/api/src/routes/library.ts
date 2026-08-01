@@ -122,6 +122,7 @@ async function resolveGameId(input: z.infer<typeof addSchema>): Promise<string> 
 
 async function entryPlatforms(userGameIds: string[]) {
   if (userGameIds.length === 0) return new Map<string, unknown[]>();
+  const parentPlatform = alias(schema.platforms, "parent_platform");
   const rows = await db
     .select({
       userGameId: schema.userGamePlatforms.userGameId,
@@ -129,6 +130,9 @@ async function entryPlatforms(userGameIds: string[]) {
       name: schema.platforms.name,
       abbreviation: schema.platforms.abbreviation,
       family: schema.platforms.family,
+      // set when this is a storefront: the platform it's a store for
+      parentPlatformId: schema.platforms.parentPlatformId,
+      parentName: parentPlatform.name,
       format: schema.userGamePlatforms.format,
       boxArtImageId: schema.gameBoxArt.imageId,
       boxArtW: boxArtImage.width,
@@ -137,6 +141,7 @@ async function entryPlatforms(userGameIds: string[]) {
     .from(schema.userGamePlatforms)
     .innerJoin(schema.platforms, eq(schema.userGamePlatforms.platformId, schema.platforms.id))
     .innerJoin(schema.userGames, eq(schema.userGamePlatforms.userGameId, schema.userGames.id))
+    .leftJoin(parentPlatform, eq(schema.platforms.parentPlatformId, parentPlatform.id))
     .leftJoin(
       schema.gameBoxArt,
       and(

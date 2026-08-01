@@ -143,6 +143,21 @@ export class ApiClient {
     return this.request(`/api/consoles/${platformId}`, { method: "DELETE" });
   }
 
+  /** Your own art for a console, replacing the stock logo. */
+  uploadConsoleImage(
+    platformId: string,
+    file: Blob,
+    filename: string,
+  ): Promise<{ imageId: string; customImageSrc: string }> {
+    const form = new FormData();
+    form.append("file", file, filename);
+    return this.request(`/api/consoles/${platformId}/image`, { method: "POST", body: form });
+  }
+
+  removeConsoleImage(platformId: string): Promise<{ ok: true }> {
+    return this.request(`/api/consoles/${platformId}/image`, { method: "DELETE" });
+  }
+
   lookupBarcode(code: string): Promise<BarcodeLookupResult> {
     return this.request<BarcodeLookupResult>(
       `/api/lookup/barcode/${encodeURIComponent(code)}`,

@@ -1,11 +1,17 @@
 import type { FastifyInstance } from "fastify";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { backfillPlatformMeta, rememberConsoles } from "../services/consoles.js";
+import { saveUploadedImage } from "../services/images.js";
 
 const addSchema = z.object({ platformId: z.string().uuid() });
+
+const parentPlatform = alias(schema.platforms, "parent_platform");
+
+const ALLOWED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 /** How many covers each console card previews. */
 const PREVIEW_LIMIT = 8;
@@ -19,6 +25,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     const consoles = await db
       .select({
         addedAt: schema.userConsoles.addedAt,
+        customImageId: schema.userConsoles.customImageId,
         id: schema.platforms.id,
         name: schema.platforms.name,
         abbreviation: schema.platforms.abbreviation,
@@ -27,9 +34,12 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
         releaseDate: schema.platforms.releaseDate,
         summary: schema.platforms.summary,
         logoUrl: schema.platforms.logoUrl,
+        parentPlatformId: schema.platforms.parentPlatformId,
+        parentName: parentPlatform.name,
       })
       .from(schema.userConsoles)
       .innerJoin(schema.platforms, eq(schema.userConsoles.platformId, schema.platforms.id))
+      .leftJoin(parentPlatform, eq(schema.platforms.parentPlatformId, parentPlatform.id))
       .where(eq(schema.userConsoles.userId, user.id))
       .orderBy(asc(schema.platforms.sortOrder));
 
@@ -83,9 +93,35 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
 
     void backfillPlatformMeta(consoles.map((c) => c.id));
 
+    // a storefront's games are PC games too, so PC's card counts itself plus
+    // everything filed under its stores — `storefrontCount` says how much of
+    // that total came from them
+    const childIds = new Map<string, string[]>();
+    for (const row of await db
+      .select({ id: schema.platforms.id, parentId: schema.platforms.parentPlatformId })
+      .from(schema.platforms)) {
+      if (!row.parentId) continue;
+      childIds.set(row.parentId, [...(childIds.get(row.parentId) ?? []), row.id]);
+    }
+
     return consoles.map((c) => {
-      const bucket = byPlatform.get(c.id);
-      const entries = [...(bucket?.entries.values() ?? [])];
+      const own = byPlatform.get(c.id);
+      const children = childIds.get(c.id) ?? [];
+      const entries = new Map(own?.entries ?? []);
+      const physical = new Set(own?.physical ?? []);
+      const digital = new Set(own?.digital ?? []);
+      let storefrontCount = 0;
+      for (const childId of children) {
+        const child = byPlatform.get(childId);
+        if (!child) continue;
+        for (const [id, entry] of child.entries) {
+          if (!entries.has(id)) storefrontCount++;
+          entries.set(id, entry);
+        }
+        for (const id of child.physical) physical.add(id);
+        for (const id of child.digital) digital.add(id);
+      }
+      const list = [...entries.values()];
       return {
         platform: {
           id: c.id,
@@ -96,13 +132,17 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
           releaseDate: c.releaseDate,
           summary: c.summary,
           logoUrl: c.logoUrl,
+          parentPlatformId: c.parentPlatformId,
+          parentName: c.parentName,
           owned: true,
         },
         addedAt: c.addedAt,
-        gameCount: entries.length,
-        physicalCount: bucket?.physical.size ?? 0,
-        digitalCount: bucket?.digital.size ?? 0,
-        preview: entries.slice(0, PREVIEW_LIMIT),
+        customImageSrc: c.customImageId ? `/api/images/${c.customImageId}` : null,
+        gameCount: list.length,
+        storefrontCount,
+        physicalCount: physical.size,
+        digitalCount: digital.size,
+        preview: list.slice(0, PREVIEW_LIMIT),
       };
     });
   });
@@ -125,6 +165,67 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
     reply.status(201);
     return { ok: true };
   });
+
+  /**
+   * Your own art for a console. Platforms are shared between users, so this
+   * lives on `user_consoles` — one person's Steam logo isn't everyone's.
+   */
+  app.post<{ Params: { platformId: string } }>(
+    "/api/consoles/:platformId/image",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const [owned] = await db
+        .select({ platformId: schema.userConsoles.platformId })
+        .from(schema.userConsoles)
+        .where(
+          and(
+            eq(schema.userConsoles.userId, user.id),
+            eq(schema.userConsoles.platformId, request.params.platformId),
+          ),
+        );
+      if (!owned) return reply.status(404).send({ message: "Not on your list" });
+
+      const file = await request.file();
+      if (!file) return reply.status(400).send({ message: "No file uploaded" });
+      if (!ALLOWED_IMAGE_MIMES.has(file.mimetype)) {
+        return reply.status(400).send({ message: "Console art must be a JPEG, PNG, or WebP image" });
+      }
+      const buffer = await file.toBuffer();
+      const imageId = await saveUploadedImage(buffer, file.mimetype, "console_logo", user.id);
+      await db
+        .update(schema.userConsoles)
+        .set({ customImageId: imageId })
+        .where(
+          and(
+            eq(schema.userConsoles.userId, user.id),
+            eq(schema.userConsoles.platformId, request.params.platformId),
+          ),
+        );
+      return { imageId, customImageSrc: `/api/images/${imageId}` };
+    },
+  );
+
+  /** Back to the stock logo. */
+  app.delete<{ Params: { platformId: string } }>(
+    "/api/consoles/:platformId/image",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const updated = await db
+        .update(schema.userConsoles)
+        .set({ customImageId: null })
+        .where(
+          and(
+            eq(schema.userConsoles.userId, user.id),
+            eq(schema.userConsoles.platformId, request.params.platformId),
+          ),
+        )
+        .returning({ platformId: schema.userConsoles.platformId });
+      if (updated.length === 0) return reply.status(404).send({ message: "Not on your list" });
+      return { ok: true };
+    },
+  );
 
   /**
    * Drop a console. Any games filed under it lose that platform too —
