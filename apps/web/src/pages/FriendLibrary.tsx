@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { GAME_STATUSES, type GameStatus } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
-import { STATUS_META, statusChip } from "../lib/format.js";
+import { statusChip, statusLabel } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 
 type View = "all" | "common" | "theirs";
@@ -96,7 +96,7 @@ export function FriendLibraryPage() {
           <option value="all">Any status</option>
           {GAME_STATUSES.map((s) => (
             <option key={s} value={s}>
-              {STATUS_META[s].label}
+              {statusLabel(s)}
             </option>
           ))}
         </select>
@@ -138,13 +138,13 @@ export function FriendLibraryPage() {
                     className={`absolute left-2 top-2 rounded-full border px-2 py-0.5 text-xs font-medium ${chip.className}`}
                     style={chip.style}
                   >
-                    {STATUS_META[e.status].label}
+                    {statusLabel(e.status)}
                   </span>
                   {e.inCommon && (
                     <span
                       title={
                         e.myStatus
-                          ? `In your library — ${STATUS_META[e.myStatus].label}`
+                          ? `In your library — ${statusLabel(e.myStatus)}`
                           : "In your library"
                       }
                       className="absolute right-2 top-2 rounded-full bg-indigo-600/90 px-2 py-0.5 text-xs font-semibold text-white"

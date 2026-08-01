@@ -19,6 +19,7 @@ import { registerLookupRoutes } from "./routes/lookup.js";
 import { registerChecklistRoutes } from "./routes/checklists.js";
 import { registerSteamRoutes } from "./routes/steam.js";
 import { registerFriendRoutes } from "./routes/friends.js";
+import { registerCategoryRoutes } from "./routes/categories.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -97,6 +98,7 @@ export async function buildServer() {
   registerChecklistRoutes(app);
   registerSteamRoutes(app);
   registerFriendRoutes(app);
+  registerCategoryRoutes(app);
 
   return app;
 }

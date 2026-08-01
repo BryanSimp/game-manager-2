@@ -11,7 +11,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
-import { gameStatusEnum, ownershipFormatEnum, progressBasisEnum } from "./enums.js";
+import { ownershipFormatEnum, progressBasisEnum } from "./enums.js";
 import { games, images, platforms } from "./catalog.js";
 import { user } from "./auth.js";
 
@@ -26,7 +26,9 @@ export const userGames = pgTable(
     gameId: uuid("game_id")
       .notNull()
       .references(() => games.id, { onDelete: "cascade" }),
-    status: gameStatusEnum("status").notNull().default("backlog"),
+    // text, not an enum: a category is either a built-in key or the id of one
+    // of this user's custom categories. Validated in the route against both.
+    status: text("status").notNull().default("backlog"),
     rating: numeric("rating", { precision: 2, scale: 1 }),
     notes: text("notes"),
     customCoverImageId: uuid("custom_cover_image_id").references(() => images.id),
@@ -100,8 +102,30 @@ export const userPreferences = pgTable("user_preferences", {
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
   theme: text("theme").notNull().default("dark"),
+  // category a newly added game lands in
+  defaultStatus: text("default_status").notNull().default("backlog"),
   statusColors: jsonb("status_colors"),
   showPlatformBadge: boolean("show_platform_badge").notNull().default(true),
   showTimeBadge: boolean("show_time_badge").notNull().default(true),
   dashboardConfig: jsonb("dashboard_config"),
 });
+
+/**
+ * User-defined categories, sitting alongside the built-in ones. The row id is
+ * what lands in `user_games.status`, so renaming a category doesn't have to
+ * rewrite every game that uses it.
+ */
+export const customCategories = pgTable(
+  "custom_categories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    color: text("color"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique().on(t.userId, t.name)],
+);

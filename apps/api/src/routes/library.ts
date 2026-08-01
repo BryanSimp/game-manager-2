@@ -1,9 +1,8 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import {
-  GAME_STATUSES,
   OWNERSHIP_FORMATS,
   PROGRESS_BASES,
   estimateProgress,
@@ -12,22 +11,34 @@ import {
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { createManualGame, upsertGameFromIgdb } from "../services/catalog.js";
+import { isValidCategory } from "../services/categories.js";
+import { defaultStatusFor } from "../services/preferences.js";
 
 const boxArtImage = alias(schema.images, "box_art_image");
+
+/** A category key: a built-in, or the id of one of the user's custom ones. */
+const categoryKey = z.string().min(1).max(64);
+
+/** 400 unless the category is one this user may actually file games under. */
+async function assertCategory(userId: string, key: string, reply: FastifyReply) {
+  if (await isValidCategory(userId, key)) return true;
+  reply.status(400).send({ message: "Unknown category" });
+  return false;
+}
 
 const addSchema = z
   .object({
     igdbId: z.number().int().positive().optional(),
     gameId: z.string().uuid().optional(),
     title: z.string().min(1).max(300).optional(),
-    status: z.enum(GAME_STATUSES).default("backlog"),
+    status: categoryKey.optional(),
   })
   .refine((v) => v.igdbId || v.gameId || v.title, {
     message: "Provide igdbId, gameId, or title",
   });
 
 const updateSchema = z.object({
-  status: z.enum(GAME_STATUSES).optional(),
+  status: categoryKey.optional(),
   rating: z.number().min(0.5).max(5).multipleOf(0.5).nullable().optional(),
   notes: z.string().max(10_000).nullable().optional(),
   ttbEnabled: z.boolean().optional(),
@@ -38,7 +49,7 @@ const updateSchema = z.object({
 const bulkUpdateSchema = z
   .object({
     ids: z.array(z.string().uuid()).min(1).max(500),
-    status: z.enum(GAME_STATUSES).optional(),
+    status: categoryKey.optional(),
     ttbEnabled: z.boolean().optional(),
     completed100: z.boolean().optional(),
   })
@@ -63,7 +74,7 @@ const bulkSchema = z.object({
       z.object({
         igdbId: z.number().int().positive().optional(),
         title: z.string().min(1).max(300).optional(),
-        status: z.enum(GAME_STATUSES).default("backlog"),
+        status: categoryKey.optional(),
       }),
     )
     .min(1)
@@ -285,10 +296,14 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!parsed.success) {
       return reply.status(400).send({ message: parsed.error.issues[0]?.message });
     }
+    // omitted status falls back to the user's configured default category
+    const status = parsed.data.status ?? (await defaultStatusFor(user.id));
+    if (!(await assertCategory(user.id, status, reply))) return;
+
     const gameId = await resolveGameId(parsed.data);
     const [created] = await db
       .insert(schema.userGames)
-      .values({ userId: user.id, gameId, status: parsed.data.status })
+      .values({ userId: user.id, gameId, status })
       .onConflictDoNothing()
       .returning({ id: schema.userGames.id });
     if (!created) {
@@ -454,6 +469,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
     const { status, rating, notes, ttbEnabled, completed100, progressBasis } = parsed.data;
     if (status !== undefined) {
+      if (!(await assertCategory(user.id, status, reply))) return;
       patch.status = status;
       // auto-stamp progress dates on first transition
       if (status === "playing" && !existing.startedAt) patch.startedAt = new Date();
@@ -480,7 +496,10 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     const { ids, status, ttbEnabled, completed100 } = parsed.data;
 
     const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
-    if (status !== undefined) patch.status = status;
+    if (status !== undefined) {
+      if (!(await assertCategory(user.id, status, reply))) return;
+      patch.status = status;
+    }
     if (ttbEnabled !== undefined) patch.ttbEnabled = ttbEnabled;
     if (completed100 !== undefined) patch.completed100 = completed100;
 
