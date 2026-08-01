@@ -350,7 +350,7 @@ export class ApiClient {
 
   updateChecklist(
     id: string,
-    input: Partial<{ title: string; isPublic: boolean }>,
+    input: Partial<{ title: string; isPublic: boolean; sequential: boolean }>,
   ): Promise<{ ok: true }> {
     return this.request(`/api/checklists/${id}`, {
       method: "PATCH",
@@ -388,6 +388,18 @@ export class ApiClient {
 
   deleteChecklistItem(itemId: string): Promise<{ ok: true }> {
     return this.request(`/api/checklists/items/${itemId}`, { method: "DELETE" });
+  }
+
+  /** Tick several entries at once — one request for a sequential fill-in. */
+  checkChecklistItems(
+    checklistId: string,
+    itemIds: string[],
+    completed: boolean,
+  ): Promise<{ ok: true; changed: number }> {
+    return this.request(`/api/checklists/${checklistId}/items/check`, {
+      method: "PUT",
+      body: JSON.stringify({ itemIds, completed }),
+    });
   }
 
   checkChecklistItem(itemId: string, completed: boolean): Promise<{ ok: true }> {

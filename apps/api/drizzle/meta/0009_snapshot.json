@@ -1,6 +1,6 @@
 {
-  "id": "4c5b9813-5aa1-4915-bd86-d7cd41622eb6",
-  "prevId": "abfaf964-9659-4f1d-b5d8-d3ec21427226",
+  "id": "b27f35fa-7448-45dd-bc93-ca2fdf81415b",
+  "prevId": "4c5b9813-5aa1-4915-bd86-d7cd41622eb6",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1945,6 +1945,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "sequential": {
+          "name": "sequential",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "is_public": {
           "name": "is_public",
