@@ -4,6 +4,7 @@ import { requireAdmin } from "../plugins/auth.js";
 import { getIgdbCredentials, setSetting } from "../services/settings.js";
 import { igdbTest } from "../services/igdb.js";
 import { steamConfigured } from "../services/steam.js";
+import { getSteamGridDbKey } from "../services/steamgriddb.js";
 
 const igdbSchema = z.object({
   clientId: z.string().min(1).max(200),
@@ -11,6 +12,7 @@ const igdbSchema = z.object({
 });
 
 const steamSchema = z.object({ apiKey: z.string().min(1).max(200) });
+const sgdbSchema = z.object({ apiKey: z.string().min(1).max(200) });
 
 export function registerAdminRoutes(app: FastifyInstance): void {
   app.get("/api/admin/settings", async (request, reply) => {
@@ -21,7 +23,18 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       igdbConfigured: creds !== null,
       igdbClientId: creds ? `${creds.clientId.slice(0, 4)}…` : null,
       steamConfigured: await steamConfigured(),
+      steamGridDbConfigured: !!(await getSteamGridDbKey()),
     };
+  });
+
+  /** SteamGridDB key — powers the alternate-cover browser on game pages. */
+  app.put("/api/admin/settings/steamgriddb", async (request, reply) => {
+    const user = await requireAdmin(request, reply);
+    if (!user) return;
+    const parsed = sgdbSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ message: "An API key is required" });
+    await setSetting("steamgriddb_api_key", parsed.data.apiKey.trim());
+    return { ok: true };
   });
 
   app.put("/api/admin/settings/steam", async (request, reply) => {

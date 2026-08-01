@@ -6,6 +6,7 @@ import type {
   BulkAddResult,
   BulkUpdateInput,
   CategoryInput,
+  CoverOptions,
   CategoryView,
   ChecklistDetail,
   FriendLibrary,
@@ -408,6 +409,26 @@ export class ApiClient {
     return this.request(`/api/checklists/items/${itemId}/check`, {
       method: "PUT",
       body: JSON.stringify({ completed }),
+    });
+  }
+
+  /** Alternate covers for an entry, from SteamGridDB. */
+  getCoverOptions(entryId: string): Promise<CoverOptions> {
+    return this.request<CoverOptions>(`/api/library/${entryId}/covers`);
+  }
+
+  /** Set one of those covers; the server downloads it. */
+  setCoverFromUrl(entryId: string, url: string): Promise<{ imageId: string; coverSrc: string }> {
+    return this.request(`/api/library/${entryId}/cover/from-url`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    });
+  }
+
+  saveSteamGridDbApiKey(apiKey: string): Promise<{ ok: true }> {
+    return this.request("/api/admin/settings/steamgriddb", {
+      method: "PUT",
+      body: JSON.stringify({ apiKey }),
     });
   }
 

@@ -14,6 +14,20 @@ export function SettingsPage() {
     null,
   );
 
+  const [sgdbKey, setSgdbKey] = useState("");
+  const [sgdbMessage, setSgdbMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const saveSgdb = useMutation({
+    mutationFn: () => api.saveSteamGridDbApiKey(sgdbKey.trim()),
+    onSuccess: () => {
+      setSgdbKey("");
+      setSgdbMessage({ kind: "ok", text: "SteamGridDB key saved — cover browsing is on." });
+      settings.refetch();
+    },
+    onError: (err) =>
+      setSgdbMessage({ kind: "err", text: err instanceof Error ? err.message : "Save failed" }),
+  });
+
   const saveSteam = useMutation({
     mutationFn: () => api.saveSteamApiKey(steamKey.trim()),
     onSuccess: () => {
@@ -190,6 +204,61 @@ export function SettingsPage() {
               }`}
             >
               {steamMessage.text}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="mt-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <h2 className="text-lg font-semibold">SteamGridDB</h2>
+        <p className="mt-1 text-sm text-zinc-400">
+          Powers the “Browse covers online” button on a game page — community box art you can
+          swap in. Status:{" "}
+          {settings.data?.steamGridDbConfigured ? (
+            <span className="font-medium text-emerald-400">configured</span>
+          ) : (
+            <span className="font-medium text-amber-400">not configured</span>
+          )}
+        </p>
+        <ol className="mt-4 list-inside list-decimal space-y-1 rounded-lg bg-zinc-950 p-4 text-sm text-zinc-400">
+          <li>
+            Sign in at{" "}
+            <a
+              href="https://www.steamgriddb.com/profile/preferences/api"
+              target="_blank"
+              rel="noreferrer"
+              className="text-indigo-400 hover:underline"
+            >
+              steamgriddb.com/profile/preferences/api
+            </a>{" "}
+            (free)
+          </li>
+          <li>Generate an API key and paste it here</li>
+        </ol>
+        <div className="mt-4 space-y-3">
+          <input
+            value={sgdbKey}
+            onChange={(e) => setSgdbKey(e.target.value)}
+            placeholder="SteamGridDB API key"
+            type="password"
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+          />
+          <button
+            onClick={() => saveSgdb.mutate()}
+            disabled={!sgdbKey.trim() || saveSgdb.isPending}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {saveSgdb.isPending ? "Saving…" : "Save"}
+          </button>
+          {sgdbMessage && (
+            <p
+              className={`rounded-lg border px-3 py-2 text-sm ${
+                sgdbMessage.kind === "ok"
+                  ? "border-emerald-900 bg-emerald-950 text-emerald-300"
+                  : "border-red-900 bg-red-950 text-red-300"
+              }`}
+            >
+              {sgdbMessage.text}
             </p>
           )}
         </div>
