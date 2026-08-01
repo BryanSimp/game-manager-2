@@ -386,3 +386,56 @@ export interface DashboardData {
     coverSrc: string | null;
   }>;
 }
+
+// ---- friends ----
+
+export interface FriendSummary {
+  userId: string;
+  name: string;
+  friendedAt: string | null;
+  /** games you both have in your libraries */
+  gamesInCommon: number;
+  libraryCount: number;
+}
+
+/** A request awaiting a decision — incoming to you, or sent by you. */
+export interface FriendRequest {
+  id: string;
+  userId: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface FriendsOverview {
+  /** your own code, generated on first view */
+  friendCode: string;
+  friends: FriendSummary[];
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+}
+
+/**
+ * One game in a friend's library. Deliberately narrower than LibraryEntry:
+ * notes are private and never leave their owner's account.
+ */
+export interface FriendLibraryEntry {
+  gameId: string;
+  title: string;
+  coverSrc: string | null;
+  releaseDate: string | null;
+  status: GameStatus;
+  rating: number | null;
+  completed100: boolean;
+  platforms: string[];
+  /** true when this game is in your library too */
+  inCommon: boolean;
+  /** your status for it, when you have it */
+  myStatus: GameStatus | null;
+}
+
+export interface FriendLibrary {
+  friend: { userId: string; name: string };
+  entries: FriendLibraryEntry[];
+  total: number;
+  inCommon: number;
+}

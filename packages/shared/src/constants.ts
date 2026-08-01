@@ -34,6 +34,13 @@ export type UserRole = (typeof USER_ROLES)[number];
 export const CHECKLIST_KINDS = ["completion", "missions"] as const;
 export type ChecklistKind = (typeof CHECKLIST_KINDS)[number];
 
+/**
+ * Friend requests are accepted before anything is shared — a friend code
+ * alone never grants access to a library.
+ */
+export const FRIENDSHIP_STATUSES = ["pending", "accepted"] as const;
+export type FriendshipStatus = (typeof FRIENDSHIP_STATUSES)[number];
+
 /** Which how-long-to-beat figure the remaining-time estimate is based on. */
 export const PROGRESS_BASES = ["main", "main_extra", "completionist"] as const;
 export type ProgressBasis = (typeof PROGRESS_BASES)[number];

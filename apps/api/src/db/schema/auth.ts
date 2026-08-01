@@ -14,6 +14,9 @@ export const user = pgTable("user", {
   banned: boolean("banned").notNull().default(false),
   banReason: text("ban_reason"),
   banExpires: timestamp("ban_expires", { withTimezone: true }),
+  // shareable code others use to send a friend request; generated on first
+  // use rather than at signup, so existing accounts don't need a backfill
+  friendCode: text("friend_code").unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

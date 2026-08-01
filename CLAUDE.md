@@ -111,6 +111,8 @@ was dev-only). Never use `db push`.
 | 9 progress + time remaining | see git log | **TTB mapping fix**: IGDB's `hastily`/`normally` were mapped to the wrong columns in `services/catalog.ts`, so main story read *longer* than main+extras (MGSV: 101h vs 49h). Correct mapping is hastily→main, normally→main_extra, completely→completionist; `normalizeTtb` (`packages/shared/src/progress.ts`) enforces the ordering on ingest and migration 0006 sorts existing rows in one pass (pairwise swaps re-invert — don't). **Mission lists**: `checklist_templates.kind` ('completion'\|'missions') + `source_url`; `services/missions.ts` scrapes Fandom via the per-wiki MediaWiki `api.php` (Fandom's cross-wiki directory API is dead and community.fandom.com is Cloudflare-gated, so the wiki subdomain is *guessed* from the title and probed). Extraction tries missions-as-subsections, then lists/tables in a matching section, then whole page, and **scores** each candidate — first-match-wins picks the wrong list. **Estimate**: `user_games.progress_basis` picks which TTB figure `estimateProgress` divides across the mission list. Web: `ProgressPanel` on a new Progress tab (achievements + checklists moved there); mobile: read-only estimate + mission ticking |
 | 8 Steam | see git log | `steam_accounts`, `achievements`, `user_achievements`, `games.steam_app_id`, `user_games.steam_playtime_minutes`; `services/steam.ts` (official Web API, key DB-first/`STEAM_API_KEY` fallback, ~250ms throttle, vanity-URL resolve); two pg-boss queues in `jobs/steam.ts`: **import** (owned games → ≥0.85 matcher confidence auto-adds with appid+playtime, leftovers become a `source='steam'` import job for the normal review UI; `import_items.steam_app_id` dedups re-imports) and **sync** (per linked appid: schema achievements upsert + player unlock state). Web: `SteamCard` on Preferences (link/import/sync, polls while jobs run), Steam key section on admin Settings, `AchievementsPanel` on GameDetail (icon grid + playtime). Mobile: read-only achievements + checklists on game detail |
 
+| 10 friends | see git log | `friendships` (requester/addressee + `pending`/`accepted`, one row per pair in either direction) and `user.friend_code`, generated **lazily** on first friends-page view so existing accounts need no backfill. `services/friends.ts` owns the code alphabet (no O/0/I/1/L/S/5/B) and `normalizeFriendCode`, which validates rather than "corrects" lookalikes — a typo must fail to match, never match something else. Adding is **request → accept**: a code alone never exposes a library. `routes/friends.ts` returns the same "no one found" message for a bad code and for your own, so the endpoint can't be walked as a user directory. Friend library responses deliberately omit `notes`. Web: `/friends` (code, requests both ways, overlap counts) and `/friends/$userId` (their library, `inCommon` flagged, filter by everything/common/theirs) |
+
 **Next: Phase 6 (skipped for now, still open)** — email verification/password reset
 (better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
 filters, admin panel (users, password resets, registration toggle, settings).
@@ -139,6 +141,12 @@ file to be provided for reference).
   the whole flow is untested against a real Steam account (needs a key + linked
   account — endpoints verified with mocked-level checks only).
 - Checklist authoring is web-only on mobile (tracking + adopting work).
+- Friends is web-only — mobile has no friends screen yet, though the API is
+  shared and ready for one.
+- Friend requests have no notification: an incoming request is only visible by
+  opening the friends page.
+- A friend's library shows status/rating/platforms/100%%, never notes. If more
+  gets exposed later, `routes/friends.ts` is the single place that decides.
 - **Wiki mission scraping is best-effort and often wrong.** Measured on 6 games:
   GTA V (74 missions) and RDR2 (51) correct, MGSV correct but incomplete (19 — the
   wiki page only documents 19), Halo CE picked up enemy names, Mass Effect 2 and
