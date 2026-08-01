@@ -153,6 +153,7 @@ export interface AdminSettings {
   igdbConfigured: boolean;
   igdbClientId: string | null;
   steamConfigured: boolean;
+  steamGridDbConfigured: boolean;
 }
 export interface TagInput {
   name: string;
@@ -432,6 +433,23 @@ export interface CategoryView {
   /** how many of your games are in it */
   count: number;
 }
+/** One alternate cover offered by SteamGridDB. */
+export interface CoverCandidate {
+  id: number;
+  url: string;
+  thumbUrl: string;
+  width: number;
+  height: number;
+  style: string | null;
+  author: string | null;
+}
+
+export interface CoverOptions {
+  /** false when no SteamGridDB key is set — the UI hides the browser */
+  configured: boolean;
+  covers: CoverCandidate[];
+}
+
 export interface CategoryInput {
   name: string;
   color?: string | null;

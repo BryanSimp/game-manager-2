@@ -190,6 +190,15 @@ file to be provided for reference).
 - Steam import files games under **Steam**, but games imported before this change
   are still on **PC**; nothing rewrites them. A bulk platform edit in the library's
   select mode is the fix if that matters.
+- **Cover browsing** (`services/steamgriddb.ts`) needs a free SteamGridDB key in
+  admin Settings (`steamgriddb_api_key`, DB-first with `STEAMGRIDDB_API_KEY`
+  fallback). No key = `configured:false` and the browser hides itself rather
+  than erroring. `POST /api/library/:id/cover/from-url` **allowlists
+  steamgriddb hosts** — it downloads server-side, so without that check it
+  would be an open proxy for fetching arbitrary URLs.
+- Pasting an image (Ctrl+V) on the Import page is web-only, and asks whether
+  it's a launcher screenshot or a shelf photo rather than guessing — the two
+  take different OCR paths.
 - Checklist authoring is web-only on mobile (tracking + adopting work).
 - Friends is web-only — mobile has no friends screen yet, though the API is
   shared and ready for one.

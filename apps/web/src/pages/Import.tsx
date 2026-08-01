@@ -76,16 +76,55 @@ export function ImportPage() {
     }
   }, [job.data, stage]);
 
+  const [pasted, setPasted] = useState<{ file: File; previewUrl: string } | null>(null);
+  const clearPasted = () => {
+    setPasted((prev) => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  };
+
   const startImage = useMutation({
     mutationFn: ({ file, source }: { file: File; source: "screenshot" | "shelf_photo" }) =>
       api.createImageImport(file, file.name, source),
     onSuccess: (created) => {
       setError(null);
+      clearPasted();
       setJobId(created.id);
       setStage("processing");
     },
     onError: (err) => setError(err instanceof Error ? err.message : "Upload failed"),
   });
+
+  /**
+   * Accept an image straight off the clipboard, so a Win+Shift+S snip can go
+   * in without a round trip through the filesystem. We hold it and ask which
+   * kind it is rather than guessing — shelf photos take a different OCR path.
+   */
+  useEffect(() => {
+    function onPaste(ev: ClipboardEvent) {
+      if (stage !== "input" || startImage.isPending) return;
+      const file = [...(ev.clipboardData?.items ?? [])]
+        .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
+        .map((i) => i.getAsFile())
+        .find((f): f is File => !!f);
+      if (!file) return;
+      ev.preventDefault();
+      // clipboard files often have no usable name
+      const named =
+        file.name && file.name !== "image.png"
+          ? file
+          : new File([file], `pasted-${Date.now()}.${file.type.split("/")[1] || "png"}`, {
+              type: file.type,
+            });
+      setPasted((prev) => {
+        if (prev) URL.revokeObjectURL(prev.previewUrl);
+        return { file: named, previewUrl: URL.createObjectURL(named) };
+      });
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [stage, startImage.isPending]);
 
   const startText = useMutation({
     mutationFn: () => api.createTextImport(text),
@@ -182,6 +221,55 @@ export function ImportPage() {
                 onFile={(file) => startImage.mutate({ file, source: "shelf_photo" })}
               />
             </div>
+
+            {pasted ? (
+              <div className="mt-4 rounded-xl border border-indigo-800 bg-indigo-950/30 p-3">
+                <div className="flex gap-3">
+                  <img
+                    src={pasted.previewUrl}
+                    alt="Pasted image"
+                    className="h-24 w-32 shrink-0 rounded-lg border border-zinc-700 object-cover"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-indigo-200">Image pasted</p>
+                    <p className="mt-0.5 text-xs text-zinc-400">
+                      Which is it? Shelf photos are read differently from launcher
+                      screenshots.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        onClick={() => startImage.mutate({ file: pasted.file, source: "screenshot" })}
+                        disabled={startImage.isPending}
+                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-50"
+                      >
+                        Library screenshot
+                      </button>
+                      <button
+                        onClick={() =>
+                          startImage.mutate({ file: pasted.file, source: "shelf_photo" })
+                        }
+                        disabled={startImage.isPending}
+                        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                      >
+                        Shelf photo
+                      </button>
+                      <button
+                        onClick={clearPasted}
+                        className="px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-300"
+                      >
+                        Discard
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 rounded-lg border border-dashed border-zinc-700 px-3 py-2 text-center text-xs text-zinc-500">
+                …or just press <kbd className="rounded bg-zinc-800 px-1.5 py-0.5">Ctrl</kbd>+
+                <kbd className="rounded bg-zinc-800 px-1.5 py-0.5">V</kbd> to paste a screenshot
+                straight from your clipboard
+              </p>
+            )}
           </section>
 
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">

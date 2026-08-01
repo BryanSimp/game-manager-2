@@ -22,7 +22,8 @@ export function imagePath(filename: string): string {
  */
 export async function cacheRemoteImage(
   url: string,
-  kind: "cover" | "background",
+  kind: "cover" | "background" | "custom_cover",
+  ownerUserId?: string,
 ): Promise<string | null> {
   try {
     await ensureImageDir();
@@ -33,7 +34,7 @@ export async function cacheRemoteImage(
 
     const [row] = await db
       .insert(schema.images)
-      .values({ kind, filename: "pending", mime })
+      .values({ kind, filename: "pending", mime, ownerUserId: ownerUserId ?? null })
       .returning({ id: schema.images.id });
     if (!row) return null;
 
