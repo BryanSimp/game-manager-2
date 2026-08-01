@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BUILTIN_CATEGORIES, type Preferences } from "@gm/shared";
+import { BUILTIN_CATEGORIES, type CategoryView, type Preferences } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { SteamCard } from "../components/SteamCard.js";
+import { ConsoleSelect } from "../components/ConsolePicker.js";
 import { useCategories } from "../lib/categories.js";
+import { statusChip } from "../lib/format.js";
 
 const DEFAULT_HEX: Record<string, string> = Object.fromEntries(
   BUILTIN_CATEGORIES.map((c) => [c.key, c.color]),
@@ -51,21 +53,6 @@ export function PreferencesPage() {
           else you want to track.
         </p>
 
-        <label className="mt-4 flex flex-wrap items-center gap-2 text-sm text-zinc-300">
-          New games go to
-          <select
-            value={p?.defaultStatus ?? "backlog"}
-            onChange={(e) => save.mutate({ defaultStatus: e.target.value })}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
-          >
-            {(categories ?? []).map((c) => (
-              <option key={c.key} value={c.key}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
         <div className="mt-4 space-y-2">
           {(categories ?? [])
             .filter((c) => !c.builtIn)
@@ -98,6 +85,52 @@ export function PreferencesPage() {
           )}
         </form>
         {categoryError && <p className="mt-2 text-xs text-amber-400">{categoryError}</p>}
+      </section>
+
+      <section className="mb-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <h2 className="text-lg font-semibold">New game defaults</h2>
+        <p className="mt-1 text-sm text-zinc-400">
+          Where a game lands when you add one without saying otherwise — including from
+          quick add, imports and barcode scans.
+        </p>
+
+        <label className="mt-4 flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+          Category
+          <select
+            value={p?.defaultStatus ?? "backlog"}
+            onChange={(e) => save.mutate({ defaultStatus: e.target.value })}
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
+          >
+            {(categories ?? []).map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+          Platform
+          <ConsoleSelect
+            value={p?.defaultPlatformId ?? null}
+            onChange={(platformId) => save.mutate({ defaultPlatformId: platformId })}
+            placeholder="Don't set one"
+          />
+          {p?.defaultPlatformId && (
+            <button
+              onClick={() =>
+                save.mutate({
+                  defaultPlatformFormat:
+                    p.defaultPlatformFormat === "digital" ? "physical" : "digital",
+                })
+              }
+              title="Toggle physical/digital"
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
+            >
+              {p.defaultPlatformFormat === "physical" ? "📦 Physical" : "💾 Digital"}
+            </button>
+          )}
+        </div>
       </section>
 
       <section className="mb-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
@@ -155,8 +188,80 @@ export function PreferencesPage() {
             onChange={(v) => save.mutate({ showPlatformBadge: v })}
           />
         </div>
+
+        <BadgeOpacity
+          value={p?.badgeOpacity ?? 100}
+          categories={categories ?? []}
+          prefs={p}
+          onChange={(badgeOpacity) => save.mutate({ badgeOpacity })}
+        />
       </section>
     </Shell>
+  );
+}
+
+/**
+ * How see-through category badges are, everywhere they render. The slider is
+ * local while dragging and only saves on release — otherwise every pixel of
+ * movement is a PUT.
+ */
+function BadgeOpacity({
+  value,
+  categories,
+  prefs,
+  onChange,
+}: {
+  value: number;
+  categories: CategoryView[];
+  prefs: Preferences | undefined;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState<number | null>(null);
+  const current = draft ?? value;
+  // preview with the dragged value rather than the saved one
+  const preview: Preferences | undefined = prefs
+    ? { ...prefs, badgeOpacity: current }
+    : undefined;
+  const samples = categories.filter((c) => c.key !== "uncategorized").slice(0, 4);
+
+  return (
+    <div className="mt-5 border-t border-zinc-800 pt-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-zinc-300">Category badge opacity</span>
+        <span className="text-xs text-zinc-500">{current}%</span>
+      </div>
+      <input
+        type="range"
+        min={20}
+        max={100}
+        step={5}
+        value={current}
+        onChange={(ev) => setDraft(Number(ev.target.value))}
+        onPointerUp={() => {
+          if (draft !== null && draft !== value) onChange(draft);
+          setDraft(null);
+        }}
+        onKeyUp={() => {
+          if (draft !== null && draft !== value) onChange(draft);
+          setDraft(null);
+        }}
+        className="mt-2 w-full accent-indigo-500"
+      />
+      <div className="mt-3 flex flex-wrap gap-2">
+        {samples.map((cat) => {
+          const chip = statusChip(cat.key, preview, categories);
+          return (
+            <span
+              key={cat.key}
+              className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${chip.className}`}
+              style={chip.style}
+            >
+              {cat.label}
+            </span>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

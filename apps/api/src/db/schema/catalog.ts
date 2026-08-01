@@ -44,7 +44,11 @@ export const games = pgTable("games", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** Consoles/platforms, seeded from a curated list; family drives shelf grouping. */
+/**
+ * Consoles/platforms, seeded from a curated list; family groups them on the
+ * consoles page. `summary`/`releaseDate` come from the seed (curated, and
+ * present with or without IGDB); `logoUrl` is filled in lazily from IGDB.
+ */
 export const platforms = pgTable("platforms", {
   id: uuid("id").defaultRandom().primaryKey(),
   igdbPlatformId: integer("igdb_platform_id").unique(),
@@ -52,6 +56,13 @@ export const platforms = pgTable("platforms", {
   abbreviation: text("abbreviation"),
   family: platformFamilyEnum("family").notNull().default("other"),
   sortOrder: integer("sort_order").notNull().default(0),
+  // first-region hardware launch, or the storefront's opening date
+  releaseDate: date("release_date"),
+  summary: text("summary"),
+  // IGDB platform logo, hot-linked rather than cached — there are only a few
+  logoUrl: text("logo_url"),
+  // when IGDB was last asked about this platform, so misses aren't retried
+  metaFetchedAt: timestamp("meta_fetched_at", { withTimezone: true }),
 });
 
 /** Platforms a game exists on (catalog-level, not ownership). */

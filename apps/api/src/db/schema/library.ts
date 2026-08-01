@@ -62,10 +62,28 @@ export const userGamePlatforms = pgTable(
       .notNull()
       .references(() => platforms.id, { onDelete: "cascade" }),
     format: ownershipFormatEnum("format").notNull(),
-    // custom order on the virtual shelf, per platform row
-    position: integer("position").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.userGameId, t.platformId, t.format] })],
+);
+
+/**
+ * Consoles the user says they own. This is the list every platform picker
+ * offers first — filing a game under a console you haven't added is still
+ * possible, it just adds the console at the same time (see
+ * `rememberConsoles`), so the two can never drift apart.
+ */
+export const userConsoles = pgTable(
+  "user_consoles",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    platformId: uuid("platform_id")
+      .notNull()
+      .references(() => platforms.id, { onDelete: "cascade" }),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.platformId] })],
 );
 
 /** User-created tags/categories, optionally grouped ("Mood", "Franchise"…). */
@@ -105,8 +123,17 @@ export const userPreferences = pgTable("user_preferences", {
   // category a newly added game lands in
   defaultStatus: text("default_status").notNull().default("backlog"),
   statusColors: jsonb("status_colors"),
+  // platform a newly added game is filed under, when set
+  defaultPlatformId: uuid("default_platform_id").references(() => platforms.id, {
+    onDelete: "set null",
+  }),
+  defaultPlatformFormat: ownershipFormatEnum("default_platform_format")
+    .notNull()
+    .default("digital"),
   showPlatformBadge: boolean("show_platform_badge").notNull().default(true),
   showTimeBadge: boolean("show_time_badge").notNull().default(true),
+  // how solid category badges look, in percent — one setting for every badge
+  badgeOpacity: integer("badge_opacity").notNull().default(100),
   dashboardConfig: jsonb("dashboard_config"),
 });
 

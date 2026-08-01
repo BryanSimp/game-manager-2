@@ -15,12 +15,27 @@ export const STATUS_COLORS: Record<GameStatus, StatusStyle> = {
 
 const UNKNOWN: StatusStyle = { bg: "#27272a", text: "#a1a1aa", label: "Other" };
 
+/** `#rrggbb` plus an alpha byte — React Native accepts 8-digit hex. */
+function withAlpha(color: string, alpha: number): string {
+  const byte = Math.round(Math.min(1, Math.max(0, alpha)) * 255);
+  return `${color}${byte.toString(16).padStart(2, "0")}`;
+}
+
 /**
  * Style for a category key. Categories are user-extensible on web, so mobile
  * may see a custom id it has no entry for — fall back rather than crash.
+ * `opacity` is the badge-opacity preference in percent, so a badge looks the
+ * same here as it does on the web app.
  */
-export function statusStyle(status: string): StatusStyle {
-  return STATUS_COLORS[status as GameStatus] ?? UNKNOWN;
+export function statusStyle(status: string, opacity = 100): StatusStyle {
+  const base = STATUS_COLORS[status as GameStatus] ?? UNKNOWN;
+  if (opacity >= 100) return base;
+  const alpha = opacity / 100;
+  return {
+    ...base,
+    bg: withAlpha(base.bg, alpha),
+    text: withAlpha(base.text, alpha),
+  };
 }
 
 /** coverSrc from the API is relative for cached images, absolute for IGDB. */

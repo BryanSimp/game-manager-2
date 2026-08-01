@@ -5,6 +5,7 @@ import { authClient } from "@/lib/auth";
 
 const LINKS: Array<{ href: Href; icon: string; label: string; note: string }> = [
   { href: "/dashboard", icon: "📊", label: "Dashboard", note: "Stats, backlog hours, recent finishes" },
+  { href: "/consoles", icon: "🕹️", label: "Consoles", note: "What you own, and your games on each" },
   { href: "/collections", icon: "🗂️", label: "Collections", note: "Series and play-order lists" },
   { href: "/tags", icon: "🏷️", label: "Tags", note: "Create, recolor, delete" },
   { href: "/import", icon: "📷", label: "Import", note: "Screenshot / shelf photo OCR" },

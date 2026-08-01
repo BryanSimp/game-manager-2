@@ -67,8 +67,26 @@ Phase 0–8 roadmap — read it before making design decisions.
   The matcher (`services/matcher.ts`) retries weak matches without the junk first token
   and with an i→l OCR-confusion variant, keeping whichever scores higher
   (Dice bigram similarity = confidence).
+- **Consoles, not a shelf** (replaced the virtual shelf in Phase 11): `user_consoles`
+  is the list of consoles/storefronts a user owns, and it *is* the platform picker
+  everywhere. `rememberConsoles()` (`services/consoles.ts`) is called by every path
+  that files a game under a platform — game detail, quick add, bulk edit, Steam
+  import, the default-platform preference — so the list can never drift from what
+  games actually claim. Deleting a console therefore also unfiles its games
+  (`removedFromGames` is returned so the UI can say so). Platform metadata
+  (`release_date`, `summary`) is curated in `apps/api/scripts/seed.ts`; IGDB fills
+  in `logo_url`, and a summary only where the seed left one blank, lazily on first
+  view (`meta_fetched_at` stamps the attempt so misses aren't retried).
+- **PC storefronts are platforms**: Steam, Epic, GOG, Battle.net, EA App, Ubisoft
+  Connect, Microsoft Store and itch.io sit in the `pc` family alongside the generic
+  **PC**, which stays for "where I bought it doesn't matter". Steam imports file
+  games under **Steam** (matched by name, not IGDB id — storefronts have none).
 - **jsonb only for display config** (dashboard layout, status colors) — everything else
   that v1 stored as JSON strings is normalized tables here.
+- **One funnel for category badges**: `statusChip()` (`apps/web/src/lib/format.ts`)
+  resolves colour *and* applies `preferences.badge_opacity`, so the opacity setting
+  lands on every badge on every page for free. Mobile mirrors it through
+  `statusStyle(status, opacity)` in `lib/ui.ts`.
 - **Real box art** (`services/boxart.ts`): physical games fetch genuine retail box-front
   scans from libretro-thumbnails (21 retro platforms; validated repo names). Dedup
   pointer files are followed; PNG dims parsed from IHDR; misses recorded in
@@ -122,6 +140,8 @@ was dev-only). Never use `db push`.
 
 | 10 friends | see git log | `friendships` (requester/addressee + `pending`/`accepted`, one row per pair in either direction) and `user.friend_code`, generated **lazily** on first friends-page view so existing accounts need no backfill. `services/friends.ts` owns the code alphabet (no O/0/I/1/L/S/5/B) and `normalizeFriendCode`, which validates rather than "corrects" lookalikes — a typo must fail to match, never match something else. Adding is **request → accept**: a code alone never exposes a library. `routes/friends.ts` returns the same "no one found" message for a bad code and for your own, so the endpoint can't be walked as a user directory. Friend library responses deliberately omit `notes`. Web: `/friends` (code, requests both ways, overlap counts) and `/friends/$userId` (their library, `inCommon` flagged, filter by everything/common/theirs) |
 
+| 11 consoles | see git log | **The virtual shelf is gone** — route, both pages, `ShelfRow`/`ShelfEntry`, the shelf-order endpoint and `user_game_platforms.position` (migration 0012). In its place: `user_consoles` + `routes/consoles.ts` (list with per-console counts and cover previews, add, remove) and `services/consoles.ts`. Migration 0012 backfills the list from existing ownership so nobody starts empty. Web `/consoles` and `/console/$platformId`; mobile `consoles.tsx` is read-only. Also in this phase: **PC storefronts** (Steam/Epic/GOG/…) seeded as platforms with Steam import filing under Steam; **quick add** on `/add` (pinned platform + category, adds in place) and a **release-year** narrowing the IGDB search (`first_release_date` bracketed in UTC); **bulk platform edit** in the library's select mode (`platformMode: add\|replace\|remove`); preferences for **badge opacity** and a **default platform** (+format) applied by `POST /api/library` when the caller doesn't name one |
+
 **Next: Phase 6 (skipped for now, still open)** — email verification/password reset
 (better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
 filters, admin panel (users, password resets, registration toggle, settings).
@@ -152,6 +172,24 @@ file to be provided for reference).
 - Custom categories are **web-only to manage**; mobile renders them via
   `statusStyle()` in `lib/ui.ts`, which falls back to a neutral chip for any
   key it doesn't know. Mobile still shows only the built-in filter chips.
+- Consoles are **web-only to manage** — mobile's `consoles.tsx` lists what you own
+  with logo, release date, summary and a cover preview, but can't add or remove.
+- The 3D box viewer and `services/boxart.ts` outlived the shelf: box scans are
+  still fetched, but only lazily from `GET /api/library` (the shelf used to be
+  what warmed them), and the viewer now lives only on a game's detail page.
+- Console logos come from IGDB and are **hot-linked**, not cached in
+  `/data/images` like covers — a handful of small PNGs wasn't worth an
+  `image_kind` enum value and a download path. Platforms IGDB doesn't know (the
+  PC storefronts, Switch 2) fall back to their abbreviation in a box.
+- Curated platform summaries in the seed are **authoritative**: re-running
+  `pnpm db:seed` overwrites anything IGDB filled in. That's deliberate (IGDB's
+  platform summaries are usually empty or dry) but it does mean edits belong in
+  `scripts/seed.ts`, not the database.
+- Badge opacity is one number for every category — there's no per-category
+  opacity, and it deliberately floors at 20% so a badge can't vanish.
+- Steam import files games under **Steam**, but games imported before this change
+  are still on **PC**; nothing rewrites them. A bulk platform edit in the library's
+  select mode is the fix if that matters.
 - **Cover browsing** (`services/steamgriddb.ts`) needs a free SteamGridDB key in
   admin Settings (`steamgriddb_api_key`, DB-first with `STEAMGRIDDB_API_KEY`
   fallback). No key = `configured:false` and the browser hides itself rather

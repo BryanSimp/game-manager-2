@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
 import { matchTitle } from "../services/matcher.js";
 import { upsertGameFromIgdb } from "../services/catalog.js";
+import { rememberConsoles } from "../services/consoles.js";
 import {
   getOwnedGames,
   getPlayerAchievements,
@@ -48,11 +49,14 @@ export async function processSteamImport(userId: string): Promise<void> {
 
     const owned = (await getOwnedGames(account.steamId)).filter((g) => !isNoiseApp(g.name));
 
-    // every Steam game is a digital PC copy — mark ownership automatically
-    const [pcPlatform] = await db
+    // every imported game is a digital Steam copy — file it under the Steam
+    // platform rather than the generic PC one, and add Steam to the user's
+    // consoles so the platform shows up in their pickers
+    const [steamPlatform] = await db
       .select({ id: schema.platforms.id })
       .from(schema.platforms)
-      .where(eq(schema.platforms.igdbPlatformId, 6));
+      .where(eq(schema.platforms.name, "Steam"));
+    if (steamPlatform) await rememberConsoles(userId, [steamPlatform.id]);
 
     // what's already linked by appid → just refresh playtime
     const appIds = owned.map((g) => g.appid);
@@ -124,10 +128,10 @@ export async function processSteamImport(userId: string): Promise<void> {
         userGameId = inserted!.id;
       }
 
-      if (pcPlatform) {
+      if (steamPlatform) {
         await db
           .insert(schema.userGamePlatforms)
-          .values({ userGameId, platformId: pcPlatform.id, format: "digital" })
+          .values({ userGameId, platformId: steamPlatform.id, format: "digital" })
           .onConflictDoNothing();
       }
     }

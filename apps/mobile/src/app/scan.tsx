@@ -76,7 +76,7 @@ export default function ScanScreen() {
     onSuccess: (title) => {
       setAddedTitle(title);
       queryClient.invalidateQueries({ queryKey: ["library"] });
-      queryClient.invalidateQueries({ queryKey: ["shelf"] });
+      queryClient.invalidateQueries({ queryKey: ["consoles"] });
     },
   });
 

@@ -10,6 +10,13 @@ export interface IgdbGame {
   platforms?: Array<{ id: number; name: string }>;
 }
 
+export interface IgdbPlatform {
+  id: number;
+  name: string;
+  summary?: string;
+  platform_logo?: { id: number; image_id: string };
+}
+
 export interface IgdbTimeToBeat {
   game_id: number;
   hastily?: number; // seconds
@@ -91,13 +98,38 @@ export async function igdbTest(): Promise<void> {
 const GAME_FIELDS =
   "fields name, summary, first_release_date, cover.image_id, genres.name, platforms.name; ";
 
-export async function searchIgdb(query: string, limit = 20): Promise<IgdbGame[] | null> {
+export async function searchIgdb(
+  query: string,
+  limit = 20,
+  /** narrow to games first released in this calendar year */
+  year?: number | null,
+): Promise<IgdbGame[] | null> {
   const sanitized = query.replace(/["\\]/g, " ").trim();
   if (!sanitized) return [];
+  let where = "where version_parent = null";
+  if (year) {
+    // IGDB dates are unix seconds; bracket the year in UTC
+    const from = Math.floor(Date.UTC(year, 0, 1) / 1000);
+    const to = Math.floor(Date.UTC(year + 1, 0, 1) / 1000);
+    where += ` & first_release_date >= ${from} & first_release_date < ${to}`;
+  }
   return igdbRequest<IgdbGame>(
     "games",
-    `search "${sanitized}"; ${GAME_FIELDS} where version_parent = null; limit ${limit};`,
+    `search "${sanitized}"; ${GAME_FIELDS} ${where}; limit ${limit};`,
   );
+}
+
+/** Platform metadata for the consoles page — logo, and a summary if IGDB has one. */
+export async function getIgdbPlatform(igdbPlatformId: number): Promise<IgdbPlatform | null> {
+  try {
+    const rows = await igdbRequest<IgdbPlatform>(
+      "platforms",
+      `fields name, summary, platform_logo.image_id; where id = ${igdbPlatformId}; limit 1;`,
+    );
+    return rows?.[0] ?? null;
+  } catch {
+    return null; // console art is decoration, never worth failing a request over
+  }
 }
 
 export async function getIgdbGame(igdbId: number): Promise<IgdbGame | null> {
@@ -123,4 +155,9 @@ export async function getIgdbTimeToBeat(igdbId: number): Promise<IgdbTimeToBeat 
 
 export function igdbCoverUrl(imageId: string, size: "cover_big" | "720p" = "cover_big"): string {
   return `https://images.igdb.com/igdb/image/upload/t_${size}_2x/${imageId}.jpg`;
+}
+
+/** Platform logos are PNGs with transparency — png, not jpg. */
+export function igdbLogoUrl(imageId: string): string {
+  return `https://images.igdb.com/igdb/image/upload/t_logo_med/${imageId}.png`;
 }

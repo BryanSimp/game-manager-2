@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { BulkUpdateInput, LibraryEntry } from "@gm/shared";
+import type { BulkUpdateInput, LibraryEntry, OwnershipFormat } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { GameCard } from "../components/GameCard.js";
+import { ConsoleSelect } from "../components/ConsolePicker.js";
 import { statusChip, statusLabel } from "../lib/format.js";
 import { useCategories } from "../lib/categories.js";
 import { usePreferences } from "../lib/prefs.js";
@@ -58,6 +59,8 @@ export function LibraryPage() {
   const [search, setSearch] = useState("");
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkPlatform, setBulkPlatform] = useState<string | null>(null);
+  const [bulkFormat, setBulkFormat] = useState<OwnershipFormat>("digital");
 
   const library = useQuery({ queryKey: ["library"], queryFn: () => api.getLibrary() });
 
@@ -68,7 +71,8 @@ export function LibraryPage() {
       setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ["library"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      queryClient.invalidateQueries({ queryKey: ["shelf"] });
+      queryClient.invalidateQueries({ queryKey: ["consoles"] });
+      queryClient.invalidateQueries({ queryKey: ["platforms"] });
     },
   });
 
@@ -273,6 +277,44 @@ export function LibraryPage() {
             💯 Mark 100%
           </button>
           {bulkUpdate.isPending && <span className="text-xs text-zinc-400">Saving…</span>}
+
+          <div className="flex w-full flex-wrap items-center gap-2 border-t border-indigo-900/60 pt-3">
+            <span className="text-xs text-zinc-400">Platform:</span>
+            <ConsoleSelect
+              value={bulkPlatform}
+              onChange={setBulkPlatform}
+              placeholder="Pick a console…"
+            />
+            <button
+              onClick={() => setBulkFormat(bulkFormat === "digital" ? "physical" : "digital")}
+              title="Toggle physical/digital"
+              className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:border-zinc-500 hover:text-white"
+            >
+              {bulkFormat === "physical" ? "📦 Physical" : "💾 Digital"}
+            </button>
+            {(
+              [
+                { mode: "add", label: "Add to platform", hint: "Keep any platforms they already have" },
+                { mode: "replace", label: "Set as only platform", hint: "Replace every platform on these games" },
+                { mode: "remove", label: "Remove platform", hint: "Take this platform off these games" },
+              ] as const
+            ).map((action) => (
+              <button
+                key={action.mode}
+                disabled={selected.size === 0 || !bulkPlatform || bulkUpdate.isPending}
+                title={action.hint}
+                onClick={() =>
+                  bulkUpdate.mutate({
+                    platforms: [{ platformId: bulkPlatform!, format: bulkFormat }],
+                    platformMode: action.mode,
+                  })
+                }
+                className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:border-zinc-500 hover:text-white disabled:opacity-40"
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

@@ -64,6 +64,30 @@ export interface Platform {
   abbreviation: string | null;
   family: PlatformFamily;
   sortOrder: number;
+  /** first-region hardware launch, or the day a storefront opened */
+  releaseDate: string | null;
+  summary: string | null;
+  logoUrl: string | null;
+  /** true when this platform is on your consoles list */
+  owned: boolean;
+}
+/**
+ * A console on your list, with how much of your library sits on it. The
+ * preview covers come from the same query so the page needs one request.
+ */
+export interface ConsoleSummary {
+  platform: Platform;
+  addedAt: string;
+  gameCount: number;
+  physicalCount: number;
+  digitalCount: number;
+  /** a handful of covers for the card, newest additions first */
+  preview: Array<{
+    entryId: string;
+    title: string;
+    coverSrc: string | null;
+    status: string;
+  }>;
 }
 export interface SearchResult {
   igdbId: number | null;
@@ -79,11 +103,20 @@ export interface SearchResponse {
   igdb: boolean;
   results: SearchResult[];
 }
+export interface SearchOptions {
+  /** narrow to games first released in this year */
+  year?: number | null;
+}
 export interface AddGameInput {
   igdbId?: number;
   gameId?: string;
   title?: string;
   status?: string;
+  /**
+   * Ownership to file the new game under. Omitted, the default platform
+   * preference applies; an empty array deliberately means "no platform".
+   */
+  platforms?: Array<{ platformId: string; format: OwnershipFormat }>;
 }
 export interface UpdateEntryInput {
   status?: string;
@@ -98,6 +131,13 @@ export interface BulkUpdateInput {
   status?: string;
   ttbEnabled?: boolean;
   completed100?: boolean;
+  /** platform ownership to apply, interpreted by `platformMode` */
+  platforms?: Array<{ platformId: string; format: OwnershipFormat }>;
+  /**
+   * 'add' keeps existing ownership, 'replace' wipes it first, 'remove' takes
+   * the listed platforms off (whatever format they were owned in).
+   */
+  platformMode?: "add" | "replace" | "remove";
 }
 export interface BulkAddItem {
   igdbId?: number;
@@ -126,8 +166,13 @@ export interface Preferences {
   defaultStatus: string;
   /** keyed by category key — built-in or custom */
   statusColors: Record<string, string> | null;
+  /** platform a newly added game is filed under; null = none */
+  defaultPlatformId: string | null;
+  defaultPlatformFormat: OwnershipFormat;
   showPlatformBadge: boolean;
   showTimeBadge: boolean;
+  /** category-badge opacity in percent, applied wherever badges render */
+  badgeOpacity: number;
 }
 export type ImportSource = "screenshot" | "shelf_photo" | "text_paste" | "steam";
 export type ImportJobStatus = "pending" | "ocr" | "matching" | "review" | "done" | "failed";
@@ -156,31 +201,6 @@ export interface ImportItem {
 }
 export interface ImportJobDetail extends ImportJobSummary {
   items: ImportItem[];
-}
-export interface ShelfEntry {
-  userGameId: string;
-  gameId: string;
-  title: string;
-  coverSrc: string | null;
-  /** real retail box scan for this shelf's platform, when found */
-  boxArtSrc: string | null;
-  boxArtW?: number | null;
-  boxArtH?: number | null;
-  format: OwnershipFormat;
-  status: string;
-  rating: number | null;
-  releaseDate: string | null;
-  position: number;
-}
-export interface ShelfRow {
-  platform: {
-    id: string;
-    name: string;
-    abbreviation: string | null;
-    family: PlatformFamily;
-    sortOrder: number;
-  };
-  entries: ShelfEntry[];
 }
 export interface CollectionSummary {
   id: string;
