@@ -55,8 +55,8 @@ export default function RootLayout() {
               ),
               headerRight: () => (
                 <>
-                  <Link href="/shelf" style={{ marginRight: 16 }}>
-                    <Text style={{ fontSize: 18 }}>🗄️</Text>
+                  <Link href="/consoles" style={{ marginRight: 16 }}>
+                    <Text style={{ fontSize: 18 }}>🕹️</Text>
                   </Link>
                   <Link href="/scan" style={{ marginRight: 16 }}>
                     <Text style={{ fontSize: 18 }}>🏷️</Text>
@@ -71,7 +71,7 @@ export default function RootLayout() {
           <Stack.Screen name="add" options={{ title: "Add game" }} />
           <Stack.Screen name="scan" options={{ title: "Scan barcode" }} />
           <Stack.Screen name="import" options={{ title: "Import" }} />
-          <Stack.Screen name="shelf" options={{ title: "Shelf" }} />
+          <Stack.Screen name="consoles" options={{ title: "Consoles" }} />
           <Stack.Screen name="collections" options={{ title: "Collections" }} />
           <Stack.Screen name="collection/[id]" options={{ title: "Collection" }} />
           <Stack.Screen name="dashboard" options={{ title: "Dashboard" }} />

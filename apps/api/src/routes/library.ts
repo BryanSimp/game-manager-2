@@ -12,7 +12,8 @@ import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { createManualGame, upsertGameFromIgdb } from "../services/catalog.js";
 import { isValidCategory } from "../services/categories.js";
-import { defaultStatusFor } from "../services/preferences.js";
+import { rememberConsoles } from "../services/consoles.js";
+import { defaultPlatformFor, defaultStatusFor } from "../services/preferences.js";
 
 const boxArtImage = alias(schema.images, "box_art_image");
 
@@ -26,12 +27,19 @@ async function assertCategory(userId: string, key: string, reply: FastifyReply) 
   return false;
 }
 
+const ownership = z.object({
+  platformId: z.string().uuid(),
+  format: z.enum(OWNERSHIP_FORMATS),
+});
+
 const addSchema = z
   .object({
     igdbId: z.number().int().positive().optional(),
     gameId: z.string().uuid().optional(),
     title: z.string().min(1).max(300).optional(),
     status: categoryKey.optional(),
+    // omitted = fall back to the default-platform preference; [] = none
+    platforms: z.array(ownership).max(50).optional(),
   })
   .refine((v) => v.igdbId || v.gameId || v.title, {
     message: "Provide igdbId, gameId, or title",
@@ -52,20 +60,20 @@ const bulkUpdateSchema = z
     status: categoryKey.optional(),
     ttbEnabled: z.boolean().optional(),
     completed100: z.boolean().optional(),
+    platforms: z.array(ownership).max(50).optional(),
+    platformMode: z.enum(["add", "replace", "remove"]).default("add"),
   })
-  .refine((v) => v.status !== undefined || v.ttbEnabled !== undefined || v.completed100 !== undefined, {
-    message: "Nothing to update",
-  });
+  .refine(
+    (v) =>
+      v.status !== undefined ||
+      v.ttbEnabled !== undefined ||
+      v.completed100 !== undefined ||
+      v.platforms !== undefined,
+    { message: "Nothing to update" },
+  );
 
 const platformsSchema = z.object({
-  platforms: z
-    .array(
-      z.object({
-        platformId: z.string().uuid(),
-        format: z.enum(OWNERSHIP_FORMATS),
-      }),
-    )
-    .max(50),
+  platforms: z.array(ownership).max(50),
 });
 
 const bulkSchema = z.object({
@@ -309,6 +317,26 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!created) {
       return reply.status(409).send({ message: "Game is already in your library" });
     }
+
+    // an explicit list wins; without one the default-platform preference
+    // applies, so quick-adding a pile of games doesn't leave them platformless
+    const ownership =
+      parsed.data.platforms ??
+      [await defaultPlatformFor(user.id)].filter((p) => p !== null);
+    if (ownership.length > 0) {
+      await db
+        .insert(schema.userGamePlatforms)
+        .values(
+          ownership.map((p) => ({
+            userGameId: created.id,
+            platformId: p.platformId,
+            format: p.format,
+          })),
+        )
+        .onConflictDoNothing();
+      await rememberConsoles(user.id, ownership.map((p) => p.platformId));
+    }
+
     reply.status(201);
     return { id: created.id, gameId };
   });
@@ -366,6 +394,9 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
           `${item.title ?? `igdb:${item.igdbId}`}: ${err instanceof Error ? err.message : "failed"}`,
         );
       }
+    }
+    if (batchPlatforms.length > 0) {
+      await rememberConsoles(user.id, batchPlatforms.map((p) => p.platformId));
     }
     return { added, skipped, errors };
   });
@@ -493,7 +524,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!parsed.success) {
       return reply.status(400).send({ message: parsed.error.issues[0]?.message });
     }
-    const { ids, status, ttbEnabled, completed100 } = parsed.data;
+    const { ids, status, ttbEnabled, completed100, platforms, platformMode } = parsed.data;
 
     const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
     if (status !== undefined) {
@@ -508,6 +539,44 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       .set(patch)
       .where(and(inArray(schema.userGames.id, ids), eq(schema.userGames.userId, user.id)))
       .returning({ id: schema.userGames.id, startedAt: schema.userGames.startedAt, finishedAt: schema.userGames.finishedAt });
+
+    // platform ownership, scoped to the entries that were actually theirs
+    if (platforms !== undefined) {
+      const mine = updated.map((r) => r.id);
+      if (mine.length > 0) {
+        const targets = platforms.map((p) => p.platformId);
+        if (platformMode === "replace") {
+          await db
+            .delete(schema.userGamePlatforms)
+            .where(inArray(schema.userGamePlatforms.userGameId, mine));
+        } else if (platformMode === "remove" && targets.length > 0) {
+          // removing ignores format — "not on this console" covers both
+          await db
+            .delete(schema.userGamePlatforms)
+            .where(
+              and(
+                inArray(schema.userGamePlatforms.userGameId, mine),
+                inArray(schema.userGamePlatforms.platformId, targets),
+              ),
+            );
+        }
+        if (platformMode !== "remove" && platforms.length > 0) {
+          await db
+            .insert(schema.userGamePlatforms)
+            .values(
+              mine.flatMap((userGameId) =>
+                platforms.map((p) => ({
+                  userGameId,
+                  platformId: p.platformId,
+                  format: p.format,
+                })),
+              ),
+            )
+            .onConflictDoNothing();
+          await rememberConsoles(user.id, targets);
+        }
+      }
+    }
 
     // auto-stamp progress dates on first transition, matching single PATCH
     if (status === "playing" || status === "finished") {
@@ -550,6 +619,8 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
           })),
         )
         .onConflictDoNothing();
+      // filing a game under a console adds it to your consoles list
+      await rememberConsoles(user.id, parsed.data.platforms.map((p) => p.platformId));
     }
     return { ok: true };
   });

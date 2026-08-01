@@ -8,6 +8,7 @@ import type {
   CategoryInput,
   CategoryView,
   ChecklistDetail,
+  ConsoleSummary,
   FriendLibrary,
   FriendsOverview,
   ChecklistKind,
@@ -28,8 +29,8 @@ import type {
   OwnershipFormat,
   Platform,
   Preferences,
+  SearchOptions,
   SearchResponse,
-  ShelfRow,
   Tag,
   TagInput,
   UpdateEntryInput,
@@ -112,12 +113,33 @@ export class ApiClient {
 
   // ---- catalog / search ----
 
-  searchGames(q: string): Promise<SearchResponse> {
-    return this.request<SearchResponse>(`/api/games/search?q=${encodeURIComponent(q)}`);
+  searchGames(q: string, options: SearchOptions = {}): Promise<SearchResponse> {
+    const params = new URLSearchParams({ q });
+    if (options.year) params.set("year", String(options.year));
+    return this.request<SearchResponse>(`/api/games/search?${params}`);
   }
 
+  /** Every platform, each flagged with whether it's on your consoles list. */
   getPlatforms(): Promise<Platform[]> {
     return this.request<Platform[]>("/api/platforms");
+  }
+
+  // ---- consoles ----
+
+  getConsoles(): Promise<ConsoleSummary[]> {
+    return this.request<ConsoleSummary[]>("/api/consoles");
+  }
+
+  addConsole(platformId: string): Promise<{ ok: true }> {
+    return this.request("/api/consoles", {
+      method: "POST",
+      body: JSON.stringify({ platformId }),
+    });
+  }
+
+  /** Also unfiles your games from it — the response says how many. */
+  removeConsole(platformId: string): Promise<{ ok: true; removedFromGames: number }> {
+    return this.request(`/api/consoles/${platformId}`, { method: "DELETE" });
   }
 
   lookupBarcode(code: string): Promise<BarcodeLookupResult> {
@@ -211,19 +233,6 @@ export class ApiClient {
 
   deleteTag(id: string): Promise<{ ok: true }> {
     return this.request(`/api/tags/${id}`, { method: "DELETE" });
-  }
-
-  // ---- shelf ----
-
-  getShelf(): Promise<ShelfRow[]> {
-    return this.request<ShelfRow[]>("/api/shelf");
-  }
-
-  setShelfOrder(platformId: string, orderedUserGameIds: string[]): Promise<{ ok: true }> {
-    return this.request(`/api/shelf/${platformId}/order`, {
-      method: "PUT",
-      body: JSON.stringify({ orderedUserGameIds }),
-    });
   }
 
   // ---- collections ----

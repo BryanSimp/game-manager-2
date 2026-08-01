@@ -9,7 +9,8 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { LibraryPage } from "./pages/Library.js";
-import { ShelfPage } from "./pages/Shelf.js";
+import { ConsolesPage } from "./pages/Consoles.js";
+import { ConsoleDetailPage } from "./pages/ConsoleDetail.js";
 import { CollectionsPage } from "./pages/Collections.js";
 import { CollectionDetailPage } from "./pages/CollectionDetail.js";
 import { AddGamePage } from "./pages/AddGame.js";
@@ -31,7 +32,8 @@ const rootRoute = createRootRoute({
 
 const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: LibraryPage }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/shelf", component: ShelfPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/consoles", component: ConsolesPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/console/$platformId", component: ConsoleDetailPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/collections", component: CollectionsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/collection/$id", component: CollectionDetailPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/add", component: AddGamePage }),

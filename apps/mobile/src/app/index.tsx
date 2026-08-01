@@ -18,6 +18,7 @@ import { GAME_STATUSES, type GameStatus, type LibraryEntry } from "@gm/shared";
 import { authClient } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, STATUS_COLORS, statusStyle } from "@/lib/ui";
+import { useBadgeOpacity } from "@/lib/prefs";
 
 const SORTS = [
   { key: "added", label: "Recent" },
@@ -171,7 +172,7 @@ function FilterChip({
 }
 
 function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => void }) {
-  const status = statusStyle(entry.status);
+  const status = statusStyle(entry.status, useBadgeOpacity());
   const cover = resolveImage(entry.game.coverSrc);
   const ttb = formatHours(entry.game.ttbMain);
   return (

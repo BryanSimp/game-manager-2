@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CollectionNode } from "@gm/shared";
 import { api } from "@/lib/api";
 import { resolveImage, STATUS_COLORS, statusStyle } from "@/lib/ui";
+import { useBadgeOpacity } from "@/lib/prefs";
 
 /**
  * The web app has the full drag-node graph editor; on mobile we flatten the
@@ -53,6 +54,7 @@ export default function CollectionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [picking, setPicking] = useState(false);
+  const badgeOpacity = useBadgeOpacity();
 
   const collection = useQuery({
     queryKey: ["collection", id],
@@ -110,7 +112,7 @@ export default function CollectionDetailScreen() {
         }
         renderItem={({ item, index }) => {
           const cover = resolveImage(item.coverSrc);
-          const status = item.status ? statusStyle(item.status) : null;
+          const status = item.status ? statusStyle(item.status, badgeOpacity) : null;
           return (
             <View style={styles.row}>
               <Text style={[styles.orderNum, { color: accent }]}>{index + 1}</Text>

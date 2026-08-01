@@ -14,6 +14,7 @@ import { Shell } from "../components/Shell.js";
 import { StarRating } from "../components/StarRating.js";
 import { BoxViewer3D } from "../components/BoxViewer3D.js";
 import { ProgressPanel } from "../components/ProgressPanel.js";
+import { AddConsoleControl, FAMILY_LABELS } from "../components/ConsolePicker.js";
 import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 
@@ -23,15 +24,6 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "progress", label: "Progress" },
 ];
-
-const FAMILY_LABELS: Record<string, string> = {
-  nintendo: "Nintendo",
-  sony: "PlayStation",
-  xbox: "Xbox",
-  pc: "PC",
-  sega: "Sega",
-  other: "Other",
-};
 
 export function GameDetailPage() {
   const { id } = useParams({ from: "/game/$id" });
@@ -66,6 +58,9 @@ export function GameDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["entry", id] });
       queryClient.invalidateQueries({ queryKey: ["library"] });
+      // filing a game under a console can add it to your consoles list
+      queryClient.invalidateQueries({ queryKey: ["consoles"] });
+      queryClient.invalidateQueries({ queryKey: ["platforms"] });
     },
   });
 
@@ -304,7 +299,11 @@ export function GameDetailPage() {
             </p>
             <div className="space-y-3">
               {PLATFORM_FAMILIES.map((family) => {
-                const fams = (platforms.data ?? []).filter((p) => p.family === family);
+                // your consoles are the shortlist; anything else you've
+                // somehow filed this game under still shows so it can be undone
+                const fams = (platforms.data ?? []).filter(
+                  (p) => p.family === family && (p.owned || owned.has(p.id)),
+                );
                 if (fams.length === 0) return null;
                 return (
                   <div key={family}>
@@ -342,6 +341,18 @@ export function GameDetailPage() {
                   </div>
                 );
               })}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {(platforms.data ?? []).every((p) => !p.owned) && (
+                  <span className="text-sm text-zinc-500">
+                    No consoles on your list yet —
+                  </span>
+                )}
+                <AddConsoleControl
+                  platforms={platforms.data ?? []}
+                  // adding a console here means you want this game on it
+                  onAdded={(p) => togglePlatform(p.id)}
+                />
+              </div>
             </div>
           </div>
 

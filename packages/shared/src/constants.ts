@@ -6,7 +6,7 @@
  * one of the user's custom categories.
  *
  * 'uncategorized' is a real value rather than a null column — nullable status
- * would have rippled through every filter, dashboard and shelf query for no
+ * would have rippled through every filter and dashboard query for no
  * gain. It renders as no badge at all.
  */
 export const GAME_STATUSES = [
@@ -39,7 +39,7 @@ export function isBuiltinCategory(key: string): key is GameStatus {
 export const OWNERSHIP_FORMATS = ["physical", "digital"] as const;
 export type OwnershipFormat = (typeof OWNERSHIP_FORMATS)[number];
 
-/** Console families — drives virtual-shelf grouping. */
+/** Console families — groups the consoles page and every platform picker. */
 export const PLATFORM_FAMILIES = [
   "nintendo",
   "sony",

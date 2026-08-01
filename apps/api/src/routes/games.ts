@@ -3,13 +3,19 @@ import { eq, ilike } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { igdbConfigured, igdbCoverUrl, searchIgdb } from "../services/igdb.js";
+import { ownedConsoleIds } from "../services/consoles.js";
 
 export function registerGameRoutes(app: FastifyInstance): void {
-  app.get<{ Querystring: { q?: string } }>("/api/games/search", async (request, reply) => {
+  app.get<{ Querystring: { q?: string; year?: string } }>(
+    "/api/games/search",
+    async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
     const q = (request.query.q ?? "").trim();
     if (q.length < 2) return { igdb: false, results: [] };
+    const parsedYear = Number(request.query.year);
+    const year =
+      Number.isInteger(parsedYear) && parsedYear >= 1950 && parsedYear <= 2100 ? parsedYear : null;
 
     // which igdb ids / game ids are already in this user's library
     const owned = await db
@@ -21,7 +27,7 @@ export function registerGameRoutes(app: FastifyInstance): void {
     const ownedGames = new Set(owned.map((o) => o.gameId));
 
     if (await igdbConfigured()) {
-      const igdbResults = (await searchIgdb(q)) ?? [];
+      const igdbResults = (await searchIgdb(q, 20, year)) ?? [];
       return {
         igdb: true,
         results: igdbResults.map((g) => ({
@@ -47,31 +53,40 @@ export function registerGameRoutes(app: FastifyInstance): void {
       .limit(20);
     return {
       igdb: false,
-      results: local.map((g) => ({
-        igdbId: g.igdbId,
-        gameId: g.id,
-        title: g.title,
-        releaseYear: g.releaseDate ? Number(g.releaseDate.slice(0, 4)) : null,
-        coverSrc: g.coverImageId ? `/api/images/${g.coverImageId}` : g.coverUrl,
-        platforms: [],
-        summary: g.summary,
-        inLibrary: ownedGames.has(g.id),
-      })),
+      results: local
+        .filter((g) => !year || g.releaseDate?.startsWith(String(year)))
+        .map((g) => ({
+          igdbId: g.igdbId,
+          gameId: g.id,
+          title: g.title,
+          releaseYear: g.releaseDate ? Number(g.releaseDate.slice(0, 4)) : null,
+          coverSrc: g.coverImageId ? `/api/images/${g.coverImageId}` : g.coverUrl,
+          platforms: [],
+          summary: g.summary,
+          inLibrary: ownedGames.has(g.id),
+        })),
     };
-  });
+    },
+  );
 
+  /** Every platform, flagged with whether it's on your consoles list. */
   app.get("/api/platforms", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    return db
+    const owned = await ownedConsoleIds(user.id);
+    const rows = await db
       .select({
         id: schema.platforms.id,
         name: schema.platforms.name,
         abbreviation: schema.platforms.abbreviation,
         family: schema.platforms.family,
         sortOrder: schema.platforms.sortOrder,
+        releaseDate: schema.platforms.releaseDate,
+        summary: schema.platforms.summary,
+        logoUrl: schema.platforms.logoUrl,
       })
       .from(schema.platforms)
       .orderBy(schema.platforms.sortOrder);
+    return rows.map((p) => ({ ...p, owned: owned.has(p.id) }));
   });
 }
