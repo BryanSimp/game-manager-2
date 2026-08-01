@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ConsoleSummary } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { AddConsoleControl, FAMILY_LABELS, usePlatforms } from "../components/ConsolePicker.js";
+import { ConsoleArtBrowser } from "../components/ConsoleArtBrowser.js";
 
 /** "1996-06-23" → "23 June 1996"; the day matters for launch dates. */
 export function formatReleaseDate(date: string | null): string | null {
@@ -93,6 +95,7 @@ export function ConsolesPage() {
 
 function ConsoleCard({ row, compact = false }: { row: ConsoleSummary; compact?: boolean }) {
   const queryClient = useQueryClient();
+  const [browsing, setBrowsing] = useState(false);
   const p = row.platform;
   const released = formatReleaseDate(p.releaseDate);
   // your upload wins over the stock IGDB logo
@@ -137,9 +140,15 @@ function ConsoleCard({ row, compact = false }: { row: ConsoleSummary; compact?: 
               </span>
             )}
           </div>
-          <div className="mt-1.5 flex items-center justify-center gap-2">
+          <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
+            <button
+              onClick={() => setBrowsing(true)}
+              className="text-[11px] text-zinc-600 hover:text-indigo-300"
+            >
+              Browse art
+            </button>
             <label className="cursor-pointer text-[11px] text-zinc-600 hover:text-indigo-300">
-              {uploadImage.isPending ? "Uploading…" : row.customImageSrc ? "Change art" : "Use my own art"}
+              {uploadImage.isPending ? "Uploading…" : "Upload"}
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
@@ -255,6 +264,14 @@ function ConsoleCard({ row, compact = false }: { row: ConsoleSummary; compact?: 
           </div>
         )}
       </div>
+
+      {browsing && (
+        <ConsoleArtBrowser
+          platformId={p.id}
+          platformName={p.name}
+          onClose={() => setBrowsing(false)}
+        />
+      )}
     </section>
   );
 }

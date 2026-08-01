@@ -26,6 +26,7 @@ export function GameCard({
   const ttb = formatHours(entry.estimatedRemainingSeconds ?? entry.game.ttbMain);
   const showTime = prefs?.showTimeBadge ?? true;
   const showPlatforms = prefs?.showPlatformBadge ?? true;
+  const showRating = prefs?.showRating ?? true;
 
   const body = (
     <>
@@ -105,7 +106,7 @@ export function GameCard({
           {entry.game.title}
         </p>
         <div className="mt-1 flex items-center justify-between">
-          <StarRating value={entry.rating} size="sm" />
+          {showRating && <StarRating value={entry.rating} size="sm" />}
           {showPlatforms && (
             <span className="truncate pl-2 text-xs text-zinc-500">
               {entry.platforms.map((p) => p.abbreviation ?? p.name).join(" · ")}

@@ -15,6 +15,7 @@ const DEFAULTS = {
   defaultPlatformFormat: "digital" as const,
   showPlatformBadge: true,
   showTimeBadge: true,
+  showRating: true,
   badgeOpacity: 100,
 };
 
@@ -29,6 +30,7 @@ const prefsSchema = z.object({
   defaultPlatformFormat: z.enum(OWNERSHIP_FORMATS).optional(),
   showPlatformBadge: z.boolean().optional(),
   showTimeBadge: z.boolean().optional(),
+  showRating: z.boolean().optional(),
   // floored at 20% — a badge you can't read is a badge that isn't there
   badgeOpacity: z.number().int().min(20).max(100).optional(),
 });
@@ -50,6 +52,7 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
       defaultPlatformFormat: row.defaultPlatformFormat,
       showPlatformBadge: row.showPlatformBadge,
       showTimeBadge: row.showTimeBadge,
+      showRating: row.showRating,
       badgeOpacity: row.badgeOpacity,
     };
   });
@@ -93,6 +96,7 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
         showPlatformBadge: parsed.data.showPlatformBadge,
       }),
       ...(parsed.data.showTimeBadge !== undefined && { showTimeBadge: parsed.data.showTimeBadge }),
+      ...(parsed.data.showRating !== undefined && { showRating: parsed.data.showRating }),
       ...(parsed.data.badgeOpacity !== undefined && { badgeOpacity: parsed.data.badgeOpacity }),
     };
     const { userId, ...updates } = values;

@@ -134,6 +134,7 @@ export const userPreferences = pgTable("user_preferences", {
     .default("digital"),
   showPlatformBadge: boolean("show_platform_badge").notNull().default(true),
   showTimeBadge: boolean("show_time_badge").notNull().default(true),
+  showRating: boolean("show_rating").notNull().default(true),
   // how solid category badges look, in percent — one setting for every badge
   badgeOpacity: integer("badge_opacity").notNull().default(100),
   dashboardConfig: jsonb("dashboard_config"),

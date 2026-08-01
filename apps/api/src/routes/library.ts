@@ -103,6 +103,8 @@ function gameToJson(game: typeof schema.games.$inferSelect) {
   return {
     id: game.id,
     igdbId: game.igdbId,
+    // set when a Steam import linked this game — the "wrong match?" fix needs it
+    steamAppId: game.steamAppId,
     title: game.title,
     summary: game.summary,
     releaseDate: game.releaseDate,

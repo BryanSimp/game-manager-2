@@ -18,7 +18,7 @@ import { GAME_STATUSES, type GameStatus, type LibraryEntry } from "@gm/shared";
 import { authClient } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, STATUS_COLORS, statusStyle } from "@/lib/ui";
-import { useBadgeOpacity } from "@/lib/prefs";
+import { usePreferences } from "@/lib/prefs";
 
 const SORTS = [
   { key: "added", label: "Recent" },
@@ -172,7 +172,8 @@ function FilterChip({
 }
 
 function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => void }) {
-  const status = statusStyle(entry.status, useBadgeOpacity());
+  const prefs = usePreferences();
+  const status = statusStyle(entry.status, prefs?.badgeOpacity ?? 100);
   const cover = resolveImage(entry.game.coverSrc);
   const ttb = formatHours(entry.game.ttbMain);
   return (
@@ -188,7 +189,9 @@ function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => vo
           <View style={[styles.badge, { backgroundColor: status.bg }]}>
             <Text style={[styles.badgeText, { color: status.text }]}>{status.label}</Text>
           </View>
-          {entry.rating != null && <Text style={styles.rating}>★ {entry.rating}</Text>}
+          {entry.rating != null && (prefs?.showRating ?? true) && (
+            <Text style={styles.rating}>★ {entry.rating}</Text>
+          )}
           {ttb && <Text style={styles.ttb}>⏱ {ttb}</Text>}
         </View>
         {entry.platforms.length > 0 && (

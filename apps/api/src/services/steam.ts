@@ -95,6 +95,41 @@ export async function getOwnedGames(steamId: string): Promise<SteamOwnedGame[]> 
   return games;
 }
 
+/**
+ * Release year for an app, from the public storefront API (no key, not part
+ * of the Web API). Used only to break ties between identically-named games —
+ * "Deadlock" is a 1996 strategy game *and* a 2024 Valve shooter, and title
+ * similarity alone can't tell them apart.
+ *
+ * Cached for the process lifetime; misses are cached too so a store page that
+ * doesn't exist isn't re-requested on every import.
+ */
+const releaseYearCache = new Map<number, number | null>();
+
+export async function getAppReleaseYear(appId: number): Promise<number | null> {
+  const cached = releaseYearCache.get(appId);
+  if (cached !== undefined) return cached;
+  const year = await throttled(async () => {
+    try {
+      const res = await fetch(
+        `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=release_date`,
+      );
+      if (!res.ok) return null;
+      const body = (await res.json()) as Record<
+        string,
+        { success?: boolean; data?: { release_date?: { date?: string } } }
+      >;
+      const date = body[String(appId)]?.data?.release_date?.date;
+      const match = date?.match(/\b(\d{4})\b/);
+      return match ? Number(match[1]) : null;
+    } catch {
+      return null; // the store API is best-effort; a miss just means no tiebreak
+    }
+  });
+  releaseYearCache.set(appId, year);
+  return year;
+}
+
 /** Achievement definitions for a game; empty when the game has none. */
 export async function getSchemaAchievements(appId: number): Promise<SteamSchemaAchievement[]> {
   const data = await steamGet<{

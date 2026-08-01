@@ -22,7 +22,7 @@ export function imagePath(filename: string): string {
  */
 export async function cacheRemoteImage(
   url: string,
-  kind: "cover" | "background" | "custom_cover",
+  kind: "cover" | "background" | "custom_cover" | "console_logo",
   ownerUserId?: string,
 ): Promise<string | null> {
   try {

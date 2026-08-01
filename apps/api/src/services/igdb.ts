@@ -119,6 +119,69 @@ export async function searchIgdb(
   );
 }
 
+/** IGDB's id for the Steam storefront in `external_game_sources`. */
+const IGDB_STEAM_SOURCE = 1;
+
+/**
+ * The IGDB game a Steam appid belongs to, from IGDB's own external-id table.
+ * This is an exact answer where matching by title is a guess: two games
+ * called "Deadlock" have one appid each, and only this says which is which.
+ *
+ * Note the field is `external_game_source`, not the older `category` — that
+ * one still exists on the endpoint but no longer matches anything.
+ */
+export async function findIgdbGameBySteamAppId(appId: number): Promise<number | null> {
+  try {
+    const rows = await igdbRequest<{ id: number; game?: number | { id: number } }>(
+      "external_games",
+      `fields game, uid; where external_game_source = ${IGDB_STEAM_SOURCE} & uid = "${appId}"; limit 1;`,
+    );
+    const game = rows?.[0]?.game;
+    if (typeof game === "number") return game;
+    return game?.id ?? null;
+  } catch {
+    return null; // fall back to matching by name
+  }
+}
+
+/**
+ * Every logo IGDB has for a platform: the platform's own, plus one per
+ * hardware revision (Switch OLED, PS4 Pro…), so the art picker has more than
+ * a single option to offer.
+ */
+export async function getIgdbPlatformLogos(
+  igdbPlatformId: number,
+): Promise<Array<{ imageId: string; label: string | null }>> {
+  try {
+    const rows = await igdbRequest<{
+      id: number;
+      name: string;
+      platform_logo?: { image_id: string };
+      versions?: Array<{ name?: string; platform_logo?: { image_id: string } }>;
+    }>(
+      "platforms",
+      `fields name, platform_logo.image_id, versions.name, versions.platform_logo.image_id;
+       where id = ${igdbPlatformId}; limit 1;`,
+    );
+    const platform = rows?.[0];
+    if (!platform) return [];
+    const logos: Array<{ imageId: string; label: string | null }> = [];
+    if (platform.platform_logo) {
+      logos.push({ imageId: platform.platform_logo.image_id, label: platform.name });
+    }
+    for (const version of platform.versions ?? []) {
+      if (version.platform_logo) {
+        logos.push({ imageId: version.platform_logo.image_id, label: version.name ?? null });
+      }
+    }
+    // IGDB repeats the base logo as a version logo more often than not
+    const seen = new Set<string>();
+    return logos.filter((l) => !seen.has(l.imageId) && seen.add(l.imageId));
+  } catch {
+    return [];
+  }
+}
+
 /** Platform metadata for the consoles page — logo, and a summary if IGDB has one. */
 export async function getIgdbPlatform(igdbPlatformId: number): Promise<IgdbPlatform | null> {
   try {

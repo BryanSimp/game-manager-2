@@ -9,6 +9,7 @@ import type {
   CoverOptions,
   CategoryView,
   ChecklistDetail,
+  ConsoleArtCandidate,
   ConsoleSummary,
   FriendLibrary,
   FriendsOverview,
@@ -18,6 +19,8 @@ import type {
   GameProgress,
   ImportMissionsInput,
   MissionSuggestion,
+  SteamImportRule,
+  SteamImportRuleInput,
   SteamStatus,
   CollectionDetail,
   CollectionLayoutInput,
@@ -156,6 +159,22 @@ export class ApiClient {
 
   removeConsoleImage(platformId: string): Promise<{ ok: true }> {
     return this.request(`/api/consoles/${platformId}/image`, { method: "DELETE" });
+  }
+
+  /** Logos to choose from, from IGDB and Wikimedia Commons. */
+  getConsoleArt(platformId: string): Promise<{ images: ConsoleArtCandidate[] }> {
+    return this.request(`/api/consoles/${platformId}/images`);
+  }
+
+  /** Use one of those, downloaded server-side. */
+  setConsoleImageFromUrl(
+    platformId: string,
+    url: string,
+  ): Promise<{ imageId: string; customImageSrc: string }> {
+    return this.request(`/api/consoles/${platformId}/image/from-url`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    });
   }
 
   lookupBarcode(code: string): Promise<BarcodeLookupResult> {
@@ -534,6 +553,21 @@ export class ApiClient {
 
   getEntryAchievements(entryId: string): Promise<GameAchievements> {
     return this.request<GameAchievements>(`/api/library/${entryId}/achievements`);
+  }
+
+  /** Apps you've blocked from importing, or pinned to a particular game. */
+  getSteamRules(): Promise<SteamImportRule[]> {
+    return this.request<SteamImportRule[]>("/api/steam/rules");
+  }
+
+  saveSteamRule(
+    input: SteamImportRuleInput,
+  ): Promise<{ ok: true; gameId: string | null; replacedWithEntryId: string | null }> {
+    return this.request("/api/steam/rules", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  deleteSteamRule(steamAppId: number): Promise<{ ok: true }> {
+    return this.request(`/api/steam/rules/${steamAppId}`, { method: "DELETE" });
   }
 
   saveSteamApiKey(apiKey: string): Promise<{ ok: true }> {

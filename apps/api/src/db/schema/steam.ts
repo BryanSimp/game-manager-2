@@ -1,5 +1,6 @@
 import {
   index,
+  integer,
   pgTable,
   primaryKey,
   text,
@@ -21,6 +22,29 @@ export const steamAccounts = pgTable("steam_accounts", {
   lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Per-user decisions about individual Steam apps, applied on every import.
+ * Matching by title alone can't tell two games called "Deadlock" apart, so
+ * this is the manual override: 'block' keeps an app out of the library for
+ * good, 'map' pins it to the game you say it is.
+ */
+export const steamImportRules = pgTable(
+  "steam_import_rules",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    steamAppId: integer("steam_app_id").notNull(),
+    action: text("action").notNull(), // block | map
+    // the game 'map' pins this app to; null for 'block'
+    gameId: uuid("game_id").references(() => games.id, { onDelete: "cascade" }),
+    // Steam's own name for the app, so the rule list reads as something
+    appName: text("app_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.steamAppId] })],
+);
 
 /** Shared achievement catalog per game (provider-scoped, Steam first). */
 export const achievements = pgTable(

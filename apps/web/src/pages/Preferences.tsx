@@ -187,6 +187,11 @@ export function PreferencesPage() {
             checked={p?.showPlatformBadge ?? true}
             onChange={(v) => save.mutate({ showPlatformBadge: v })}
           />
+          <Toggle
+            label="Show your star rating"
+            checked={p?.showRating ?? true}
+            onChange={(v) => save.mutate({ showRating: v })}
+          />
         </div>
 
         <BadgeOpacity
