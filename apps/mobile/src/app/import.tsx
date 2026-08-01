@@ -13,7 +13,7 @@ import {
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GAME_STATUSES, type GameStatus, type ImportCandidate, type ImportItem } from "@gm/shared";
+import { BUILTIN_CATEGORIES, GAME_STATUSES, type GameStatus, type ImportCandidate, type ImportItem } from "@gm/shared";
 import { api } from "@/lib/api";
 
 interface ReviewItem {
@@ -27,13 +27,10 @@ interface ReviewItem {
   status: GameStatus;
 }
 
-const STATUS_CHIP: Record<GameStatus, { label: string; color: string }> = {
-  wishlist: { label: "Wishlist", color: "#38bdf8" },
-  backlog: { label: "Backlog", color: "#fbbf24" },
-  playing: { label: "Playing", color: "#818cf8" },
-  finished: { label: "Finished", color: "#34d399" },
-  dropped: { label: "Dropped", color: "#fb7185" },
-};
+/** Chip styling for the import review screen, from the shared built-ins. */
+const STATUS_CHIP: Record<string, { label: string; color: string }> = Object.fromEntries(
+  BUILTIN_CATEGORIES.map((c) => [c.key, { label: c.label, color: c.color }]),
+);
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Queued…",

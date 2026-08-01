@@ -1,21 +1,31 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GAME_STATUSES, type GameStatus, type Preferences } from "@gm/shared";
+import { BUILTIN_CATEGORIES, type Preferences } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { SteamCard } from "../components/SteamCard.js";
-import { STATUS_META } from "../lib/format.js";
+import { useCategories } from "../lib/categories.js";
 
-const DEFAULT_HEX: Record<GameStatus, string> = {
-  wishlist: "#38bdf8",
-  backlog: "#fbbf24",
-  playing: "#818cf8",
-  finished: "#34d399",
-  dropped: "#fb7185",
-};
+const DEFAULT_HEX: Record<string, string> = Object.fromEntries(
+  BUILTIN_CATEGORIES.map((c) => [c.key, c.color]),
+);
 
 export function PreferencesPage() {
   const queryClient = useQueryClient();
   const prefs = useQuery({ queryKey: ["preferences"], queryFn: () => api.getPreferences() });
+  const categories = useCategories();
+  const [newCategory, setNewCategory] = useState("");
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+
+  const createCategory = useMutation({
+    mutationFn: (name: string) => api.createCategory({ name }),
+    onSuccess: () => {
+      setNewCategory("");
+      setCategoryError(null);
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
+    },
+    onError: (err: Error) => setCategoryError(err.message),
+  });
 
   const save = useMutation({
     mutationFn: (patch: Partial<Preferences>) => api.savePreferences(patch),
@@ -24,7 +34,7 @@ export function PreferencesPage() {
 
   const p = prefs.data;
 
-  function setStatusColor(status: GameStatus, hex: string) {
+  function setStatusColor(status: string, hex: string) {
     save.mutate({ statusColors: { ...(p?.statusColors ?? {}), [status]: hex } });
   }
 
@@ -35,13 +45,70 @@ export function PreferencesPage() {
       <SteamCard />
 
       <section className="mb-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-        <h2 className="text-lg font-semibold">Status colors</h2>
+        <h2 className="text-lg font-semibold">Categories</h2>
         <p className="mt-1 text-sm text-zinc-400">
-          Pick your own color for each status — used on cards, badges, and the dashboard.
+          Built-in categories can be recoloured but not removed. Add your own for anything
+          else you want to track.
+        </p>
+
+        <label className="mt-4 flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+          New games go to
+          <select
+            value={p?.defaultStatus ?? "backlog"}
+            onChange={(e) => save.mutate({ defaultStatus: e.target.value })}
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
+          >
+            {(categories ?? []).map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="mt-4 space-y-2">
+          {(categories ?? [])
+            .filter((c) => !c.builtIn)
+            .map((c) => (
+              <CustomCategoryRow key={c.key} id={c.key} name={c.label} count={c.count} />
+            ))}
+        </div>
+
+        <form
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            if (newCategory.trim()) createCategory.mutate(newCategory.trim());
+          }}
+          className="mt-3 flex gap-2"
+        >
+          <input
+            value={newCategory}
+            onChange={(ev) => setNewCategory(ev.target.value)}
+            placeholder="+ new category (e.g. Replaying)"
+            className="min-w-0 flex-1 rounded-lg border border-dashed border-zinc-700 bg-transparent px-3 py-1.5 text-sm outline-none placeholder:text-zinc-600 focus:border-indigo-500"
+          />
+          {newCategory.trim() && (
+            <button
+              type="submit"
+              disabled={createCategory.isPending}
+              className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold hover:bg-indigo-500"
+            >
+              Add
+            </button>
+          )}
+        </form>
+        {categoryError && <p className="mt-2 text-xs text-amber-400">{categoryError}</p>}
+      </section>
+
+      <section className="mb-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <h2 className="text-lg font-semibold">Category colors</h2>
+        <p className="mt-1 text-sm text-zinc-400">
+          Pick your own color for each category — used on cards, badges, and the dashboard.
         </p>
         <div className="mt-4 space-y-3">
-          {GAME_STATUSES.map((s) => {
-            const current = p?.statusColors?.[s] ?? DEFAULT_HEX[s];
+          {(categories ?? []).map((cat) => {
+            const s = cat.key;
+            const current = p?.statusColors?.[s] ?? cat.color ?? DEFAULT_HEX[s] ?? "#71717a";
             return (
               <div key={s} className="flex items-center gap-3">
                 <input
@@ -58,7 +125,7 @@ export function PreferencesPage() {
                     borderColor: `${current}66`,
                   }}
                 >
-                  {STATUS_META[s].label}
+                  {cat.label}
                 </span>
               </div>
             );
@@ -116,5 +183,57 @@ function Toggle({
         />
       </button>
     </label>
+  );
+}
+
+
+/** One custom category: rename in place, or delete it. */
+function CustomCategoryRow({ id, name, count }: { id: string; name: string; count: number }) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState(name);
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["categories"] });
+    queryClient.invalidateQueries({ queryKey: ["library"] });
+  };
+
+  const rename = useMutation({
+    mutationFn: (next: string) => api.updateCategory(id, { name: next }),
+    onSuccess: refresh,
+  });
+  const remove = useMutation({
+    mutationFn: () => api.deleteCategory(id),
+    onSuccess: refresh,
+  });
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        value={draft}
+        onChange={(ev) => setDraft(ev.target.value)}
+        onBlur={() => {
+          const next = draft.trim();
+          if (next && next !== name) rename.mutate(next);
+          else if (!next) setDraft(name);
+        }}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") ev.currentTarget.blur();
+          if (ev.key === "Escape") setDraft(name);
+        }}
+        className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
+      />
+      <span className="shrink-0 text-xs text-zinc-600">{count} games</span>
+      <button
+        onClick={() => {
+          const msg =
+            count > 0
+              ? `Delete "${name}"? Its ${count} game(s) move to Uncategorized.`
+              : `Delete "${name}"?`;
+          if (confirm(msg)) remove.mutate();
+        }}
+        className="shrink-0 px-1 text-xs text-zinc-600 hover:text-red-400"
+      >
+        ✕
+      </button>
+    </div>
   );
 }

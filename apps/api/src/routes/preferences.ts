@@ -1,12 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { GAME_STATUSES } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
+import { isValidCategory } from "../services/categories.js";
 
 const DEFAULTS = {
   theme: "dark",
+  defaultStatus: "backlog",
   statusColors: null as Record<string, string> | null,
   showPlatformBadge: true,
   showTimeBadge: true,
@@ -16,10 +17,9 @@ const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 
 const prefsSchema = z.object({
   theme: z.enum(["dark", "light"]).optional(),
-  statusColors: z
-    .partialRecord(z.enum(GAME_STATUSES), hexColor)
-    .nullable()
-    .optional(),
+  // keys are category keys — built-in or custom — so this is a plain record
+  statusColors: z.record(z.string().min(1).max(64), hexColor).nullable().optional(),
+  defaultStatus: z.string().min(1).max(64).optional(),
   showPlatformBadge: z.boolean().optional(),
   showTimeBadge: z.boolean().optional(),
 });
@@ -35,6 +35,7 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
     if (!row) return DEFAULTS;
     return {
       theme: row.theme,
+      defaultStatus: row.defaultStatus,
       statusColors: (row.statusColors as Record<string, string> | null) ?? null,
       showPlatformBadge: row.showPlatformBadge,
       showTimeBadge: row.showTimeBadge,
@@ -48,9 +49,18 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
     if (!parsed.success) {
       return reply.status(400).send({ message: parsed.error.issues[0]?.message });
     }
+    if (
+      parsed.data.defaultStatus !== undefined &&
+      !(await isValidCategory(user.id, parsed.data.defaultStatus))
+    ) {
+      return reply.status(400).send({ message: "Unknown category" });
+    }
     const values = {
       userId: user.id,
       ...(parsed.data.theme !== undefined && { theme: parsed.data.theme }),
+      ...(parsed.data.defaultStatus !== undefined && {
+        defaultStatus: parsed.data.defaultStatus,
+      }),
       ...(parsed.data.statusColors !== undefined && { statusColors: parsed.data.statusColors }),
       ...(parsed.data.showPlatformBadge !== undefined && {
         showPlatformBadge: parsed.data.showPlatformBadge,

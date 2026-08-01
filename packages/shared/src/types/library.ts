@@ -1,11 +1,9 @@
 import type {
   ChecklistKind,
-  GameStatus,
   OwnershipFormat,
   PlatformFamily,
   ProgressBasis,
 } from "../constants.js";
-
 export interface GameSummary {
   id: string;
   igdbId: number | null;
@@ -18,7 +16,6 @@ export interface GameSummary {
   ttbCompletionist: number | null;
   ttbSource: "igdb" | "manual" | null;
 }
-
 export interface OwnedPlatform {
   platformId: string;
   name: string;
@@ -30,17 +27,15 @@ export interface OwnedPlatform {
   boxArtW?: number | null;
   boxArtH?: number | null;
 }
-
 export interface Tag {
   id: string;
   name: string;
   color: string | null;
   groupName: string | null;
 }
-
 export interface LibraryEntry {
   id: string;
-  status: GameStatus;
+  status: string;
   rating: number | null;
   notes: string | null;
   ttbEnabled: boolean;
@@ -63,7 +58,6 @@ export interface LibraryEntry {
   platforms: OwnedPlatform[];
   tags: Tag[];
 }
-
 export interface Platform {
   id: string;
   name: string;
@@ -71,7 +65,6 @@ export interface Platform {
   family: PlatformFamily;
   sortOrder: number;
 }
-
 export interface SearchResult {
   igdbId: number | null;
   gameId: string | null;
@@ -82,70 +75,62 @@ export interface SearchResult {
   summary: string | null;
   inLibrary: boolean;
 }
-
 export interface SearchResponse {
   igdb: boolean;
   results: SearchResult[];
 }
-
 export interface AddGameInput {
   igdbId?: number;
   gameId?: string;
   title?: string;
-  status?: GameStatus;
+  status?: string;
 }
-
 export interface UpdateEntryInput {
-  status?: GameStatus;
+  status?: string;
   rating?: number | null;
   notes?: string | null;
   ttbEnabled?: boolean;
   completed100?: boolean;
   progressBasis?: ProgressBasis;
 }
-
 export interface BulkUpdateInput {
   ids: string[];
-  status?: GameStatus;
+  status?: string;
   ttbEnabled?: boolean;
   completed100?: boolean;
 }
-
 export interface BulkAddItem {
   igdbId?: number;
   title?: string;
-  status?: GameStatus;
+  status?: string;
 }
-
 export interface BulkAddResult {
   added: number;
   skipped: number;
   errors: string[];
 }
-
 export interface AdminSettings {
   igdbConfigured: boolean;
   igdbClientId: string | null;
   steamConfigured: boolean;
 }
-
 export interface TagInput {
   name: string;
   color?: string | null;
   groupName?: string | null;
 }
-
 export interface Preferences {
   theme: "dark" | "light";
-  statusColors: Partial<Record<GameStatus, string>> | null;
+  /** category a newly added game lands in */
+  defaultStatus: string;
+  /** keyed by category key — built-in or custom */
+  statusColors: Record<string, string> | null;
   showPlatformBadge: boolean;
   showTimeBadge: boolean;
 }
-
 export type ImportSource = "screenshot" | "shelf_photo" | "text_paste" | "steam";
 export type ImportJobStatus = "pending" | "ocr" | "matching" | "review" | "done" | "failed";
 export type ImportItemResolution = "pending" | "auto" | "manual" | "skipped";
-
 export interface ImportCandidate {
   igdbId: number | null;
   gameId: string | null;
@@ -153,7 +138,6 @@ export interface ImportCandidate {
   releaseYear: number | null;
   coverSrc: string | null;
 }
-
 export interface ImportJobSummary {
   id: string;
   source: ImportSource;
@@ -161,7 +145,6 @@ export interface ImportJobSummary {
   error: string | null;
   createdAt: string;
 }
-
 export interface ImportItem {
   id: string;
   rawText: string;
@@ -170,11 +153,9 @@ export interface ImportItem {
   confidence: number | null;
   resolution: ImportItemResolution;
 }
-
 export interface ImportJobDetail extends ImportJobSummary {
   items: ImportItem[];
 }
-
 export interface ShelfEntry {
   userGameId: string;
   gameId: string;
@@ -185,12 +166,11 @@ export interface ShelfEntry {
   boxArtW?: number | null;
   boxArtH?: number | null;
   format: OwnershipFormat;
-  status: GameStatus;
+  status: string;
   rating: number | null;
   releaseDate: string | null;
   position: number;
 }
-
 export interface ShelfRow {
   platform: {
     id: string;
@@ -201,7 +181,6 @@ export interface ShelfRow {
   };
   entries: ShelfEntry[];
 }
-
 export interface CollectionSummary {
   id: string;
   name: string;
@@ -210,7 +189,6 @@ export interface CollectionSummary {
   total: number;
   finished: number;
 }
-
 export interface CollectionNode {
   gameId: string;
   title: string;
@@ -218,16 +196,14 @@ export interface CollectionNode {
   x: number;
   y: number;
   userGameId: string | null;
-  status: GameStatus | null;
+  status: string | null;
 }
-
 export interface CollectionLink {
   id: string;
   fromGameId: string;
   toGameId: string;
   label: string | null;
 }
-
 export interface CollectionDetail {
   id: string;
   name: string;
@@ -236,14 +212,11 @@ export interface CollectionDetail {
   games: CollectionNode[];
   links: CollectionLink[];
 }
-
 export interface CollectionLayoutInput {
   nodes: Array<{ gameId: string; x: number; y: number }>;
   links: Array<{ fromGameId: string; toGameId: string; label?: string | null }>;
 }
-
 // ---- completionist checklists (Phase 7) ----
-
 export interface ChecklistSummary {
   id: string;
   title: string;
@@ -259,7 +232,6 @@ export interface ChecklistSummary {
   itemCount: number;
   doneCount: number;
 }
-
 export interface ChecklistItemView {
   id: string;
   position: number;
@@ -267,7 +239,6 @@ export interface ChecklistItemView {
   category: string | null;
   completedAt: string | null;
 }
-
 export interface ChecklistDetail {
   id: string;
   gameId: string;
@@ -280,14 +251,11 @@ export interface ChecklistDetail {
   authorName: string | null;
   items: ChecklistItemView[];
 }
-
 export interface GameChecklists {
   mine: ChecklistSummary[];
   public: ChecklistSummary[];
 }
-
 // ---- mission progress + time remaining ----
-
 /** One wiki page that looks like it holds a mission/chapter list. */
 export interface MissionSourceCandidate {
   wikiName: string;
@@ -296,7 +264,6 @@ export interface MissionSourceCandidate {
   pageTitle: string;
   url: string;
 }
-
 /**
  * A parsed mission list, returned for review. Nothing is saved until the
  * user confirms — wiki parsing is heuristic and picks up stray rows.
@@ -311,7 +278,6 @@ export interface MissionSuggestion {
   /** other pages worth trying if this one parsed badly */
   alternatives: MissionSourceCandidate[];
 }
-
 export interface ImportMissionsInput {
   title: string;
   missions: string[];
@@ -319,7 +285,6 @@ export interface ImportMissionsInput {
   /** defaults to 'missions' (the timed main-story list) */
   kind?: Extract<ChecklistKind, "missions" | "side_quests">;
 }
-
 /** Time-remaining estimate for one library entry. */
 export interface GameProgress {
   basis: ProgressBasis;
@@ -333,9 +298,7 @@ export interface GameProgress {
   perItemSeconds: number | null;
   remainingSeconds: number | null;
 }
-
 // ---- Steam (Phase 8) ----
-
 export interface SteamStatus {
   configured: boolean; // server has an API key
   linked: boolean;
@@ -346,7 +309,6 @@ export interface SteamStatus {
   importing: boolean;
   syncing: boolean;
 }
-
 export interface AchievementView {
   id: string;
   name: string;
@@ -356,14 +318,12 @@ export interface AchievementView {
   unlockedAt: string | null;
   unlocked: boolean;
 }
-
 export interface GameAchievements {
   total: number;
   unlocked: number;
   achievements: AchievementView[];
   steamPlaytimeMinutes: number | null;
 }
-
 export interface BarcodeLookupResult {
   found: boolean;
   product: string | null;
@@ -372,10 +332,9 @@ export interface BarcodeLookupResult {
   candidates: ImportCandidate[];
   confidence: number;
 }
-
 export interface DashboardData {
   total: number;
-  statusCounts: Partial<Record<GameStatus, number>>;
+  statusCounts: Record<string, number>;
   platformCounts: Array<{
     name: string;
     abbreviation: string | null;
@@ -391,9 +350,7 @@ export interface DashboardData {
     coverSrc: string | null;
   }>;
 }
-
 // ---- friends ----
-
 export interface FriendSummary {
   userId: string;
   name: string;
@@ -402,7 +359,6 @@ export interface FriendSummary {
   gamesInCommon: number;
   libraryCount: number;
 }
-
 /** A request awaiting a decision — incoming to you, or sent by you. */
 export interface FriendRequest {
   id: string;
@@ -410,7 +366,6 @@ export interface FriendRequest {
   name: string;
   createdAt: string;
 }
-
 export interface FriendsOverview {
   /** your own code, generated on first view */
   friendCode: string;
@@ -418,7 +373,6 @@ export interface FriendsOverview {
   incoming: FriendRequest[];
   outgoing: FriendRequest[];
 }
-
 /**
  * One game in a friend's library. Deliberately narrower than LibraryEntry:
  * notes are private and never leave their owner's account.
@@ -428,19 +382,37 @@ export interface FriendLibraryEntry {
   title: string;
   coverSrc: string | null;
   releaseDate: string | null;
-  status: GameStatus;
+  status: string;
   rating: number | null;
   completed100: boolean;
   platforms: string[];
   /** true when this game is in your library too */
   inCommon: boolean;
   /** your status for it, when you have it */
-  myStatus: GameStatus | null;
+  myStatus: string | null;
 }
-
 export interface FriendLibrary {
   friend: { userId: string; name: string };
   entries: FriendLibraryEntry[];
   total: number;
   inCommon: number;
+}
+// ---- categories ----
+/**
+ * A category as the UI needs it: built-ins and custom ones resolved into the
+ * same shape, so chips and filters don't care which kind they're rendering.
+ */
+export interface CategoryView {
+  /** stored in user_games.status — a built-in key, or a custom category id */
+  key: string;
+  label: string;
+  color: string;
+  builtIn: boolean;
+  sortOrder: number;
+  /** how many of your games are in it */
+  count: number;
+}
+export interface CategoryInput {
+  name: string;
+  color?: string | null;
 }

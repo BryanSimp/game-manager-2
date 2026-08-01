@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GAME_STATUSES, type BulkUpdateInput, type GameStatus, type LibraryEntry } from "@gm/shared";
+import type { BulkUpdateInput, LibraryEntry } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { GameCard } from "../components/GameCard.js";
-import { STATUS_META, statusChip } from "../lib/format.js";
+import { statusChip, statusLabel } from "../lib/format.js";
+import { useCategories } from "../lib/categories.js";
 import { usePreferences } from "../lib/prefs.js";
 
 type SortKey = "title" | "rating" | "release" | "added" | "ttb" | "estimated";
@@ -47,8 +48,9 @@ function sortEntries(entries: LibraryEntry[], sort: SortKey): LibraryEntry[] {
 
 export function LibraryPage() {
   const prefs = usePreferences();
+  const categories = useCategories();
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<GameStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [only100, setOnly100] = useState(false);
   const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [tagFilter, setTagFilter] = useState<string>("all");
@@ -188,8 +190,9 @@ export function LibraryPage() {
           active={statusFilter === "all"}
           onClick={() => setStatusFilter("all")}
         />
-        {GAME_STATUSES.map((s) => {
-          const chip = statusChip(s, prefs);
+        {(categories ?? []).map((cat) => {
+          const s = cat.key;
+          const chip = statusChip(s, prefs, categories);
           return (
             <span key={s} className="inline-flex items-center gap-1">
               <button
@@ -204,7 +207,7 @@ export function LibraryPage() {
                 }`}
                 style={statusFilter === s ? chip.style : undefined}
               >
-                {STATUS_META[s].label} ({counts.get(s) ?? 0})
+                {cat.label} ({counts.get(s) ?? 0})
               </button>
               {s === "finished" && statusFilter === "finished" && (
                 <button
@@ -243,14 +246,14 @@ export function LibraryPage() {
           </button>
           <span className="mx-1 h-5 w-px bg-zinc-700" />
           <span className="text-xs text-zinc-400">Set status:</span>
-          {GAME_STATUSES.map((s) => (
+          {(categories ?? []).map(({ key: s }) => (
             <button
               key={s}
               disabled={selected.size === 0 || bulkUpdate.isPending}
               onClick={() => bulkUpdate.mutate({ status: s })}
               className="rounded-full border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:border-zinc-500 hover:text-white disabled:opacity-40"
             >
-              {STATUS_META[s].label}
+              {statusLabel(s, categories)}
             </button>
           ))}
           <span className="mx-1 h-5 w-px bg-zinc-700" />

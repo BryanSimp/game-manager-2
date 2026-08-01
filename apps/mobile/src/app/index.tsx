@@ -17,7 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { GAME_STATUSES, type GameStatus, type LibraryEntry } from "@gm/shared";
 import { authClient } from "@/lib/auth";
 import { api } from "@/lib/api";
-import { formatHours, resolveImage, STATUS_COLORS } from "@/lib/ui";
+import { formatHours, resolveImage, STATUS_COLORS, statusStyle } from "@/lib/ui";
 
 const SORTS = [
   { key: "added", label: "Recent" },
@@ -171,7 +171,7 @@ function FilterChip({
 }
 
 function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => void }) {
-  const status = STATUS_COLORS[entry.status];
+  const status = statusStyle(entry.status);
   const cover = resolveImage(entry.game.coverSrc);
   const ttb = formatHours(entry.game.ttbMain);
   return (

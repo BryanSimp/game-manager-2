@@ -1,20 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CollectionLink, CollectionNode, GameStatus } from "@gm/shared";
+import { BUILTIN_CATEGORIES, type CollectionLink, type CollectionNode } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 
 const NODE_W = 92;
 const NODE_H = 122;
 
-const STATUS_RING: Record<GameStatus, string> = {
-  wishlist: "#38bdf8",
-  backlog: "#fbbf24",
-  playing: "#818cf8",
-  finished: "#34d399",
-  dropped: "#fb7185",
-};
+/** Ring colour for a node's category; unknown/custom keys get a neutral grey. */
+function statusRing(status: string | null): string {
+  if (!status) return "#3f3f46";
+  return BUILTIN_CATEGORIES.find((c) => c.key === status)?.color ?? "#71717a";
+}
 
 interface LocalNode extends CollectionNode {}
 
@@ -293,11 +291,7 @@ export function CollectionDetailPage() {
                   rx={8}
                   fill="#18181b"
                   stroke={
-                    connectFrom === node.gameId
-                      ? "#818cf8"
-                      : node.status
-                        ? STATUS_RING[node.status]
-                        : "#3f3f46"
+                    connectFrom === node.gameId ? "#818cf8" : statusRing(node.status)
                   }
                   strokeWidth={connectFrom === node.gameId ? 3 : 2}
                 />

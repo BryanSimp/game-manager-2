@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import type { LibraryEntry } from "@gm/shared";
-import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
+import { formatHours, statusChip, statusLabel } from "../lib/format.js";
+import { useCategories } from "../lib/categories.js";
 import { usePreferences } from "../lib/prefs.js";
 import { StarRating } from "./StarRating.js";
 
@@ -17,7 +18,8 @@ export function GameCard({
   onToggleSelect?: () => void;
 }) {
   const prefs = usePreferences();
-  const chip = statusChip(entry.status, prefs);
+  const categories = useCategories();
+  const chip = statusChip(entry.status, prefs, categories);
   // once a game has a mission list, the badge counts down rather than showing
   // the same full length whatever your progress
   const estimating = entry.estimatedRemainingSeconds !== null;
@@ -41,12 +43,16 @@ export function GameCard({
           </div>
         )}
         <span className="absolute left-2 top-2 flex items-center gap-1">
-          <span
-            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${chip.className}`}
-            style={chip.style}
-          >
-            {STATUS_META[entry.status].label}
-          </span>
+          {/* uncategorized games show no badge at all — an empty corner is the
+              point of the category, not a chip that says "Uncategorized" */}
+          {entry.status !== "uncategorized" && (
+            <span
+              className={`rounded-full border px-2 py-0.5 text-xs font-medium ${chip.className}`}
+              style={chip.style}
+            >
+              {statusLabel(entry.status, categories)}
+            </span>
+          )}
           {entry.completed100 && (
             <span
               title="100% completed"

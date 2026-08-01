@@ -40,8 +40,17 @@ Phase 0–8 roadmap — read it before making design decisions.
   routing in prod → no CORS). Mobile = `@better-auth/expo` with SecureStore. First
   registered user becomes admin (databaseHook in `auth.ts`). Registration toggled by
   `ALLOW_REGISTRATION`.
-- **Statuses pinned to five**: wishlist/backlog/playing/finished/dropped (v1 had drift).
-  Defined once in `packages/shared/src/constants.ts`, used for the pg enum.
+- **Categories** (was "statuses pinned to five"): seven built-ins in
+  `BUILTIN_CATEGORIES` (`packages/shared/src/constants.ts`) — uncategorized,
+  wishlist, backlog, playing, finished, shelved, dropped — **plus per-user
+  `custom_categories`**. `user_games.status` is therefore **text**, not the old
+  pg enum: it holds a built-in key or a custom category's *id* (id, so renaming
+  a category doesn't rewrite game rows). Every write validates via
+  `isValidCategory`, which also scopes custom ids to their owner. Deleting a
+  custom category moves its games to `uncategorized` rather than orphaning them.
+  `uncategorized` is a real value, not a null column — nullable status would
+  have rippled through every filter, dashboard and shelf query; it renders as
+  *no* badge. The `game_status` pg type still exists but backs nothing.
 - **IGDB**: server-side only (`services/igdb.ts`), Twitch client-credentials token cached
   in memory, ~3 req/s throttle queue. Credentials resolve **DB settings table first, env
   fallback** (v1 pattern) — admin pastes them into web Settings. Every fetched game is
@@ -140,6 +149,9 @@ file to be provided for reference).
 - Steam achievements sync needs the profile's "Game details" privacy set to Public;
   the whole flow is untested against a real Steam account (needs a key + linked
   account — endpoints verified with mocked-level checks only).
+- Custom categories are **web-only to manage**; mobile renders them via
+  `statusStyle()` in `lib/ui.ts`, which falls back to a neutral chip for any
+  key it doesn't know. Mobile still shows only the built-in filter chips.
 - Checklist authoring is web-only on mobile (tracking + adopting work).
 - Friends is web-only — mobile has no friends screen yet, though the API is
   shared and ready for one.

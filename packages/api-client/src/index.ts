@@ -5,6 +5,8 @@ import type {
   BulkAddItem,
   BulkAddResult,
   BulkUpdateInput,
+  CategoryInput,
+  CategoryView,
   ChecklistDetail,
   FriendLibrary,
   FriendsOverview,
@@ -407,6 +409,29 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify({ completed }),
     });
+  }
+
+  // ---- categories ----
+
+  /** Built-ins and your custom categories, resolved with counts. */
+  getCategories(): Promise<CategoryView[]> {
+    return this.request<CategoryView[]>("/api/categories");
+  }
+
+  createCategory(input: CategoryInput): Promise<{ id: string }> {
+    return this.request("/api/categories", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  updateCategory(id: string, input: Partial<CategoryInput>): Promise<{ ok: true }> {
+    return this.request(`/api/categories/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+
+  /** Games filed under it move to 'uncategorized' rather than vanishing. */
+  deleteCategory(id: string): Promise<{ ok: true; movedToUncategorized: number }> {
+    return this.request(`/api/categories/${id}`, { method: "DELETE" });
   }
 
   // ---- friends ----
