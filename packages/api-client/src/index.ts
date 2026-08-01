@@ -6,6 +6,8 @@ import type {
   BulkAddResult,
   BulkUpdateInput,
   ChecklistDetail,
+  FriendLibrary,
+  FriendsOverview,
   ChecklistKind,
   GameAchievements,
   GameChecklists,
@@ -405,6 +407,37 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify({ completed }),
     });
+  }
+
+  // ---- friends ----
+
+  getFriends(): Promise<FriendsOverview> {
+    return this.request<FriendsOverview>("/api/friends");
+  }
+
+  /** Send a friend request by code. Returns 'accepted' if they'd already asked. */
+  sendFriendRequest(code: string): Promise<{ status: "pending" | "accepted"; name: string }> {
+    return this.request("/api/friends/requests", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  acceptFriendRequest(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/friends/requests/${id}/accept`, { method: "POST" });
+  }
+
+  /** Decline an incoming request, or withdraw one you sent. */
+  cancelFriendRequest(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/friends/requests/${id}`, { method: "DELETE" });
+  }
+
+  removeFriend(userId: string): Promise<{ ok: true }> {
+    return this.request(`/api/friends/${userId}`, { method: "DELETE" });
+  }
+
+  getFriendLibrary(userId: string): Promise<FriendLibrary> {
+    return this.request<FriendLibrary>(`/api/friends/${userId}/library`);
   }
 
   // ---- Steam ----

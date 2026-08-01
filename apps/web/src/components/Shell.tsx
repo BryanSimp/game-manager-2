@@ -60,6 +60,9 @@ export function Shell({ children }: { children: ReactNode }) {
             <Link to="/import" className={link}>
               Import
             </Link>
+            <Link to="/friends" className={link}>
+              Friends
+            </Link>
             <Link to="/tags" className={link}>
               Tags
             </Link>
