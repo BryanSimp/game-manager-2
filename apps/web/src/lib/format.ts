@@ -36,6 +36,20 @@ function withAlpha(color: string, alpha: number): string {
   return `${color}${byte.toString(16).padStart(2, "0")}`;
 }
 
+/** Blend two hex colours; `weight` is how much of `b` to take. */
+function mix(a: string, b: string, weight: number): string {
+  const parse = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const [ar, ag, ab] = parse(a);
+  const [br, bg, bb] = parse(b);
+  const channel = (x = 0, y = 0) => Math.round(x + (y - x) * weight);
+  return `#${[channel(ar, br), channel(ag, bg), channel(ab, bb)]
+    .map((n) => n.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+/** Card backdrop the badges sit on, so a badge stays readable over cover art. */
+const SURFACE = "#09090b";
+
 /** Badge opacity as a 0–1 multiplier; full strength until a preference says otherwise. */
 export function badgeAlpha(prefs: Preferences | undefined): number {
   return (prefs?.badgeOpacity ?? 100) / 100;
@@ -53,9 +67,12 @@ export function categoryColor(
 }
 
 /**
- * Chip appearance for a category: a tint of its colour, faded by the badge
- * opacity preference. Everything that draws a category badge goes through
- * here, which is what keeps the setting consistent across every page.
+ * Chip appearance for a category: the category's colour on a dark plate of
+ * the same hue, with the badge-opacity preference applied to the whole thing.
+ *
+ * The plate is nearly opaque at 100% on purpose — these badges sit on top of
+ * cover art, and a light tint over a busy image reads as broken rather than
+ * subtle. Turning the preference down is what makes them see-through.
  */
 export function statusChip(
   status: string,
@@ -67,9 +84,9 @@ export function statusChip(
   return {
     className: "border",
     style: {
-      backgroundColor: withAlpha(color, 0.15 * alpha),
+      backgroundColor: withAlpha(mix(color, SURFACE, 0.82), alpha),
       color: withAlpha(color, alpha),
-      borderColor: withAlpha(color, 0.4 * alpha),
+      borderColor: withAlpha(mix(color, SURFACE, 0.35), alpha),
     },
   };
 }

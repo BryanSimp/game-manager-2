@@ -92,6 +92,19 @@ Phase 0–8 roadmap — read it before making design decisions.
 - **Console art is per-user** (`user_consoles.custom_image_id`, image kind
   `console_logo`): platforms are shared rows, so one person's uploaded Steam
   logo can't be everyone's. Falls back to the IGDB logo, then the abbreviation.
+  Browsable as well as uploadable (`services/console-art.ts`): IGDB platform +
+  hardware-revision logos first, then Wikimedia Commons, whose files are
+  freely licensed and cover the storefronts IGDB doesn't model. Commons is a
+  text search, so `ART_QUERIES` disambiguates names that are ordinary English
+  words ("Steam logo" alone returns locomotives) and results are ranked by
+  title before being cut to 12.
+- **Steam matching goes by appid, not title** (`findIgdbGameBySteamAppId`):
+  IGDB's `external_games` maps a Steam appid straight to a game, which is the
+  only thing that separates two games called "Deadlock". Title matching (plus
+  a release-year tiebreak from the store API, capped per run) is the fallback
+  when IGDB has no mapping. On top of that, `steam_import_rules` is the manual
+  last word per user: `block` keeps an app out for good, `map` pins it to a
+  game — set from the game's page ("Wrong game?"), reviewed in the Steam card.
 - **jsonb only for display config** (dashboard layout, status colors) — everything else
   that v1 stored as JSON strings is normalized tables here.
 - **One funnel for category badges**: `statusChip()` (`apps/web/src/lib/format.ts`)
@@ -153,6 +166,7 @@ was dev-only). Never use `db push`.
 
 | 11 consoles | see git log | **The virtual shelf is gone** — route, both pages, `ShelfRow`/`ShelfEntry`, the shelf-order endpoint and `user_game_platforms.position` (migration 0012). In its place: `user_consoles` + `routes/consoles.ts` (list with per-console counts and cover previews, add, remove) and `services/consoles.ts`. Migration 0012 backfills the list from existing ownership so nobody starts empty. Web `/consoles` and `/console/$platformId`; mobile `consoles.tsx` is read-only. Also in this phase: **PC storefronts** (Steam/Epic/GOG/…) seeded as platforms with Steam import filing under Steam; **quick add** on `/add` (pinned platform + category, adds in place) and a **release-year** narrowing the IGDB search (`first_release_date` bracketed in UTC); **bulk platform edit** in the library's select mode (`platformMode: add\|replace\|remove`); preferences for **badge opacity** and a **default platform** (+format) applied by `POST /api/library` when the caller doesn't name one |
 | 11b sub-platforms | see git log | Storefronts became **children of PC** rather than siblings (`platforms.parent_platform_id`, migration 0013), so a Steam game counts as a PC game everywhere while still saying Steam. `ConsoleSelect` is now two dropdowns (platform, then storefront) and is used by quick add, import, preferences and bulk edit alike; the library filter gained `PC (all)` plus indented stores; the consoles page nests storefront cards under their platform. Added **Origin**, renamed Microsoft Store → **Xbox / Microsoft Store**. Per-user **console art** (`user_consoles.custom_image_id`, upload/reset on each card). Nav shrunk to `text-xs` so ten links stay on one row |
+| 11c import accuracy + polish | see git log | **Steam matching by appid**: `findIgdbGameBySteamAppId` (IGDB `external_games`, `external_game_source = 1`) resolves an appid to the exact game before any title matching; a store-API release-year tiebreak (`getAppReleaseYear`, capped per run) handles what's left. `steam_import_rules` (migration 0014) adds per-user `block`/`map` overrides, set from `SteamMatchFixer` on a game's page and reviewed in `SteamCard`. **Console art browsing** (`services/console-art.ts` → IGDB logos + Wikimedia Commons, `ConsoleArtBrowser`). **Badge chips** became dark plates of the category hue so they read over cover art at 100% opacity. Library hides empty category chips. `preferences.show_rating` hides card star ratings on web and mobile |
 
 **Next: Phase 6 (skipped for now, still open)** — email verification/password reset
 (better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
@@ -206,7 +220,18 @@ file to be provided for reference).
   platform summaries are usually empty or dry) but it does mean edits belong in
   `scripts/seed.ts`, not the database.
 - Badge opacity is one number for every category — there's no per-category
-  opacity, and it deliberately floors at 20% so a badge can't vanish.
+  opacity, and it deliberately floors at 20% so a badge can't vanish. The chip
+  is a dark plate of the category's own hue rather than a light tint: badges
+  sit on cover art, where a tint reads as broken rather than subtle.
+- The library's category chips hide categories with no games (the one you're
+  filtering by stays, so you can always click back out). The bulk-edit "Set
+  status" row still lists them all — you need to be able to move games *into*
+  an empty category.
+- Wikimedia Commons results are a plain text search: the odd unrelated file
+  turns up, and the picker says so rather than pretending otherwise.
+- Steam import rules are per user and keyed by appid. Blocking doesn't remove
+  a game that's already in the library — it only stops the next import from
+  putting it back.
 - Migration 0013's Steam backfill only moves games it can *prove* came from
   Steam (they carry a `steam_app_id`). Anything else you filed under plain PC
   stays there — a bulk platform edit in the library's select mode is the fix.

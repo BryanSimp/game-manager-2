@@ -139,6 +139,7 @@ export function SteamCard() {
               Unlink
             </button>
           </div>
+          <SteamRules />
         </>
       )}
 
@@ -154,5 +155,63 @@ export function SteamCard() {
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * Apps the importer has been told about by hand: skipped entirely, or pinned
+ * to a particular game. Rules are made from a game's page ("wrong match?");
+ * this is where they're reviewed and undone.
+ */
+function SteamRules() {
+  const queryClient = useQueryClient();
+  const rules = useQuery({ queryKey: ["steam-rules"], queryFn: () => api.getSteamRules() });
+
+  const remove = useMutation({
+    mutationFn: (steamAppId: number) => api.deleteSteamRule(steamAppId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["steam-rules"] }),
+  });
+
+  const list = rules.data ?? [];
+  if (list.length === 0) return null;
+
+  return (
+    <div className="mt-5 border-t border-zinc-800 pt-4">
+      <p className="text-sm font-semibold text-zinc-300">Import rules</p>
+      <p className="mt-1 text-xs text-zinc-500">
+        Set from a game's page when an import matched the wrong thing. They apply to every
+        import from now on.
+      </p>
+      <ul className="mt-3 space-y-1.5">
+        {list.map((rule) => (
+          <li key={rule.steamAppId} className="flex items-center gap-2 text-sm">
+            <span
+              className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+                rule.action === "block"
+                  ? "bg-red-950 text-red-300"
+                  : "bg-indigo-950 text-indigo-300"
+              }`}
+            >
+              {rule.action === "block" ? "never import" : "always import as"}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-zinc-400">
+              {rule.action === "map" ? (
+                <span className="text-zinc-200">{rule.gameTitle ?? "a game you picked"}</span>
+              ) : (
+                <span className="text-zinc-200">{rule.appName ?? `Steam app ${rule.steamAppId}`}</span>
+              )}
+              <span className="text-zinc-600"> · app {rule.steamAppId}</span>
+            </span>
+            <button
+              onClick={() => remove.mutate(rule.steamAppId)}
+              title="Drop this rule"
+              className="px-1 text-xs text-zinc-600 hover:text-red-400"
+            >
+              ✕
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

@@ -5,9 +5,15 @@ import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { backfillPlatformMeta, rememberConsoles } from "../services/consoles.js";
-import { saveUploadedImage } from "../services/images.js";
+import { searchConsoleArt } from "../services/console-art.js";
+import { cacheRemoteImage, saveUploadedImage } from "../services/images.js";
 
 const addSchema = z.object({ platformId: z.string().uuid() });
+
+const artUrlSchema = z.object({ url: z.string().url().max(1000) });
+
+/** Hosts the console-art endpoint will fetch — the two sources it offers. */
+const ALLOWED_ART_HOSTS = ["images.igdb.com", "upload.wikimedia.org"];
 
 const parentPlatform = alias(schema.platforms, "parent_platform");
 
@@ -193,6 +199,72 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
       }
       const buffer = await file.toBuffer();
       const imageId = await saveUploadedImage(buffer, file.mimetype, "console_logo", user.id);
+      await db
+        .update(schema.userConsoles)
+        .set({ customImageId: imageId })
+        .where(
+          and(
+            eq(schema.userConsoles.userId, user.id),
+            eq(schema.userConsoles.platformId, request.params.platformId),
+          ),
+        );
+      return { imageId, customImageSrc: `/api/images/${imageId}` };
+    },
+  );
+
+  /** Art you could use for this console, to browse instead of hunting for a file. */
+  app.get<{ Params: { platformId: string } }>(
+    "/api/consoles/:platformId/images",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const [platform] = await db
+        .select({
+          name: schema.platforms.name,
+          igdbPlatformId: schema.platforms.igdbPlatformId,
+        })
+        .from(schema.platforms)
+        .where(eq(schema.platforms.id, request.params.platformId));
+      if (!platform) return reply.status(404).send({ message: "Unknown console" });
+      return { images: await searchConsoleArt(platform.name, platform.igdbPlatformId) };
+    },
+  );
+
+  /**
+   * Use one of those images. Downloaded server-side, and the host is
+   * allowlisted so this can't be turned into a fetch-any-URL proxy.
+   */
+  app.post<{ Params: { platformId: string } }>(
+    "/api/consoles/:platformId/image/from-url",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const parsed = artUrlSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ message: "An image url is required" });
+
+      const [owned] = await db
+        .select({ platformId: schema.userConsoles.platformId })
+        .from(schema.userConsoles)
+        .where(
+          and(
+            eq(schema.userConsoles.userId, user.id),
+            eq(schema.userConsoles.platformId, request.params.platformId),
+          ),
+        );
+      if (!owned) return reply.status(404).send({ message: "Not on your list" });
+
+      let host: string;
+      try {
+        host = new URL(parsed.data.url).host;
+      } catch {
+        return reply.status(400).send({ message: "Invalid url" });
+      }
+      if (!ALLOWED_ART_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) {
+        return reply.status(400).send({ message: "That image host isn't allowed" });
+      }
+
+      const imageId = await cacheRemoteImage(parsed.data.url, "console_logo", user.id);
+      if (!imageId) return reply.status(502).send({ message: "Couldn't download that image" });
       await db
         .update(schema.userConsoles)
         .set({ customImageId: imageId })

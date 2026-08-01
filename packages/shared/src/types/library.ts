@@ -7,6 +7,8 @@ import type {
 export interface GameSummary {
   id: string;
   igdbId: number | null;
+  /** set when a Steam import linked this game to an app */
+  steamAppId: number | null;
   title: string;
   summary: string | null;
   releaseDate: string | null;
@@ -186,6 +188,8 @@ export interface Preferences {
   defaultPlatformFormat: OwnershipFormat;
   showPlatformBadge: boolean;
   showTimeBadge: boolean;
+  /** star ratings on library cards */
+  showRating: boolean;
   /** category-badge opacity in percent, applied wherever badges render */
   badgeOpacity: number;
 }
@@ -344,6 +348,37 @@ export interface SteamStatus {
   lastSyncAt: string | null;
   importing: boolean;
   syncing: boolean;
+}
+/**
+ * A per-user override for one Steam app. Title matching can't separate two
+ * games with the same name, so these are the manual last word on an import.
+ */
+export interface SteamImportRule {
+  steamAppId: number;
+  action: "block" | "map";
+  /** Steam's own name for the app, when we knew it */
+  appName: string | null;
+  /** for 'map': the game this app always imports as */
+  gameId: string | null;
+  gameTitle: string | null;
+  createdAt: string;
+}
+export interface SteamImportRuleInput {
+  steamAppId: number;
+  action: "block" | "map";
+  gameId?: string;
+  igdbId?: number;
+  appName?: string;
+  /** a mis-matched entry to replace with the pinned game, keeping playtime */
+  replaceEntryId?: string;
+}
+/** One piece of art you could use for a console. */
+export interface ConsoleArtCandidate {
+  id: string;
+  url: string;
+  thumbUrl: string;
+  source: "igdb" | "wikimedia";
+  label: string | null;
 }
 export interface AchievementView {
   id: string;

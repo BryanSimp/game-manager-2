@@ -228,7 +228,11 @@ export function LibraryPage() {
           active={statusFilter === "all"}
           onClick={() => setStatusFilter("all")}
         />
-        {(categories ?? []).map((cat) => {
+        {(categories ?? [])
+          // an empty category is nothing to filter by — but keep the one
+          // you're currently filtering by, so you can always click back out
+          .filter((cat) => (counts.get(cat.key) ?? 0) > 0 || statusFilter === cat.key)
+          .map((cat) => {
           const s = cat.key;
           const chip = statusChip(s, prefs, categories);
           return (

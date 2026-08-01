@@ -1,9 +1,12 @@
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
-import { matchTitle } from "../services/matcher.js";
+import { matchTitle, type MatchCandidate, type MatchResult } from "../services/matcher.js";
+import { similarity } from "../services/noise-filter.js";
 import { upsertGameFromIgdb } from "../services/catalog.js";
+import { findIgdbGameBySteamAppId } from "../services/igdb.js";
 import { rememberConsoles } from "../services/consoles.js";
 import {
+  getAppReleaseYear,
   getOwnedGames,
   getPlayerAchievements,
   getSchemaAchievements,
@@ -31,6 +34,39 @@ function cleanSteamName(name: string): string {
 /** Playtest/demo/soundtrack/server tools — never library material. */
 function isNoiseApp(name: string): boolean {
   return /\b(playtest|demo|dedicated server|soundtrack|sdk|beta test|test server)\b/i.test(name);
+}
+
+/** Store lookups are only worth it for genuine ties; cap them per import. */
+const MAX_YEAR_LOOKUPS = 40;
+
+/**
+ * Pick between candidates the title can't separate. Several games share a
+ * name — "Deadlock" is both a 1996 strategy game and Valve's 2024 shooter —
+ * and the matcher scores them identically, so the first one IGDB happens to
+ * return wins. Steam knows when the app was released; use that to choose.
+ */
+async function pickCandidate(
+  match: MatchResult,
+  appId: number,
+  budget: { left: number },
+): Promise<MatchCandidate | undefined> {
+  const top = match.candidates[0];
+  if (!top) return undefined;
+  const topScore = similarity(match.query, top.title);
+  const tied = match.candidates.filter(
+    (c) => Math.abs(similarity(match.query, c.title) - topScore) < 0.05,
+  );
+  if (tied.length < 2 || budget.left <= 0) return top;
+
+  budget.left--;
+  const year = await getAppReleaseYear(appId);
+  if (!year) return top;
+  // an exact year wins; a year either side covers regional release drift
+  return (
+    tied.find((c) => c.releaseYear === year) ??
+    tied.find((c) => c.releaseYear !== null && Math.abs(c.releaseYear - year) <= 1) ??
+    top
+  );
 }
 
 /**
@@ -78,29 +114,62 @@ export async function processSteamImport(userId: string): Promise<void> {
       );
     const reviewedAppIds = new Set(reviewed.map((r) => r.steamAppId!));
 
+    // per-user overrides: apps to skip entirely, and apps pinned to a game
+    const rules = await db
+      .select()
+      .from(schema.steamImportRules)
+      .where(eq(schema.steamImportRules.userId, userId));
+    const ruleByApp = new Map(rules.map((r) => [r.steamAppId, r]));
+
     const leftovers: Array<{ appid: number; name: string }> = [];
+    const yearBudget = { left: MAX_YEAR_LOOKUPS };
 
     for (const steamGame of owned) {
-      let gameId = gameByAppId.get(steamGame.appid) ?? null;
+      const rule = ruleByApp.get(steamGame.appid);
+      // blocked apps never come back, however they were matched last time
+      if (rule?.action === "block") continue;
+
+      let gameId = rule?.action === "map" ? rule.gameId : null;
+      if (gameId) {
+        // a pinned app owns the appid link, so achievements sync to the game
+        // you actually chose
+        await db
+          .update(schema.games)
+          .set({ steamAppId: steamGame.appid })
+          .where(and(eq(schema.games.id, gameId), isNull(schema.games.steamAppId)))
+          .catch(() => {});
+      }
+      gameId ??= gameByAppId.get(steamGame.appid) ?? null;
 
       if (!gameId) {
         if (reviewedAppIds.has(steamGame.appid)) continue;
-        const cleaned = cleanSteamName(steamGame.name);
-        const match = await matchTitle(cleaned);
-        const top = match.candidates[0];
-        if (top?.igdbId && match.confidence >= AUTO_ADD_THRESHOLD) {
-          gameId = await upsertGameFromIgdb(top.igdbId);
-          // remember the appid ↔ game link for achievements sync (never steal
-          // an existing link — unique constraint on steam_app_id)
-          await db
-            .update(schema.games)
-            .set({ steamAppId: steamGame.appid })
-            .where(and(eq(schema.games.id, gameId), isNull(schema.games.steamAppId)))
-            .catch(() => {});
-        } else {
-          leftovers.push({ appid: steamGame.appid, name: cleaned });
-          continue;
+
+        // IGDB knows which game an appid belongs to. Ask it first: matching by
+        // title can't tell two games with the same name apart, and picking the
+        // wrong one is a mistake that repeats on every future import.
+        const byAppId = await findIgdbGameBySteamAppId(steamGame.appid);
+        let igdbId = byAppId;
+
+        if (!igdbId) {
+          const cleaned = cleanSteamName(steamGame.name);
+          const match = await matchTitle(cleaned);
+          const top = await pickCandidate(match, steamGame.appid, yearBudget);
+          if (top?.igdbId && match.confidence >= AUTO_ADD_THRESHOLD) {
+            igdbId = top.igdbId;
+          } else {
+            leftovers.push({ appid: steamGame.appid, name: cleaned });
+            continue;
+          }
         }
+
+        gameId = await upsertGameFromIgdb(igdbId);
+        // remember the appid ↔ game link for achievements sync (never steal
+        // an existing link — unique constraint on steam_app_id)
+        await db
+          .update(schema.games)
+          .set({ steamAppId: steamGame.appid })
+          .where(and(eq(schema.games.id, gameId), isNull(schema.games.steamAppId)))
+          .catch(() => {});
       }
 
       // upsert library entry + playtime

@@ -15,6 +15,7 @@ import { StarRating } from "../components/StarRating.js";
 import { BoxViewer3D } from "../components/BoxViewer3D.js";
 import { ProgressPanel } from "../components/ProgressPanel.js";
 import { AddConsoleControl, FAMILY_LABELS } from "../components/ConsolePicker.js";
+import { SteamMatchFixer } from "../components/SteamMatchFixer.js";
 import { CoverBrowser } from "../components/CoverBrowser.js";
 import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
@@ -409,6 +410,8 @@ export function GameDetailPage() {
               </form>
             </div>
           </div>
+
+          <SteamMatchFixer entry={e} />
 
           <div className="mt-6 max-w-2xl">
             <p className="mb-1 text-sm font-semibold text-zinc-300">Notes</p>
