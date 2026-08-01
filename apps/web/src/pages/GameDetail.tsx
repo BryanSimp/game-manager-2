@@ -14,6 +14,7 @@ import { Shell } from "../components/Shell.js";
 import { StarRating } from "../components/StarRating.js";
 import { BoxViewer3D } from "../components/BoxViewer3D.js";
 import { ProgressPanel } from "../components/ProgressPanel.js";
+import { CoverBrowser } from "../components/CoverBrowser.js";
 import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 
@@ -48,6 +49,7 @@ export function GameDetailPage() {
   const [notesDirty, setNotesDirty] = useState(false);
   const [boxPlatform, setBoxPlatform] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
+  const [browsingCovers, setBrowsingCovers] = useState(false);
   useEffect(() => {
     if (entry.data && !notesDirty) setNotes(entry.data.notes ?? "");
   }, [entry.data, notesDirty]);
@@ -176,6 +178,12 @@ export function GameDetailPage() {
           )}
 
           <div className="mt-3 flex flex-col gap-2">
+            <button
+              onClick={() => setBrowsingCovers(true)}
+              className="rounded-lg bg-indigo-600/20 px-3 py-1.5 text-center text-xs font-semibold text-indigo-200 ring-1 ring-indigo-500/50 hover:bg-indigo-600/30"
+            >
+              🖼 Browse covers online
+            </button>
             <label className="cursor-pointer rounded-lg border border-zinc-700 px-3 py-1.5 text-center text-xs text-zinc-300 hover:bg-zinc-800">
               {uploadCover.isPending ? "Uploading…" : "Upload custom cover"}
               <input
@@ -427,6 +435,14 @@ export function GameDetailPage() {
           </div>
         </div>
       </div>
+
+      {browsingCovers && (
+        <CoverBrowser
+          entryId={id}
+          title={e.game.title}
+          onClose={() => setBrowsingCovers(false)}
+        />
+      )}
 
       {boxPlatform && (
         <div
