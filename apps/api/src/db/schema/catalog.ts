@@ -6,6 +6,7 @@ import {
   text,
   timestamp,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { imageKindEnum, platformFamilyEnum, ttbSourceEnum } from "./enums.js";
 import { user } from "./auth.js";
@@ -56,6 +57,16 @@ export const platforms = pgTable("platforms", {
   abbreviation: text("abbreviation"),
   family: platformFamilyEnum("family").notNull().default("other"),
   sortOrder: integer("sort_order").notNull().default(0),
+  /**
+   * Sub-platform parent: the PC storefronts (Steam, Epic, GOG…) hang off
+   * "PC". A game filed under Steam is still a PC game — anything that counts
+   * or filters by platform rolls children up into their parent, and only the
+   * badge and the consoles page care about which store it came from.
+   * One level deep, deliberately: nobody needs a store inside a store.
+   */
+  parentPlatformId: uuid("parent_platform_id").references((): AnyPgColumn => platforms.id, {
+    onDelete: "set null",
+  }),
   // first-region hardware launch, or the storefront's opening date
   releaseDate: date("release_date"),
   summary: text("summary"),

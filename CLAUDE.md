@@ -77,10 +77,21 @@ Phase 0–8 roadmap — read it before making design decisions.
   (`release_date`, `summary`) is curated in `apps/api/scripts/seed.ts`; IGDB fills
   in `logo_url`, and a summary only where the seed left one blank, lazily on first
   view (`meta_fetched_at` stamps the attempt so misses aren't retried).
-- **PC storefronts are platforms**: Steam, Epic, GOG, Battle.net, EA App, Ubisoft
-  Connect, Microsoft Store and itch.io sit in the `pc` family alongside the generic
-  **PC**, which stays for "where I bought it doesn't matter". Steam imports file
-  games under **Steam** (matched by name, not IGDB id — storefronts have none).
+- **PC storefronts are sub-platforms of PC**, via `platforms.parent_platform_id`
+  (one level deep — nobody needs a store inside a store). Steam, Epic, GOG,
+  Battle.net, Origin, EA App, Ubisoft Connect, Xbox / Microsoft Store and
+  itch.io are children of **PC**, which stays selectable on its own for "where
+  I bought it doesn't matter". A game filed under Steam **is** a PC game:
+  anything that counts or filters by platform rolls children into their parent
+  (the library's `PC (all)` option, the consoles page's `storefrontCount`,
+  `/console/$platformId`), while badges show the specific store. Owning a store
+  implies owning its parent — `rememberConsoles()` adds both via `withParents()`.
+  Steam imports file under **Steam**, matched by name because storefronts have
+  no IGDB platform id; migration 0013 moves pre-existing PC ownership of any
+  game with a `steam_app_id` onto Steam.
+- **Console art is per-user** (`user_consoles.custom_image_id`, image kind
+  `console_logo`): platforms are shared rows, so one person's uploaded Steam
+  logo can't be everyone's. Falls back to the IGDB logo, then the abbreviation.
 - **jsonb only for display config** (dashboard layout, status colors) — everything else
   that v1 stored as JSON strings is normalized tables here.
 - **One funnel for category badges**: `statusChip()` (`apps/web/src/lib/format.ts`)
@@ -141,6 +152,7 @@ was dev-only). Never use `db push`.
 | 10 friends | see git log | `friendships` (requester/addressee + `pending`/`accepted`, one row per pair in either direction) and `user.friend_code`, generated **lazily** on first friends-page view so existing accounts need no backfill. `services/friends.ts` owns the code alphabet (no O/0/I/1/L/S/5/B) and `normalizeFriendCode`, which validates rather than "corrects" lookalikes — a typo must fail to match, never match something else. Adding is **request → accept**: a code alone never exposes a library. `routes/friends.ts` returns the same "no one found" message for a bad code and for your own, so the endpoint can't be walked as a user directory. Friend library responses deliberately omit `notes`. Web: `/friends` (code, requests both ways, overlap counts) and `/friends/$userId` (their library, `inCommon` flagged, filter by everything/common/theirs) |
 
 | 11 consoles | see git log | **The virtual shelf is gone** — route, both pages, `ShelfRow`/`ShelfEntry`, the shelf-order endpoint and `user_game_platforms.position` (migration 0012). In its place: `user_consoles` + `routes/consoles.ts` (list with per-console counts and cover previews, add, remove) and `services/consoles.ts`. Migration 0012 backfills the list from existing ownership so nobody starts empty. Web `/consoles` and `/console/$platformId`; mobile `consoles.tsx` is read-only. Also in this phase: **PC storefronts** (Steam/Epic/GOG/…) seeded as platforms with Steam import filing under Steam; **quick add** on `/add` (pinned platform + category, adds in place) and a **release-year** narrowing the IGDB search (`first_release_date` bracketed in UTC); **bulk platform edit** in the library's select mode (`platformMode: add\|replace\|remove`); preferences for **badge opacity** and a **default platform** (+format) applied by `POST /api/library` when the caller doesn't name one |
+| 11b sub-platforms | see git log | Storefronts became **children of PC** rather than siblings (`platforms.parent_platform_id`, migration 0013), so a Steam game counts as a PC game everywhere while still saying Steam. `ConsoleSelect` is now two dropdowns (platform, then storefront) and is used by quick add, import, preferences and bulk edit alike; the library filter gained `PC (all)` plus indented stores; the consoles page nests storefront cards under their platform. Added **Origin**, renamed Microsoft Store → **Xbox / Microsoft Store**. Per-user **console art** (`user_consoles.custom_image_id`, upload/reset on each card). Nav shrunk to `text-xs` so ten links stay on one row |
 
 **Next: Phase 6 (skipped for now, still open)** — email verification/password reset
 (better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
@@ -178,18 +190,27 @@ file to be provided for reference).
   still fetched, but only lazily from `GET /api/library` (the shelf used to be
   what warmed them), and the viewer now lives only on a game's detail page.
 - Console logos come from IGDB and are **hot-linked**, not cached in
-  `/data/images` like covers — a handful of small PNGs wasn't worth an
-  `image_kind` enum value and a download path. Platforms IGDB doesn't know (the
-  PC storefronts, Switch 2) fall back to their abbreviation in a box.
+  `/data/images` like covers. Platforms IGDB doesn't know (the PC storefronts,
+  Switch 2) have no logo at all — upload your own art, or live with the
+  abbreviation in a box.
+- Sub-platforms are **one level deep and PC-only** in practice. Nothing stops
+  seeding a child elsewhere, but the UI assumes a two-level picker, and the
+  rollups (`withParents`, the library filter, `storefrontCount`) only ever look
+  one hop up.
+- A game can be filed under both PC and one of its storefronts at once; the
+  rollups de-duplicate by entry, so counts stay honest, but the card will show
+  both badges. Nothing prevents or tidies that — it's a legitimate "I own it on
+  Steam and GOG" state.
 - Curated platform summaries in the seed are **authoritative**: re-running
   `pnpm db:seed` overwrites anything IGDB filled in. That's deliberate (IGDB's
   platform summaries are usually empty or dry) but it does mean edits belong in
   `scripts/seed.ts`, not the database.
 - Badge opacity is one number for every category — there's no per-category
   opacity, and it deliberately floors at 20% so a badge can't vanish.
-- Steam import files games under **Steam**, but games imported before this change
-  are still on **PC**; nothing rewrites them. A bulk platform edit in the library's
-  select mode is the fix if that matters.
+- Migration 0013's Steam backfill only moves games it can *prove* came from
+  Steam (they carry a `steam_app_id`). Anything else you filed under plain PC
+  stays there — a bulk platform edit in the library's select mode is the fix.
+- Console art is web-only to change; mobile shows whatever you uploaded.
 - **Cover browsing** (`services/steamgriddb.ts`) needs a free SteamGridDB key in
   admin Settings (`steamgriddb_api_key`, DB-first with `STEAMGRIDDB_API_KEY`
   fallback). No key = `configured:false` and the browser hides itself rather

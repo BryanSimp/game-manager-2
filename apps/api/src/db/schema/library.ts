@@ -81,6 +81,8 @@ export const userConsoles = pgTable(
     platformId: uuid("platform_id")
       .notNull()
       .references(() => platforms.id, { onDelete: "cascade" }),
+    // your own art for this console, overriding the IGDB logo
+    customImageId: uuid("custom_image_id").references(() => images.id),
     addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.platformId] })],

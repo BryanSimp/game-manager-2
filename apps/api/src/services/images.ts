@@ -57,7 +57,7 @@ export async function cacheRemoteImage(
 export async function saveUploadedImage(
   buffer: Buffer,
   mime: string,
-  kind: "cover" | "custom_cover" | "shelf_photo" | "background",
+  kind: "cover" | "custom_cover" | "shelf_photo" | "background" | "console_logo",
   ownerUserId: string | null,
 ): Promise<string> {
   await ensureImageDir();

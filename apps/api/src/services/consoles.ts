@@ -9,7 +9,7 @@ import { getIgdbPlatform, igdbConfigured, igdbLogoUrl } from "./igdb.js";
  * Steam import, or a bulk edit — keeps the consoles page honest.
  */
 export async function rememberConsoles(userId: string, platformIds: string[]): Promise<void> {
-  const unique = [...new Set(platformIds)];
+  const unique = await withParents([...new Set(platformIds)]);
   if (unique.length === 0) return;
   await db
     .insert(schema.userConsoles)
@@ -24,6 +24,22 @@ export async function ownedConsoleIds(userId: string): Promise<Set<string>> {
     .from(schema.userConsoles)
     .where(eq(schema.userConsoles.userId, userId));
   return new Set(rows.map((r) => r.platformId));
+}
+
+/**
+ * Owning a storefront implies owning what it runs on: adding Steam without PC
+ * would leave a game filed under Steam invisible to anything that groups by
+ * the parent platform.
+ */
+export async function withParents(platformIds: string[]): Promise<string[]> {
+  if (platformIds.length === 0) return [];
+  const rows = await db
+    .select({ id: schema.platforms.id, parentId: schema.platforms.parentPlatformId })
+    .from(schema.platforms)
+    .where(inArray(schema.platforms.id, platformIds));
+  const out = new Set(platformIds);
+  for (const row of rows) if (row.parentId) out.add(row.parentId);
+  return [...out];
 }
 
 /**

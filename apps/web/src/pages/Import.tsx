@@ -9,6 +9,7 @@ import {
 } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
+import { ConsoleSelect } from "../components/ConsolePicker.js";
 import { STATUS_META, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 
@@ -41,7 +42,6 @@ export function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BulkAddResult | null>(null);
   // batch ownership: "this whole list is my <platform> library"
-  const platforms = useQuery({ queryKey: ["platforms"], queryFn: () => api.getPlatforms() });
   const [ownPlatformId, setOwnPlatformId] = useState("");
   const [ownFormat, setOwnFormat] = useState<"physical" | "digital">("digital");
 
@@ -325,20 +325,13 @@ export function ImportPage() {
             <p className="mr-auto text-sm text-zinc-400">
               {active.length} of {items.length} titles will be added — fix any wrong matches first
             </p>
-            <label className="flex items-center gap-2 text-sm text-zinc-400">
+            <label className="flex flex-wrap items-center gap-2 text-sm text-zinc-400">
               Mark all as owned on
-              <select
-                value={ownPlatformId}
-                onChange={(e) => setOwnPlatformId(e.target.value)}
-                className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-200"
-              >
-                <option value="">— don't set —</option>
-                {(platforms.data ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+              <ConsoleSelect
+                value={ownPlatformId || null}
+                onChange={(platformId) => setOwnPlatformId(platformId ?? "")}
+                placeholder="— don't set —"
+              />
             </label>
             {ownPlatformId && (
               <div className="flex overflow-hidden rounded-lg border border-zinc-700">

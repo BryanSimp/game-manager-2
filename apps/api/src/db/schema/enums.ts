@@ -20,4 +20,5 @@ export const imageKindEnum = pgEnum("image_kind", [
   "custom_cover",
   "shelf_photo",
   "background",
+  "console_logo",
 ]);

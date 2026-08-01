@@ -23,7 +23,18 @@ export function ConsolesPage() {
   const platforms = usePlatforms();
 
   const rows = consoles.data ?? [];
-  const totalGames = rows.reduce((sum, c) => sum + c.gameCount, 0);
+  // storefront totals are already counted inside their parent platform
+  const totalGames = rows
+    .filter((c) => !c.platform.parentPlatformId)
+    .reduce((sum, c) => sum + c.gameCount, 0);
+
+  const consolesOnly = rows.filter((c) => !c.platform.parentPlatformId);
+  const storefrontsByParent = new Map<string, ConsoleSummary[]>();
+  for (const row of rows) {
+    const parentId = row.platform.parentPlatformId;
+    if (!parentId) continue;
+    storefrontsByParent.set(parentId, [...(storefrontsByParent.get(parentId) ?? []), row]);
+  }
 
   return (
     <Shell>
@@ -52,50 +63,108 @@ export function ConsolesPage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {rows.map((row) => (
-          <ConsoleCard key={row.platform.id} row={row} />
-        ))}
+      {/* one section per console; a platform with storefronts (PC) gets its
+          stores as their own sub-section underneath it */}
+      <div className="space-y-4">
+        {consolesOnly.map((row) => {
+          const stores = storefrontsByParent.get(row.platform.id) ?? [];
+          return (
+            <div key={row.platform.id} className="space-y-3">
+              <ConsoleCard row={row} />
+              {stores.length > 0 && (
+                <div className="ml-0 space-y-3 border-l-2 border-zinc-800 pl-4 sm:ml-6">
+                  <p className="text-xs uppercase tracking-wide text-zinc-600">
+                    {row.platform.name} storefronts
+                  </p>
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    {stores.map((store) => (
+                      <ConsoleCard key={store.platform.id} row={store} compact />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </Shell>
   );
 }
 
-function ConsoleCard({ row }: { row: ConsoleSummary }) {
+function ConsoleCard({ row, compact = false }: { row: ConsoleSummary; compact?: boolean }) {
   const queryClient = useQueryClient();
   const p = row.platform;
   const released = formatReleaseDate(p.releaseDate);
+  // your upload wins over the stock IGDB logo
+  const art = row.customImageSrc ?? p.logoUrl;
 
-  const remove = useMutation({
-    mutationFn: () => api.removeConsole(p.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["consoles"] });
-      queryClient.invalidateQueries({ queryKey: ["platforms"] });
-      queryClient.invalidateQueries({ queryKey: ["library"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-    },
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["consoles"] });
+    queryClient.invalidateQueries({ queryKey: ["platforms"] });
+    queryClient.invalidateQueries({ queryKey: ["library"] });
+    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  };
+
+  const remove = useMutation({ mutationFn: () => api.removeConsole(p.id), onSuccess: refresh });
+  const uploadImage = useMutation({
+    mutationFn: (file: File) => api.uploadConsoleImage(p.id, file, file.name),
+    onSuccess: refresh,
+  });
+  const clearImage = useMutation({
+    mutationFn: () => api.removeConsoleImage(p.id),
+    onSuccess: refresh,
   });
 
   return (
     <section className="flex flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-      <div className="flex gap-4 p-5">
-        <div className="flex h-24 w-32 flex-none items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950 p-3">
-          {p.logoUrl ? (
-            <img
-              src={p.logoUrl}
-              alt={p.name}
-              loading="lazy"
-              className="max-h-full max-w-full object-contain"
-            />
-          ) : (
-            <span className="text-center text-xs font-semibold text-zinc-600">
-              {p.abbreviation ?? p.name}
-            </span>
-          )}
+      <div className={`flex gap-4 ${compact ? "p-4" : "p-5"}`}>
+        <div className="flex-none">
+          <div
+            className={`flex items-center justify-center overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-3 ${
+              compact ? "h-16 w-24" : "h-24 w-32"
+            }`}
+          >
+            {art ? (
+              <img
+                src={art}
+                alt={p.name}
+                loading="lazy"
+                className="max-h-full max-w-full object-contain"
+              />
+            ) : (
+              <span className="text-center text-xs font-semibold text-zinc-600">
+                {p.abbreviation ?? p.name}
+              </span>
+            )}
+          </div>
+          <div className="mt-1.5 flex items-center justify-center gap-2">
+            <label className="cursor-pointer text-[11px] text-zinc-600 hover:text-indigo-300">
+              {uploadImage.isPending ? "Uploading…" : row.customImageSrc ? "Change art" : "Use my own art"}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(ev) => {
+                  const file = ev.target.files?.[0];
+                  if (file) uploadImage.mutate(file);
+                  ev.target.value = "";
+                }}
+              />
+            </label>
+            {row.customImageSrc && (
+              <button
+                onClick={() => clearImage.mutate()}
+                title="Back to the stock logo"
+                className="text-[11px] text-zinc-600 hover:text-red-400"
+              >
+                reset
+              </button>
+            )}
+          </div>
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
-            <h2 className="mr-auto text-lg font-semibold">
+            <h2 className={`mr-auto font-semibold ${compact ? "text-base" : "text-lg"}`}>
               <Link
                 to="/console/$platformId"
                 params={{ platformId: p.id }}
@@ -119,11 +188,17 @@ function ConsoleCard({ row }: { row: ConsoleSummary }) {
             </button>
           </div>
           <p className="text-xs uppercase tracking-wide text-zinc-600">
-            {FAMILY_LABELS[p.family]}
-            {released && ` · released ${released}`}
+            {p.parentName ? `${p.parentName} storefront` : FAMILY_LABELS[p.family]}
+            {released && ` · ${p.parentName ? "launched" : "released"} ${released}`}
           </p>
           {p.summary && (
-            <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-zinc-400">{p.summary}</p>
+            <p
+              className={`mt-2 text-sm leading-relaxed text-zinc-400 ${
+                compact ? "line-clamp-2" : "line-clamp-3"
+              }`}
+            >
+              {p.summary}
+            </p>
           )}
         </div>
       </div>
@@ -133,6 +208,7 @@ function ConsoleCard({ row }: { row: ConsoleSummary }) {
           <span className="font-semibold text-zinc-300">
             {row.gameCount} {row.gameCount === 1 ? "game" : "games"}
           </span>
+          {row.storefrontCount > 0 && <span>🛒 {row.storefrontCount} via storefronts</span>}
           {row.physicalCount > 0 && <span>📦 {row.physicalCount} physical</span>}
           {row.digitalCount > 0 && <span>💾 {row.digitalCount} digital</span>}
           {row.gameCount > row.preview.length && (

@@ -21,6 +21,9 @@ export interface OwnedPlatform {
   name: string;
   abbreviation: string | null;
   family: PlatformFamily;
+  /** set when this is a storefront (Steam…): the platform it sells for (PC) */
+  parentPlatformId: string | null;
+  parentName: string | null;
   format: OwnershipFormat;
   /** real retail box scan for this platform, when found */
   boxArtSrc?: string | null;
@@ -68,6 +71,13 @@ export interface Platform {
   releaseDate: string | null;
   summary: string | null;
   logoUrl: string | null;
+  /**
+   * Sub-platform link. The PC storefronts (Steam, Epic, GOG…) are children of
+   * PC: a game filed under one is still a PC game, and anything that counts or
+   * filters by platform rolls children up into their parent.
+   */
+  parentPlatformId: string | null;
+  parentName: string | null;
   /** true when this platform is on your consoles list */
   owned: boolean;
 }
@@ -78,7 +88,12 @@ export interface Platform {
 export interface ConsoleSummary {
   platform: Platform;
   addedAt: string;
+  /** your own art for this console, replacing the stock logo */
+  customImageSrc: string | null;
+  /** includes games filed under this platform's storefronts */
   gameCount: number;
+  /** how many of those came from a storefront rather than the platform itself */
+  storefrontCount: number;
   physicalCount: number;
   digitalCount: number;
   /** a handful of covers for the card, newest additions first */

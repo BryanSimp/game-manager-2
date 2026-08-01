@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { db, schema } from "../src/db/index.js";
 import type { PlatformFamily } from "@gm/shared";
 
@@ -19,6 +20,8 @@ const PLATFORMS: Array<{
   sortOrder: number;
   releaseDate?: string;
   summary?: string;
+  /** name of the platform this is a storefront of — PC, for all of them */
+  parent?: string;
 }> = [
   // Nintendo
   {
@@ -255,19 +258,21 @@ const PLATFORMS: Array<{
     summary:
       "Two machines at two prices, sharing a library. Quick Resume, four generations of backwards compatibility, and Game Pass as the centre of the pitch.",
   },
-  // PC + storefronts. "PC" stays as the catch-all; the storefronts sit
-  // alongside it so a digital library can say where a copy actually lives.
+  // PC and its storefronts. The stores are *children* of PC (`parent`), so a
+  // game bought on Steam is still a PC game everywhere that counts platforms;
+  // only the badge and the consoles page care which store it came from.
   {
     name: "PC",
     family: "pc",
     igdbPlatformId: 6,
     sortOrder: 50,
     summary:
-      "The catch-all for computer games — use it when where you bought a copy doesn't matter, or pick the specific storefront below when it does.",
+      "The catch-all for computer games — use it on its own when where you bought a copy doesn't matter, or pick one of its storefronts when it does.",
   },
   {
     name: "Steam",
     family: "pc",
+    parent: "PC",
     sortOrder: 51,
     releaseDate: "2003-09-12",
     summary:
@@ -277,6 +282,7 @@ const PLATFORMS: Array<{
     name: "Epic Games Store",
     abbreviation: "Epic",
     family: "pc",
+    parent: "PC",
     sortOrder: 52,
     releaseDate: "2018-12-06",
     summary:
@@ -285,6 +291,7 @@ const PLATFORMS: Array<{
   {
     name: "GOG",
     family: "pc",
+    parent: "PC",
     sortOrder: 53,
     releaseDate: "2008-09-19",
     summary:
@@ -292,16 +299,28 @@ const PLATFORMS: Array<{
   },
   {
     name: "Battle.net",
+    abbreviation: "Blizzard",
     family: "pc",
+    parent: "PC",
     sortOrder: 54,
     releaseDate: "1996-12-31",
     summary:
       "Blizzard's own service, launched alongside Diablo and now the launcher for everything Blizzard and Activision publishes on PC.",
   },
   {
+    name: "Origin",
+    family: "pc",
+    parent: "PC",
+    sortOrder: 55,
+    releaseDate: "2011-06-03",
+    summary:
+      "EA's old PC client, retired in favour of the EA App — kept here because plenty of libraries were bought on it and still say Origin.",
+  },
+  {
     name: "EA App",
     family: "pc",
-    sortOrder: 55,
+    parent: "PC",
+    sortOrder: 56,
     releaseDate: "2022-09-27",
     summary:
       "EA's PC launcher and store, the replacement for Origin. Home of EA Play and anything EA keeps off other storefronts.",
@@ -310,25 +329,28 @@ const PLATFORMS: Array<{
     name: "Ubisoft Connect",
     abbreviation: "Ubisoft",
     family: "pc",
-    sortOrder: 56,
+    parent: "PC",
+    sortOrder: 57,
     releaseDate: "2020-10-29",
     summary:
       "Ubisoft's storefront and launcher, formerly Uplay. Required alongside Steam or Epic for most Ubisoft PC releases.",
   },
   {
-    name: "Microsoft Store",
-    abbreviation: "MS Store",
+    name: "Xbox / Microsoft Store",
+    abbreviation: "Xbox PC",
     family: "pc",
-    sortOrder: 57,
+    parent: "PC",
+    sortOrder: 58,
     releaseDate: "2012-10-26",
     summary:
-      "The Windows storefront, and where PC Game Pass installs land. Shares entitlements with Xbox for anything published as Play Anywhere.",
+      "The Xbox app and Windows storefront, and where PC Game Pass installs land. Shares entitlements with the console for anything published as Play Anywhere.",
   },
   {
     name: "itch.io",
     abbreviation: "itch",
     family: "pc",
-    sortOrder: 58,
+    parent: "PC",
+    sortOrder: 59,
     releaseDate: "2013-03-03",
     summary:
       "An open marketplace for independent and experimental games, jam entries and pay-what-you-want releases — much of it available nowhere else.",
@@ -392,6 +414,7 @@ async function main() {
     await db
       .insert(schema.platforms)
       .values({
+        // parents are linked in a second pass, once every row exists
         name: p.name,
         abbreviation: p.abbreviation,
         family: p.family,
@@ -413,6 +436,20 @@ async function main() {
         },
       });
   }
+
+  // second pass: hang the storefronts off their parent platform
+  const rows = await db
+    .select({ id: schema.platforms.id, name: schema.platforms.name })
+    .from(schema.platforms);
+  const idByName = new Map(rows.map((r) => [r.name, r.id]));
+  for (const p of PLATFORMS) {
+    const parentId = p.parent ? (idByName.get(p.parent) ?? null) : null;
+    await db
+      .update(schema.platforms)
+      .set({ parentPlatformId: parentId })
+      .where(eq(schema.platforms.name, p.name));
+  }
+
   console.log("Seed complete. (First registered account becomes admin.)");
   process.exit(0);
 }

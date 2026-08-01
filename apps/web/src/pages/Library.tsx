@@ -85,16 +85,44 @@ export function LibraryPage() {
     });
   }
 
-  // filter options derived from what's actually in the library
+  // Filter options derived from what's actually in the library. Storefronts
+  // are listed under the platform they belong to, and picking the parent (PC)
+  // matches its stores too — a Steam game is a PC game.
   const { platformOptions, tagOptions } = useMemo(() => {
-    const platforms = new Map<string, string>();
+    const parents = new Map<string, { label: string; children: Map<string, string> }>();
     const tags = new Map<string, string>();
     for (const e of library.data ?? []) {
-      for (const p of e.platforms) platforms.set(p.platformId, p.abbreviation ?? p.name);
+      for (const p of e.platforms) {
+        if (p.parentPlatformId && p.parentName) {
+          const parent = parents.get(p.parentPlatformId) ?? {
+            label: p.parentName,
+            children: new Map(),
+          };
+          parent.children.set(p.platformId, p.name);
+          parents.set(p.parentPlatformId, parent);
+        } else {
+          const existing = parents.get(p.platformId);
+          parents.set(p.platformId, {
+            label: p.abbreviation ?? p.name,
+            children: existing?.children ?? new Map(),
+          });
+        }
+      }
       for (const t of e.tags) tags.set(t.id, t.name);
     }
+    const options: Array<[string, string]> = [];
+    for (const [id, parent] of [...parents.entries()].sort((a, b) =>
+      a[1].label.localeCompare(b[1].label),
+    )) {
+      options.push([id, parent.children.size > 0 ? `${parent.label} (all)` : parent.label]);
+      for (const [childId, name] of [...parent.children.entries()].sort((a, b) =>
+        a[1].localeCompare(b[1]),
+      )) {
+        options.push([childId, `   ↳ ${name}`]);
+      }
+    }
     return {
-      platformOptions: [...platforms.entries()].sort((a, b) => a[1].localeCompare(b[1])),
+      platformOptions: options,
       tagOptions: [...tags.entries()].sort((a, b) => a[1].localeCompare(b[1])),
     };
   }, [library.data]);
@@ -103,7 +131,13 @@ export function LibraryPage() {
     const filtered = (library.data ?? []).filter((e) => {
       if (statusFilter !== "all" && e.status !== statusFilter) return false;
       if (statusFilter === "finished" && only100 && !e.completed100) return false;
-      if (platformFilter !== "all" && !e.platforms.some((p) => p.platformId === platformFilter))
+      // a parent platform matches its storefronts as well as itself
+      if (
+        platformFilter !== "all" &&
+        !e.platforms.some(
+          (p) => p.platformId === platformFilter || p.parentPlatformId === platformFilter,
+        )
+      )
         return false;
       if (tagFilter !== "all" && !e.tags.some((t) => t.id === tagFilter)) return false;
       if (search && !e.game.title.toLowerCase().includes(search.toLowerCase())) return false;
