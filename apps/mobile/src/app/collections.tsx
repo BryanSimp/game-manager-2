@@ -11,11 +11,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
 export default function CollectionsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
 
@@ -50,7 +52,7 @@ export default function CollectionsScreen() {
       <FlatList
         data={collections.data ?? []}
         keyExtractor={(c) => c.id}
-        contentContainerStyle={{ padding: 12 }}
+        contentContainerStyle={{ padding: 12, paddingBottom: 24 + insets.bottom }}
         refreshControl={
           <RefreshControl
             refreshing={collections.isRefetching}

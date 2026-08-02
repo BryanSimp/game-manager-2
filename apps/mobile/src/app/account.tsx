@@ -1,23 +1,30 @@
 import { useRouter, type Href } from "expo-router";
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "@/lib/auth";
 
 const LINKS: Array<{ href: Href; icon: string; label: string; note: string }> = [
   { href: "/dashboard", icon: "📊", label: "Dashboard", note: "Stats, backlog hours, recent finishes" },
   { href: "/consoles", icon: "🕹️", label: "Consoles", note: "What you own, and your games on each" },
+  { href: "/friends", icon: "👥", label: "Friends", note: "Your code, requests, their libraries" },
   { href: "/collections", icon: "🗂️", label: "Collections", note: "Series and play-order lists" },
   { href: "/tags", icon: "🏷️", label: "Tags", note: "Create, recolor, delete" },
+  { href: "/scan", icon: "🔖", label: "Scan barcodes", note: "Batch-scan a shelf of cases" },
   { href: "/import", icon: "📷", label: "Import", note: "Screenshot / shelf photo OCR" },
 ];
 
 export default function AccountScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { data: session } = authClient.useSession();
 
   return (
-    <View style={styles.screen}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={{ padding: 16, paddingBottom: 32 + insets.bottom }}
+    >
       <View style={styles.userCard}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>
@@ -38,8 +45,12 @@ export default function AccountScreen() {
         <TouchableOpacity key={link.label} style={styles.row} onPress={() => router.push(link.href)}>
           <Text style={styles.icon}>{link.icon}</Text>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.label}>{link.label}</Text>
-            <Text style={styles.note}>{link.note}</Text>
+            <Text style={styles.label} numberOfLines={1}>
+              {link.label}
+            </Text>
+            <Text style={styles.note} numberOfLines={2}>
+              {link.note}
+            </Text>
           </View>
           <Text style={styles.chevron}>›</Text>
         </TouchableOpacity>
@@ -64,12 +75,12 @@ export default function AccountScreen() {
       >
         <Text style={styles.signOutText}>Sign out</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#101014", padding: 16 },
+  screen: { flex: 1, backgroundColor: "#101014" },
   userCard: {
     flexDirection: "row",
     alignItems: "center",

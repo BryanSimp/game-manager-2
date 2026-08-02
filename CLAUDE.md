@@ -168,6 +168,8 @@ was dev-only). Never use `db push`.
 | 11b sub-platforms | see git log | Storefronts became **children of PC** rather than siblings (`platforms.parent_platform_id`, migration 0013), so a Steam game counts as a PC game everywhere while still saying Steam. `ConsoleSelect` is now two dropdowns (platform, then storefront) and is used by quick add, import, preferences and bulk edit alike; the library filter gained `PC (all)` plus indented stores; the consoles page nests storefront cards under their platform. Added **Origin**, renamed Microsoft Store → **Xbox / Microsoft Store**. Per-user **console art** (`user_consoles.custom_image_id`, upload/reset on each card). Nav shrunk to `text-xs` so ten links stay on one row |
 | 11c import accuracy + polish | see git log | **Steam matching by appid**: `findIgdbGameBySteamAppId` (IGDB `external_games`, `external_game_source = 1`) resolves an appid to the exact game before any title matching; a store-API release-year tiebreak (`getAppReleaseYear`, capped per run) handles what's left. `steam_import_rules` (migration 0014) adds per-user `block`/`map` overrides, set from `SteamMatchFixer` on a game's page and reviewed in `SteamCard`. **Console art browsing** (`services/console-art.ts` → IGDB logos + Wikimedia Commons, `ConsoleArtBrowser`). **Badge chips** became dark plates of the category hue so they read over cover art at 100% opacity. Library hides empty category chips. `preferences.show_rating` hides card star ratings on web and mobile |
 
+| 12 mobile parity + polish | see git log | **Friends on mobile**: `friends.tsx` (code + `Share`, requests both ways, unfriend) and `friend/[userId].tsx` (their library, everything/common/theirs, search). **Consoles on mobile**: cards nest storefronts under their platform and open a new `console/[platformId]` page (format filter, per-store badges), and the library gained a **console filter row** that rolls storefronts into their parent — `lib/platforms.ts` owns `onPlatform`/`groupConsoles` so both screens agree. **Batch barcode scanning**: `scan.tsx` queues game after game and writes the batch only when confirmed. **Layout fixes**: safe-area bottom insets on every screen (FABs, sheets, the import footer), sort moved off the search row into a picker, dashboard category tiles widened from a fifth to a third so "Uncategorized" stops clipping, import review split onto two lines, header icons wrapped in a row |
+
 **Next: Phase 6 (skipped for now, still open)** — email verification/password reset
 (better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
 filters, admin panel (users, password resets, registration toggle, settings).
@@ -199,7 +201,8 @@ file to be provided for reference).
   `statusStyle()` in `lib/ui.ts`, which falls back to a neutral chip for any
   key it doesn't know. Mobile still shows only the built-in filter chips.
 - Consoles are **web-only to manage** — mobile's `consoles.tsx` lists what you own
-  with logo, release date, summary and a cover preview, but can't add or remove.
+  (storefronts nested under their platform) and each card opens
+  `console/[platformId]`, but adding and removing is still web-only.
 - The 3D box viewer and `services/boxart.ts` outlived the shelf: box scans are
   still fetched, but only lazily from `GET /api/library` (the shelf used to be
   what warmed them), and the viewer now lives only on a game's detail page.
@@ -246,8 +249,10 @@ file to be provided for reference).
   it's a launcher screenshot or a shelf photo rather than guessing — the two
   take different OCR paths.
 - Checklist authoring is web-only on mobile (tracking + adopting work).
-- Friends is web-only — mobile has no friends screen yet, though the API is
-  shared and ready for one.
+- Friends on mobile (`friends.tsx`, `friend/[userId].tsx`) does everything the
+  web page does except copy-to-clipboard: React Native dropped `Clipboard` from
+  core and no clipboard package is installed, so the code is selectable text
+  plus a `Share` sheet.
 - Friend requests have no notification: an incoming request is only visible by
   opening the friends page.
 - A friend's library shows status/rating/platforms/100%%, never notes. If more
@@ -290,4 +295,20 @@ file to be provided for reference).
   several exist; there's no picker. `missionCountsByGame` in `routes/library.ts`
   applies the same rule for the list payload — keep the two in step.
 - Mobile's library has no "Estimated shortest" sort (web-only), though
-  `LibraryEntry.estimatedRemainingSeconds` is available to it.
+  `LibraryEntry.estimatedRemainingSeconds` is available to it. Sort moved into
+  an `Alert` picker rather than a fifth row of chips — the four sort buttons
+  used to share the search row and squeezed the field to a sliver.
+- Mobile's barcode scanner **batches**: a scan queues a game and the camera
+  resumes, and nothing is written until you confirm the batch. Confirming is one
+  `POST /api/library` per game, not `bulk` — each scan carries its own platform
+  hint from the UPC title, which `BulkAddItem` can't express. A 409 from a game
+  you already own is counted as a duplicate, not an error. The queue is
+  in-memory, so leaving the screen loses it.
+- The import review's "pick the right game" is an `Alert` with up to six
+  buttons; **Android's dialog only renders three**. It's fine on the iPhone this
+  is developed against, so it's left alone — but new mobile controls shouldn't
+  reach for a multi-button `Alert` (the library's sort cycles a button instead).
+- Mobile screens pad their bottom with `useSafeAreaInsets()` (expo-router
+  already mounts the `SafeAreaProvider`); the navigator is pinned to a dark
+  theme because every screen paints its own zinc-950 background and following
+  the system scheme gave a white header on a light phone.

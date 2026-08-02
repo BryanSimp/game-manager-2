@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Redirect, useRouter } from "expo-router";
 import {
   ActivityIndicator,
@@ -13,11 +13,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { GAME_STATUSES, type GameStatus, type LibraryEntry } from "@gm/shared";
 import { authClient } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, STATUS_COLORS, statusStyle } from "@/lib/ui";
+import { groupConsoles, onPlatform } from "@/lib/platforms";
 import { usePreferences } from "@/lib/prefs";
 
 const SORTS = [
@@ -30,8 +32,10 @@ type SortKey = (typeof SORTS)[number]["key"];
 
 export default function LibraryScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { data: session, isPending } = authClient.useSession();
   const [statusFilter, setStatusFilter] = useState<GameStatus | "all">("all");
+  const [platformFilter, setPlatformFilter] = useState<string | "all">("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("added");
 
@@ -40,10 +44,34 @@ export default function LibraryScreen() {
     queryFn: () => api.getLibrary(),
     enabled: !!session,
   });
+  const consoles = useQuery({
+    queryKey: ["consoles"],
+    queryFn: () => api.getConsoles(),
+    enabled: !!session,
+  });
 
+  const all = useMemo(() => library.data ?? [], [library.data]);
+
+  // one chip per console you own, storefronts indented under their platform —
+  // picking PC therefore includes everything you bought on Steam
+  const platformChips = useMemo(
+    () =>
+      groupConsoles(consoles.data ?? []).flatMap((group) => [
+        { id: group.console.platform.id, label: group.console.platform.name, child: false },
+        ...group.storefronts.map((s) => ({
+          id: s.platform.id,
+          label: s.platform.name,
+          child: true,
+        })),
+      ]),
+    [consoles.data],
+  );
+
+  const sortIndex = SORTS.findIndex((s) => s.key === sort);
   const needle = search.trim().toLowerCase();
-  const entries = (library.data ?? [])
+  const entries = all
     .filter((e) => statusFilter === "all" || e.status === statusFilter)
+    .filter((e) => platformFilter === "all" || onPlatform(e.platforms, platformFilter))
     .filter((e) => !needle || e.game.title.toLowerCase().includes(needle))
     .sort((a, b) => {
       if (sort === "title") return a.game.title.localeCompare(b.game.title);
@@ -76,34 +104,34 @@ export default function LibraryScreen() {
           placeholderTextColor="#71717a"
           autoCapitalize="none"
         />
-        {SORTS.map((s) => (
-          <TouchableOpacity
-            key={s.key}
-            style={[styles.sortBtn, sort === s.key && styles.sortActive]}
-            onPress={() => setSort(s.key)}
-          >
-            <Text style={[styles.sortText, sort === s.key && styles.sortTextActive]}>
-              {s.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {/* four sort buttons used to share this row with the search box and
+            squeezed it to a sliver — one button that cycles instead. A picker
+            would be an Alert, and Android only renders three of its buttons */}
+        <TouchableOpacity
+          style={styles.sortBtn}
+          accessibilityLabel={`Sorted by ${SORTS[sortIndex]!.label}, tap to change`}
+          onPress={() => setSort(SORTS[(sortIndex + 1) % SORTS.length]!.key)}
+        >
+          <Text style={styles.sortText} numberOfLines={1}>
+            ⇅ {SORTS[sortIndex]!.label}
+          </Text>
+        </TouchableOpacity>
       </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterBar}
-        contentContainerStyle={{ paddingHorizontal: 12, gap: 8, alignItems: "center" }}
-      >
-        <FilterChip
-          label={`All (${library.data?.length ?? 0})`}
+
+      <ChipBar>
+        <Chip
+          label={`All (${all.length})`}
           active={statusFilter === "all"}
           onPress={() => setStatusFilter("all")}
         />
         {GAME_STATUSES.map((s) => {
-          const n = (library.data ?? []).filter((e) => e.status === s).length;
+          const n = all.filter((e) => e.status === s).length;
+          // empty categories only clutter the bar — except the one you're in,
+          // so you can always click back out of it
+          if (n === 0 && statusFilter !== s) return null;
           const meta = STATUS_COLORS[s];
           return (
-            <FilterChip
+            <Chip
               key={s}
               label={`${meta.label} (${n})`}
               active={statusFilter === s}
@@ -113,34 +141,96 @@ export default function LibraryScreen() {
             />
           );
         })}
-      </ScrollView>
+      </ChipBar>
+
+      {platformChips.length > 0 && (
+        <ChipBar>
+          <Text style={styles.barLabel}>Console</Text>
+          <Chip
+            label="Any"
+            active={platformFilter === "all"}
+            onPress={() => setPlatformFilter("all")}
+          />
+          {platformChips.map((p) => {
+            const n = all.filter((e) => onPlatform(e.platforms, p.id)).length;
+            if (n === 0 && platformFilter !== p.id) return null;
+            return (
+              <Chip
+                key={p.id}
+                label={`${p.child ? "↳ " : ""}${p.label} (${n})`}
+                active={platformFilter === p.id}
+                onPress={() => setPlatformFilter(platformFilter === p.id ? "all" : p.id)}
+              />
+            );
+          })}
+        </ChipBar>
+      )}
+
+      {platformFilter !== "all" && (
+        <TouchableOpacity
+          style={styles.consoleLink}
+          onPress={() => router.push(`/console/${platformFilter}`)}
+        >
+          <Text style={styles.consoleLinkText}>
+            Open the {platformChips.find((p) => p.id === platformFilter)?.label ?? "console"} page ›
+          </Text>
+        </TouchableOpacity>
+      )}
+
       <FlatList
         data={entries}
         keyExtractor={(item) => item.id}
         refreshControl={
           <RefreshControl refreshing={library.isRefetching} onRefresh={() => library.refetch()} />
         }
-        contentContainerStyle={{ padding: 12, paddingBottom: 96 }}
+        contentContainerStyle={{ padding: 12, paddingBottom: 96 + insets.bottom }}
         ListEmptyComponent={
           library.isLoading ? (
             <ActivityIndicator style={{ marginTop: 48 }} />
           ) : (
             <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>Your library is empty</Text>
-              <Text style={styles.emptyText}>Tap + to add your first game.</Text>
+              <Text style={styles.emptyTitle}>
+                {all.length === 0 ? "Your library is empty" : "Nothing matches those filters"}
+              </Text>
+              <Text style={styles.emptyText}>
+                {all.length === 0
+                  ? "Tap + to add your first game."
+                  : "Clear a filter to see more games."}
+              </Text>
             </View>
           )
         }
-        renderItem={({ item }) => <LibraryRow entry={item} onPress={() => router.push(`/game/${item.id}`)} />}
+        renderItem={({ item }) => (
+          <LibraryRow entry={item} onPress={() => router.push(`/game/${item.id}`)} />
+        )}
       />
-      <TouchableOpacity style={styles.fab} onPress={() => router.push("/add")}>
+
+      <TouchableOpacity
+        style={[styles.fab, { bottom: 24 + insets.bottom }]}
+        accessibilityLabel="Add a game"
+        onPress={() => router.push("/add")}
+      >
         <Text style={styles.fabText}>＋</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-function FilterChip({
+/** A horizontally scrolling row of chips that never squeezes its neighbours. */
+function ChipBar({ children }: { children: React.ReactNode }) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.chipBar}
+      contentContainerStyle={styles.chipBarContent}
+    >
+      {children}
+    </ScrollView>
+  );
+}
+
+function Chip({
   label,
   active,
   onPress,
@@ -157,16 +247,14 @@ function FilterChip({
     <TouchableOpacity
       onPress={onPress}
       style={[
-        styles.filterChip,
+        styles.chip,
         active && {
           backgroundColor: activeBg ?? "#312e81",
           borderColor: activeColor ?? "#818cf8",
         },
       ]}
     >
-      <Text style={[styles.filterChipText, active && { color: activeColor ?? "#c7d2fe" }]}>
-        {label}
-      </Text>
+      <Text style={[styles.chipText, active && { color: activeColor ?? "#c7d2fe" }]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -179,15 +267,19 @@ function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => vo
   return (
     <Pressable style={styles.row} onPress={onPress}>
       <View style={styles.cover}>
-        {cover && <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />}
+        {cover && (
+          <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        )}
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.title} numberOfLines={1}>
+        <Text style={styles.title} numberOfLines={2}>
           {entry.game.title}
         </Text>
         <View style={styles.metaRow}>
           <View style={[styles.badge, { backgroundColor: status.bg }]}>
-            <Text style={[styles.badgeText, { color: status.text }]}>{status.label}</Text>
+            <Text style={[styles.badgeText, { color: status.text }]} numberOfLines={1}>
+              {status.label}
+            </Text>
           </View>
           {entry.rating != null && (prefs?.showRating ?? true) && (
             <Text style={styles.rating}>★ {entry.rating}</Text>
@@ -210,7 +302,7 @@ const styles = StyleSheet.create({
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 8,
     paddingHorizontal: 12,
     paddingTop: 10,
   },
@@ -221,29 +313,32 @@ const styles = StyleSheet.create({
     borderColor: "#3f3f46",
     borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: 9,
     color: "#fafafa",
-    fontSize: 14,
+    fontSize: 15,
   },
   sortBtn: {
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: "#3f3f46",
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    backgroundColor: "#18181b",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
   },
-  sortActive: { backgroundColor: "#312e81", borderColor: "#818cf8" },
-  sortText: { color: "#a1a1aa", fontSize: 11, fontWeight: "600" },
-  sortTextActive: { color: "#c7d2fe" },
-  filterBar: { flexGrow: 0, paddingVertical: 10 },
-  filterChip: {
+  sortText: { color: "#c7d2fe", fontSize: 13, fontWeight: "600" },
+  consoleLink: { paddingHorizontal: 12, paddingTop: 10 },
+  consoleLinkText: { color: "#818cf8", fontSize: 12, fontWeight: "600" },
+  chipBar: { flexGrow: 0, marginTop: 8 },
+  chipBarContent: { paddingHorizontal: 12, gap: 8, alignItems: "center" },
+  barLabel: { color: "#52525b", fontSize: 11, fontWeight: "700", textTransform: "uppercase" },
+  chip: {
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "#3f3f46",
     paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingVertical: 6,
   },
-  filterChipText: { color: "#a1a1aa", fontSize: 13, fontWeight: "500" },
+  chipText: { color: "#a1a1aa", fontSize: 13, fontWeight: "500" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#101014" },
   row: {
     flexDirection: "row",
@@ -264,20 +359,19 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   title: { color: "#fafafa", fontSize: 15, fontWeight: "600" },
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
-  badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  metaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, maxWidth: 140 },
   badgeText: { fontSize: 11, fontWeight: "600" },
   rating: { color: "#fbbf24", fontSize: 12 },
   ttb: { color: "#a1a1aa", fontSize: 12 },
   platforms: { color: "#71717a", fontSize: 11, marginTop: 3 },
   chevron: { color: "#52525b", fontSize: 24, paddingLeft: 4 },
-  empty: { alignItems: "center", marginTop: 64 },
-  emptyTitle: { color: "#fafafa", fontSize: 16, fontWeight: "600" },
-  emptyText: { color: "#71717a", fontSize: 13, marginTop: 4 },
+  empty: { alignItems: "center", marginTop: 64, paddingHorizontal: 24 },
+  emptyTitle: { color: "#fafafa", fontSize: 16, fontWeight: "600", textAlign: "center" },
+  emptyText: { color: "#71717a", fontSize: 13, marginTop: 4, textAlign: "center" },
   fab: {
     position: "absolute",
     right: 20,
-    bottom: 28,
     width: 56,
     height: 56,
     borderRadius: 28,
