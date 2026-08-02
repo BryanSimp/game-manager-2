@@ -21,21 +21,25 @@ import { colors, radius, space, type } from "@/lib/theme";
 import {
   Badge,
   Chevron,
-  Chip,
-  ChipBar,
   Cover,
   EmptyState,
   Field,
   Icon,
   Loading,
+  OptionRow,
   Screen,
+  Sheet,
+  SheetButton,
+  SheetSection,
 } from "@/components/ui";
 
+// `short` goes on the button, which is a third of a phone row wide; `label`
+// goes in the sheet, which has room to say what the sort actually does
 const SORTS = [
-  { key: "added", label: "Recent" },
-  { key: "title", label: "A–Z" },
-  { key: "rating", label: "Rating" },
-  { key: "ttb", label: "Time" },
+  { key: "added", label: "Recently added", short: "Recent", icon: "time-outline" },
+  { key: "title", label: "Title A–Z", short: "A–Z", icon: "text-outline" },
+  { key: "rating", label: "Highest rated", short: "Rating", icon: "star-outline" },
+  { key: "ttb", label: "Shortest to beat", short: "Shortest", icon: "speedometer-outline" },
 ] as const;
 type SortKey = (typeof SORTS)[number]["key"];
 
@@ -47,6 +51,7 @@ export default function LibraryScreen() {
   const [platformFilter, setPlatformFilter] = useState<string | "all">("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("added");
+  const [sheet, setSheet] = useState<null | "filter" | "sort">(null);
 
   const library = useQuery({
     queryKey: ["library"],
@@ -61,9 +66,9 @@ export default function LibraryScreen() {
 
   const all = useMemo(() => library.data ?? [], [library.data]);
 
-  // one chip per console you own, storefronts indented under their platform —
+  // one option per console you own, storefronts indented under their platform —
   // picking PC therefore includes everything you bought on Steam
-  const platformChips = useMemo(
+  const platformOptions = useMemo(
     () =>
       groupConsoles(consoles.data ?? []).flatMap((group) => [
         { id: group.console.platform.id, label: group.console.platform.name, child: false },
@@ -72,8 +77,9 @@ export default function LibraryScreen() {
     [consoles.data],
   );
 
-  const sortIndex = SORTS.findIndex((s) => s.key === sort);
+  const activeSort = SORTS.find((s) => s.key === sort)!;
   const needle = search.trim().toLowerCase();
+
   const entries = all
     .filter((e) => statusFilter === "all" || e.status === statusFilter)
     .filter((e) => platformFilter === "all" || onPlatform(e.platforms, platformFilter))
@@ -92,11 +98,24 @@ export default function LibraryScreen() {
   if (isPending) return <Loading />;
   if (!session) return <Redirect href="/login" />;
 
-  const filtered = statusFilter !== "all" || platformFilter !== "all" || needle.length > 0;
+  const activeFilters = (statusFilter === "all" ? 0 : 1) + (platformFilter === "all" ? 0 : 1);
+  const statusLabel = statusFilter === "all" ? null : STATUS_COLORS[statusFilter].label;
+  const platformLabel =
+    platformFilter === "all"
+      ? null
+      : (platformOptions.find((p) => p.id === platformFilter)?.label ?? "Console");
+  // naming both filters overflows the button ("Backlog · Nintendo Switch 2"),
+  // so two of them collapse to a count and the badge carries the detail
+  const filterLabel =
+    activeFilters === 0
+      ? "All games"
+      : activeFilters === 1
+        ? (statusLabel ?? platformLabel)!
+        : "2 filters";
 
   return (
     <Screen>
-      <View style={styles.searchRow}>
+      <View style={styles.controls}>
         <View style={styles.searchWrap}>
           <Icon name="search" size={16} color={colors.textFaint} />
           <Field
@@ -108,83 +127,25 @@ export default function LibraryScreen() {
             returnKeyType="search"
           />
         </View>
-        {/* four sort buttons used to share this row with the search box and
-            squeezed it to a sliver — one button that cycles instead. A picker
-            would be an Alert, and Android only renders three of its buttons */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Sorted by ${SORTS[sortIndex]!.label}, tap to change`}
-          onPress={() => setSort(SORTS[(sortIndex + 1) % SORTS.length]!.key)}
-          style={({ pressed }) => [styles.sortBtn, pressed && { opacity: 0.7 }]}
-        >
-          <Icon name="swap-vertical" size={15} color={colors.accentText} />
-          <Text style={[type.caption, { color: colors.accentText }]} numberOfLines={1}>
-            {SORTS[sortIndex]!.label}
-          </Text>
-        </Pressable>
-      </View>
-
-      <ChipBar style={{ marginTop: space.sm }}>
-        <Chip
-          label={`All ${all.length}`}
-          active={statusFilter === "all"}
-          onPress={() => setStatusFilter("all")}
-        />
-        {GAME_STATUSES.map((s) => {
-          const n = all.filter((e) => e.status === s).length;
-          // empty categories only clutter the bar — except the one you're in,
-          // so you can always tap back out of it
-          if (n === 0 && statusFilter !== s) return null;
-          const meta = STATUS_COLORS[s];
-          return (
-            <Chip
-              key={s}
-              label={`${meta.label} ${n}`}
-              active={statusFilter === s}
-              activeColor={meta.text}
-              activeBg={meta.bg}
-              onPress={() => setStatusFilter(statusFilter === s ? "all" : s)}
-            />
-          );
-        })}
-      </ChipBar>
-
-      {platformChips.length > 0 && (
-        <ChipBar style={{ marginTop: 6 }}>
-          <Chip
-            label="Any console"
-            icon="game-controller-outline"
-            active={platformFilter === "all"}
-            onPress={() => setPlatformFilter("all")}
+        {/* two roomy buttons instead of two scrolling rows of chips: seven
+            categories plus a console each was more than a phone row can hold */}
+        <View style={styles.buttonRow}>
+          <SheetButton
+            label={filterLabel}
+            icon="filter-outline"
+            active={activeFilters > 0}
+            badge={activeFilters}
+            onPress={() => setSheet("filter")}
+            style={{ flex: 3 }}
           />
-          {platformChips.map((p) => {
-            const n = all.filter((e) => onPlatform(e.platforms, p.id)).length;
-            if (n === 0 && platformFilter !== p.id) return null;
-            return (
-              <Chip
-                key={p.id}
-                label={`${p.label} ${n}`}
-                icon={p.child ? "storefront-outline" : undefined}
-                active={platformFilter === p.id}
-                onPress={() => setPlatformFilter(platformFilter === p.id ? "all" : p.id)}
-              />
-            );
-          })}
-        </ChipBar>
-      )}
-
-      {platformFilter !== "all" && (
-        <Pressable
-          accessibilityRole="link"
-          style={styles.consoleLink}
-          onPress={() => router.push(`/console/${platformFilter}`)}
-        >
-          <Text style={[type.caption, { color: colors.accentBorder }]}>
-            Open the {platformChips.find((p) => p.id === platformFilter)?.label ?? "console"} page
-          </Text>
-          <Icon name="arrow-forward" size={13} color={colors.accentBorder} />
-        </Pressable>
-      )}
+          <SheetButton
+            label={activeSort.short}
+            icon="swap-vertical"
+            onPress={() => setSheet("sort")}
+            style={{ flex: 2 }}
+          />
+        </View>
+      </View>
 
       <FlatList
         data={entries}
@@ -193,10 +154,24 @@ export default function LibraryScreen() {
           <RefreshControl refreshing={library.isRefetching} onRefresh={() => library.refetch()} />
         }
         contentContainerStyle={{ padding: space.md, paddingBottom: 96 + insets.bottom }}
+        ListHeaderComponent={
+          platformFilter !== "all" ? (
+            <Pressable
+              accessibilityRole="link"
+              style={styles.consoleLink}
+              onPress={() => router.push(`/console/${platformFilter}`)}
+            >
+              <Text style={[type.caption, { color: colors.accentBorder }]}>
+                Open the {platformLabel} page
+              </Text>
+              <Icon name="arrow-forward" size={13} color={colors.accentBorder} />
+            </Pressable>
+          ) : null
+        }
         ListEmptyComponent={
           library.isLoading ? (
             <ActivityIndicator style={{ marginTop: 48 }} color={colors.accentBorder} />
-          ) : filtered ? (
+          ) : activeFilters > 0 || needle ? (
             <EmptyState
               icon="filter-outline"
               title="Nothing matches those filters"
@@ -223,6 +198,85 @@ export default function LibraryScreen() {
       >
         <Icon name="add" size={30} color="#ffffff" />
       </Pressable>
+
+      <Sheet visible={sheet === "filter"} title="Filter" onClose={() => setSheet(null)}>
+        <SheetSection label="Category" />
+        <OptionRow
+          label="All categories"
+          count={all.length}
+          selected={statusFilter === "all"}
+          onPress={() => setStatusFilter("all")}
+        />
+        {GAME_STATUSES.map((s) => {
+          const n = all.filter((e) => e.status === s).length;
+          // an empty category is still worth showing here — the sheet has room,
+          // and it tells you the category exists
+          const meta = STATUS_COLORS[s];
+          return (
+            <OptionRow
+              key={s}
+              label={meta.label}
+              count={n}
+              tint={meta.text}
+              selected={statusFilter === s}
+              onPress={() => setStatusFilter(statusFilter === s ? "all" : s)}
+            />
+          );
+        })}
+
+        {platformOptions.length > 0 && (
+          <>
+            <SheetSection label="Console" />
+            <OptionRow
+              label="Any console"
+              icon="game-controller-outline"
+              count={all.length}
+              selected={platformFilter === "all"}
+              onPress={() => setPlatformFilter("all")}
+            />
+            {platformOptions.map((p) => (
+              <OptionRow
+                key={p.id}
+                label={p.label}
+                icon={p.child ? "storefront-outline" : undefined}
+                indent={p.child}
+                count={all.filter((e) => onPlatform(e.platforms, p.id)).length}
+                selected={platformFilter === p.id}
+                onPress={() => setPlatformFilter(platformFilter === p.id ? "all" : p.id)}
+              />
+            ))}
+          </>
+        )}
+
+        {activeFilters > 0 && (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.clearRow}
+            onPress={() => {
+              setStatusFilter("all");
+              setPlatformFilter("all");
+            }}
+          >
+            <Icon name="close-circle-outline" size={16} color={colors.textMuted} />
+            <Text style={[type.label, { color: colors.textMuted }]}>Clear filters</Text>
+          </Pressable>
+        )}
+      </Sheet>
+
+      <Sheet visible={sheet === "sort"} title="Sort by" onClose={() => setSheet(null)}>
+        {SORTS.map((s) => (
+          <OptionRow
+            key={s.key}
+            label={s.label}
+            icon={s.icon}
+            selected={sort === s.key}
+            onPress={() => {
+              setSort(s.key);
+              setSheet(null);
+            }}
+          />
+        ))}
+      </Sheet>
     </Screen>
   );
 }
@@ -269,15 +323,8 @@ function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => vo
 }
 
 const styles = StyleSheet.create({
-  searchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.sm,
-    paddingHorizontal: space.md,
-    paddingTop: space.sm,
-  },
+  controls: { paddingHorizontal: space.md, paddingTop: space.sm, gap: space.sm },
   searchWrap: {
-    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: space.sm,
@@ -295,23 +342,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     paddingRight: space.md,
   },
-  sortBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    minHeight: 42,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.surface,
-    paddingHorizontal: space.md,
-  },
+  buttonRow: { flexDirection: "row", gap: space.sm },
   consoleLink: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    paddingHorizontal: space.md,
-    paddingTop: space.md,
+    paddingBottom: space.sm,
+  },
+  clearRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    minHeight: 44,
+    marginTop: space.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
   },
   row: {
     flexDirection: "row",

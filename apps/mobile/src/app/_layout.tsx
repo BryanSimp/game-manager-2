@@ -1,6 +1,6 @@
-import { Stack, Link, type Href } from "expo-router";
+import { Stack, useRouter, type Href } from "expo-router";
 import { DarkTheme, ThemeProvider } from "@react-navigation/native";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet } from "react-native";
 import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
@@ -46,22 +46,25 @@ const navigationTheme = {
 };
 
 /**
- * Header icons need a row container of their own — a bare fragment stacks
- * them — and an icon-font glyph rather than an emoji, which no line height
- * could reliably centre.
+ * A header button, centred in a fixed square.
+ *
+ * This deliberately doesn't use `<Link asChild>`: the link clones its child
+ * and wins the `style` prop, so the sizing never landed and the glyph was
+ * left baseline-positioned in a 24pt box jammed against the screen edge.
+ * Pushing the route by hand keeps the box.
  */
 function HeaderIcon({ href, name, label }: { href: Href; name: IconName; label: string }) {
+  const router = useRouter();
   return (
-    <Link href={href} asChild>
-      <Pressable
-        accessibilityRole="link"
-        accessibilityLabel={label}
-        hitSlop={6}
-        style={({ pressed }) => [styles.headerIcon, pressed && { opacity: 0.6 }]}
-      >
-        <Icon name={name} size={21} color={colors.textMuted} />
-      </Pressable>
-    </Link>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={8}
+      onPress={() => router.push(href)}
+      style={({ pressed }) => [styles.headerIcon, pressed && { opacity: 0.6 }]}
+    >
+      <Icon name={name} size={24} color={colors.textMuted} />
+    </Pressable>
   );
 }
 
@@ -94,18 +97,11 @@ export default function RootLayout() {
             name="index"
             options={{
               title: "Library",
+              // one way in, top left: the account hub already lists consoles,
+              // friends, scanning and import, so a second row of header icons
+              // was duplicating it
               headerLeft: () => (
-                <View style={styles.headerRow}>
-                  <HeaderIcon href="/account" name="person-circle-outline" label="Account" />
-                </View>
-              ),
-              headerRight: () => (
-                <View style={styles.headerRow}>
-                  <HeaderIcon href="/friends" name="people-outline" label="Friends" />
-                  <HeaderIcon href="/consoles" name="game-controller-outline" label="Consoles" />
-                  <HeaderIcon href="/scan" name="barcode-outline" label="Scan barcodes" />
-                  <HeaderIcon href="/import" name="camera-outline" label="Import" />
-                </View>
+                <HeaderIcon href="/account" name="person-circle-outline" label="Account" />
               ),
             }}
           />
@@ -132,6 +128,12 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  headerRow: { flexDirection: "row", alignItems: "center" },
-  headerIcon: { paddingHorizontal: 7, paddingVertical: 8 },
+  headerIcon: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    // the web header gives headerLeft no inset of its own
+    marginLeft: 4,
+  },
 });
