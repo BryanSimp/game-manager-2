@@ -1,17 +1,10 @@
 import { useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { colors, radius, space, type } from "@/lib/theme";
+import { Button, Card, EmptyState, Field, IconButton, Screen } from "@/components/ui";
 
 // same palette the web tag manager offers
 const TAG_COLORS = [
@@ -45,58 +38,65 @@ export default function TagsScreen() {
   });
 
   return (
-    <View style={styles.screen}>
+    <Screen>
       <View style={styles.createBox}>
-        <TextInput
-          style={styles.input}
+        <Field
           value={name}
           onChangeText={setName}
           placeholder="New tag…"
-          placeholderTextColor="#71717a"
+          returnKeyType="done"
+          onSubmitEditing={() => name.trim() && create.mutate()}
         />
         <View style={styles.paletteRow}>
           {TAG_COLORS.map((c) => (
-            <TouchableOpacity
+            <Pressable
               key={c}
+              accessibilityRole="button"
+              accessibilityLabel={`Use colour ${c}`}
+              accessibilityState={{ selected: color === c }}
               style={[styles.swatch, { backgroundColor: c }, color === c && styles.swatchActive]}
               onPress={() => setColor(c)}
             />
           ))}
-          <TouchableOpacity
-            style={[styles.createBtn, (!name.trim() || create.isPending) && { opacity: 0.5 }]}
-            disabled={!name.trim() || create.isPending}
+          <Button
+            label="Add"
+            icon="add"
+            disabled={!name.trim()}
+            busy={create.isPending}
             onPress={() => create.mutate()}
-          >
-            <Text style={styles.createText}>Add</Text>
-          </TouchableOpacity>
+            style={styles.addBtn}
+          />
         </View>
       </View>
 
       <FlatList
         data={tags.data ?? []}
         keyExtractor={(t) => t.id}
-        contentContainerStyle={{ padding: 12, paddingBottom: 24 + insets.bottom }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ padding: space.md, paddingBottom: space.xxl + insets.bottom }}
         ListEmptyComponent={
           tags.isLoading ? (
-            <ActivityIndicator style={{ marginTop: 48 }} />
+            <ActivityIndicator style={{ marginTop: 48 }} color={colors.accentBorder} />
           ) : (
-            <Text style={styles.empty}>No tags yet — create one above.</Text>
+            <EmptyState icon="pricetags-outline" title="No tags yet" text="Create one above." />
           )
         }
         renderItem={({ item }) => {
-          const tagColor = item.color ?? "#71717a";
+          const tagColor = item.color ?? colors.textFaint;
           return (
-            <View style={styles.row}>
+            <Card style={styles.row}>
               <View style={[styles.dot, { backgroundColor: tagColor }]} />
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.tagName} numberOfLines={1}>
+                <Text style={type.bodyStrong} numberOfLines={1}>
                   {item.name}
                 </Text>
-                {item.groupName ? <Text style={styles.group}>{item.groupName}</Text> : null}
+                {item.groupName ? <Text style={type.micro}>{item.groupName}</Text> : null}
                 <View style={styles.paletteRow}>
                   {TAG_COLORS.map((c) => (
-                    <TouchableOpacity
+                    <Pressable
                       key={c}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Recolour ${item.name}`}
                       style={[
                         styles.swatchSm,
                         { backgroundColor: c },
@@ -107,64 +107,37 @@ export default function TagsScreen() {
                   ))}
                 </View>
               </View>
-              <TouchableOpacity
-                hitSlop={8}
+              <IconButton
+                name="trash-outline"
+                accessibilityLabel={`Delete ${item.name}`}
                 onPress={() =>
                   Alert.alert("Delete tag", `Delete "${item.name}"? It's removed from all games.`, [
                     { text: "Cancel", style: "cancel" },
                     { text: "Delete", style: "destructive", onPress: () => remove.mutate(item.id) },
                   ])
                 }
-              >
-                <Text style={styles.removeX}>✕</Text>
-              </TouchableOpacity>
-            </View>
+              />
+            </Card>
           );
         }}
       />
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#101014" },
-  createBox: { padding: 12, paddingBottom: 0, gap: 8 },
-  input: {
-    backgroundColor: "#27272a",
-    borderWidth: 1,
-    borderColor: "#3f3f46",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    color: "#fafafa",
-    fontSize: 14,
-  },
-  paletteRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 6 },
-  swatch: { width: 24, height: 24, borderRadius: 12 },
-  swatchSm: { width: 18, height: 18, borderRadius: 9 },
-  swatchActive: { borderWidth: 2, borderColor: "#fafafa" },
-  createBtn: {
-    marginLeft: "auto",
-    backgroundColor: "#4f46e5",
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-  },
-  createText: { color: "#fff", fontWeight: "600", fontSize: 13 },
-  empty: { color: "#71717a", fontSize: 13, textAlign: "center", marginTop: 48 },
-  row: {
+  createBox: { padding: space.md, paddingBottom: 0, gap: space.sm },
+  paletteRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    backgroundColor: "#18181b",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 12,
-    marginBottom: 8,
+    gap: 6,
+    flexWrap: "wrap",
+    marginTop: 6,
   },
+  swatch: { width: 26, height: 26, borderRadius: 13 },
+  swatchSm: { width: 20, height: 20, borderRadius: 10 },
+  swatchActive: { borderWidth: 2, borderColor: colors.text },
+  addBtn: { marginLeft: "auto", minHeight: 36, paddingHorizontal: space.lg },
+  row: { flexDirection: "row", alignItems: "center", gap: space.md, marginBottom: space.sm },
   dot: { width: 14, height: 14, borderRadius: 7 },
-  tagName: { color: "#fafafa", fontSize: 15, fontWeight: "600" },
-  group: { color: "#71717a", fontSize: 11, marginTop: 2 },
-  removeX: { color: "#52525b", fontSize: 16, padding: 4 },
 });

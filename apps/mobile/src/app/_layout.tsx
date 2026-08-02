@@ -1,15 +1,15 @@
 import { Stack, Link, type Href } from "expo-router";
 import { DarkTheme, ThemeProvider } from "@react-navigation/native";
-import { Text, View, StyleSheet } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StatusBar } from "expo-status-bar";
+import { Icon, type IconName } from "@/components/ui";
+import { colors, type } from "@/lib/theme";
 
 const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 7; // keep a week of offline data
-
-const SCREEN_BG = "#101014";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,14 +35,32 @@ const persister = createAsyncStoragePersister({
  */
 const navigationTheme = {
   ...DarkTheme,
-  colors: { ...DarkTheme.colors, background: SCREEN_BG, card: "#18181b", border: "#27272a" },
+  colors: {
+    ...DarkTheme.colors,
+    background: colors.bg,
+    card: colors.bg,
+    border: colors.border,
+    text: colors.text,
+    primary: colors.accentBorder,
+  },
 };
 
-/** Header icons need a row container of their own — a bare fragment stacks them. */
-function HeaderIcon({ href, glyph, label }: { href: Href; glyph: string; label: string }) {
+/**
+ * Header icons need a row container of their own — a bare fragment stacks
+ * them — and an icon-font glyph rather than an emoji, which no line height
+ * could reliably centre.
+ */
+function HeaderIcon({ href, name, label }: { href: Href; name: IconName; label: string }) {
   return (
-    <Link href={href} accessibilityLabel={label} style={styles.headerIcon}>
-      <Text style={styles.headerGlyph}>{glyph}</Text>
+    <Link href={href} asChild>
+      <Pressable
+        accessibilityRole="link"
+        accessibilityLabel={label}
+        hitSlop={6}
+        style={({ pressed }) => [styles.headerIcon, pressed && { opacity: 0.6 }]}
+      >
+        <Icon name={name} size={21} color={colors.textMuted} />
+      </Pressable>
     </Link>
   );
 }
@@ -65,8 +83,11 @@ export default function RootLayout() {
       <ThemeProvider value={navigationTheme}>
         <Stack
           screenOptions={{
-            contentStyle: { backgroundColor: SCREEN_BG },
-            headerTitleStyle: { fontSize: 17 },
+            contentStyle: { backgroundColor: colors.bg },
+            headerStyle: { backgroundColor: colors.bg },
+            headerTitleStyle: type.heading,
+            headerShadowVisible: false,
+            headerTintColor: colors.textMuted,
           }}
         >
           <Stack.Screen
@@ -75,15 +96,15 @@ export default function RootLayout() {
               title: "Library",
               headerLeft: () => (
                 <View style={styles.headerRow}>
-                  <HeaderIcon href="/account" glyph="👤" label="Account" />
+                  <HeaderIcon href="/account" name="person-circle-outline" label="Account" />
                 </View>
               ),
               headerRight: () => (
                 <View style={styles.headerRow}>
-                  <HeaderIcon href="/friends" glyph="👥" label="Friends" />
-                  <HeaderIcon href="/consoles" glyph="🕹️" label="Consoles" />
-                  <HeaderIcon href="/scan" glyph="🏷️" label="Scan barcodes" />
-                  <HeaderIcon href="/import" glyph="📷" label="Import" />
+                  <HeaderIcon href="/friends" name="people-outline" label="Friends" />
+                  <HeaderIcon href="/consoles" name="game-controller-outline" label="Consoles" />
+                  <HeaderIcon href="/scan" name="barcode-outline" label="Scan barcodes" />
+                  <HeaderIcon href="/import" name="camera-outline" label="Import" />
                 </View>
               ),
             }}
@@ -112,7 +133,5 @@ export default function RootLayout() {
 
 const styles = StyleSheet.create({
   headerRow: { flexDirection: "row", alignItems: "center" },
-  // tall enough to tap, tight enough that four of them still leave the title room
-  headerIcon: { paddingHorizontal: 5, paddingVertical: 10 },
-  headerGlyph: { fontSize: 16, lineHeight: 21 },
+  headerIcon: { paddingHorizontal: 7, paddingVertical: 8 },
 });

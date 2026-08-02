@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
-  ActivityIndicator,
   Alert,
   Image,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,6 +15,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GAME_STATUSES, type ChecklistSummary, type UpdateEntryInput } from "@gm/shared";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, STATUS_COLORS } from "@/lib/ui";
+import { colors, radius, space, type } from "@/lib/theme";
+import {
+  Button,
+  Cover,
+  Icon,
+  Loading,
+  ProgressBar,
+  Screen,
+  SectionTitle,
+} from "@/components/ui";
 
 const RATINGS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 
@@ -58,150 +67,174 @@ export default function GameDetailScreen() {
     },
   });
 
-  if (entry.isLoading || !entry.data) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
+  if (entry.isLoading || !entry.data) return <Loading />;
 
   const e = entry.data;
   const cover = resolveImage(e.game.coverSrc);
   const ttbMain = formatHours(e.game.ttbMain);
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={{ padding: 16, paddingBottom: 40 + insets.bottom }}
-    >
-      <View style={styles.header}>
-        <View style={styles.cover}>
-          {cover && <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />}
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.title}>{e.game.title}</Text>
-          {e.game.releaseDate && <Text style={styles.subtle}>Released {e.game.releaseDate}</Text>}
-          {ttbMain && <Text style={styles.subtle}>⏱ {ttbMain} main story</Text>}
-          {e.platforms.length > 0 && (
-            <Text style={styles.subtle}>
-              {e.platforms
-                .map((p) => `${p.abbreviation ?? p.name} ${p.format === "physical" ? "📦" : "💾"}`)
-                .join(" · ")}
-            </Text>
-          )}
-        </View>
-      </View>
-
-      <Text style={styles.section}>Status</Text>
-      <View style={styles.chips}>
-        {GAME_STATUSES.map((s) => {
-          const meta = STATUS_COLORS[s];
-          const active = e.status === s;
-          return (
-            <TouchableOpacity
-              key={s}
-              style={[styles.chip, active && { backgroundColor: meta.bg, borderColor: meta.text }]}
-              onPress={() => update.mutate({ status: s })}
-            >
-              <Text style={[styles.chipText, active && { color: meta.text }]}>{meta.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      <Text style={styles.section}>Rating</Text>
-      <View style={styles.chips}>
-        {RATINGS.map((r) => {
-          const active = e.rating === r;
-          return (
-            <TouchableOpacity
-              key={r}
-              style={[styles.ratingChip, active && styles.ratingActive]}
-              onPress={() => update.mutate({ rating: active ? null : r })}
-            >
-              <Text style={[styles.chipText, active && { color: "#fbbf24" }]}>{r}★</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {(allTags.data?.length ?? 0) > 0 && (
-        <>
-          <Text style={styles.section}>Tags</Text>
-          <View style={styles.chips}>
-            {(allTags.data ?? []).map((t) => {
-              const active = e.tags.some((et) => et.id === t.id);
-              const color = t.color ?? "#71717a";
-              return (
-                <TouchableOpacity
-                  key={t.id}
-                  style={[
-                    styles.chip,
-                    active && { backgroundColor: `${color}26`, borderColor: color },
-                  ]}
-                  onPress={() => {
-                    const current = e.tags.map((et) => et.id);
-                    setTags.mutate(
-                      active ? current.filter((tid) => tid !== t.id) : [...current, t.id],
-                    );
-                  }}
-                >
-                  <Text style={[styles.chipText, active && { color }]}>{t.name}</Text>
-                </TouchableOpacity>
-              );
-            })}
+    <Screen>
+      <ScrollView contentContainerStyle={{ padding: space.lg, paddingBottom: space.xl + insets.bottom }}>
+        <View style={styles.header}>
+          <View style={styles.cover}>
+            {cover ? (
+              <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            ) : (
+              <Icon name="game-controller-outline" size={28} color={colors.textGhost} />
+            )}
           </View>
-        </>
-      )}
+          <View style={{ flex: 1, minWidth: 0, gap: space.xs }}>
+            <Text style={type.title}>{e.game.title}</Text>
+            {e.game.releaseDate && (
+              <View style={styles.metaItem}>
+                <Icon name="calendar-outline" size={13} color={colors.textFaint} />
+                <Text style={type.micro}>{e.game.releaseDate}</Text>
+              </View>
+            )}
+            {ttbMain && (
+              <View style={styles.metaItem}>
+                <Icon name="time-outline" size={13} color={colors.textFaint} />
+                <Text style={type.micro}>{ttbMain} main story</Text>
+              </View>
+            )}
+            {e.platforms.length > 0 && (
+              <View style={styles.platformWrap}>
+                {e.platforms.map((p) => (
+                  <View key={`${p.platformId}-${p.format}`} style={styles.platformTag}>
+                    <Icon
+                      name={p.format === "physical" ? "cube-outline" : "cloud-download-outline"}
+                      size={11}
+                      color={colors.textMuted}
+                    />
+                    <Text style={type.micro} numberOfLines={1}>
+                      {p.abbreviation ?? p.name}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        </View>
 
-      {e.game.summary && (
-        <>
-          <Text style={styles.section}>About</Text>
-          <Text style={styles.summary}>{e.game.summary}</Text>
-        </>
-      )}
+        <SectionTitle>Status</SectionTitle>
+        <View style={styles.chips}>
+          {GAME_STATUSES.map((s) => {
+            const meta = STATUS_COLORS[s];
+            const active = e.status === s;
+            return (
+              <Pressable
+                key={s}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.chip, active && { backgroundColor: meta.bg, borderColor: meta.text }]}
+                onPress={() => update.mutate({ status: s })}
+              >
+                <Text style={[type.caption, active && { color: meta.text }]}>{meta.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
-      <Text style={styles.section}>Notes</Text>
-      <TextInput
-        style={styles.notes}
-        value={notes}
-        onChangeText={(v) => {
-          setNotes(v);
-          setNotesDirty(true);
-        }}
-        multiline
-        placeholder="Your notes…"
-        placeholderTextColor="#71717a"
-      />
-      {notesDirty && (
-        <TouchableOpacity
-          style={styles.saveBtn}
-          onPress={() => {
-            update.mutate({ notes });
-            setNotesDirty(false);
+        <SectionTitle>Rating</SectionTitle>
+        <View style={styles.chips}>
+          {RATINGS.map((r) => {
+            const active = e.rating === r;
+            return (
+              <Pressable
+                key={r}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.ratingChip, active && styles.ratingActive]}
+                onPress={() => update.mutate({ rating: active ? null : r })}
+              >
+                <Icon name="star" size={12} color={active ? colors.star : colors.textGhost} />
+                <Text style={[type.caption, active && { color: colors.star }]}>{r}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {(allTags.data?.length ?? 0) > 0 && (
+          <>
+            <SectionTitle>Tags</SectionTitle>
+            <View style={styles.chips}>
+              {(allTags.data ?? []).map((t) => {
+                const active = e.tags.some((et) => et.id === t.id);
+                const color = t.color ?? colors.textFaint;
+                return (
+                  <Pressable
+                    key={t.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[styles.chip, active && { backgroundColor: `${color}26`, borderColor: color }]}
+                    onPress={() => {
+                      const current = e.tags.map((et) => et.id);
+                      setTags.mutate(
+                        active ? current.filter((tid) => tid !== t.id) : [...current, t.id],
+                      );
+                    }}
+                  >
+                    <Text style={[type.caption, active && { color }]}>{t.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </>
+        )}
+
+        {e.game.summary && (
+          <>
+            <SectionTitle>About</SectionTitle>
+            <Text style={type.prose}>{e.game.summary}</Text>
+          </>
+        )}
+
+        <SectionTitle>Notes</SectionTitle>
+        <TextInput
+          style={[styles.notes, type.body]}
+          value={notes}
+          onChangeText={(v) => {
+            setNotes(v);
+            setNotesDirty(true);
           }}
-        >
-          <Text style={styles.saveText}>Save notes</Text>
-        </TouchableOpacity>
-      )}
+          multiline
+          placeholder="Your notes…"
+          placeholderTextColor={colors.textFaint}
+        />
+        {notesDirty && (
+          <Button
+            label="Save notes"
+            icon="save-outline"
+            fill
+            style={{ marginTop: space.sm }}
+            busy={update.isPending}
+            onPress={() => {
+              update.mutate({ notes });
+              setNotesDirty(false);
+            }}
+          />
+        )}
 
-      <ProgressSection entryId={id} gameId={e.game.id} />
-      <AchievementsSection entryId={id} />
-      <ChecklistsSection gameId={e.game.id} />
+        <ProgressSection entryId={id} gameId={e.game.id} />
+        <AchievementsSection entryId={id} />
+        <ChecklistsSection gameId={e.game.id} />
 
-      <TouchableOpacity
-        style={styles.deleteBtn}
-        onPress={() =>
-          Alert.alert("Remove game", `Remove "${e.game.title}" from your library?`, [
-            { text: "Cancel", style: "cancel" },
-            { text: "Remove", style: "destructive", onPress: () => remove.mutate() },
-          ])
-        }
-      >
-        <Text style={styles.deleteText}>Remove from library</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        <Button
+          label="Remove from library"
+          tone="danger"
+          icon="trash-outline"
+          fill
+          style={{ marginTop: space.xxl }}
+          onPress={() =>
+            Alert.alert("Remove game", `Remove "${e.game.title}" from your library?`, [
+              { text: "Cancel", style: "cancel" },
+              { text: "Remove", style: "destructive", onPress: () => remove.mutate() },
+            ])
+          }
+        />
+      </ScrollView>
+    </Screen>
   );
 }
 
@@ -228,17 +261,15 @@ function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string 
 
   return (
     <>
-      <Text style={styles.section}>Progress</Text>
+      <SectionTitle>Progress</SectionTitle>
       {p && p.total > 0 && (
-        <>
-          <Text style={styles.achievementCount}>
+        <View style={{ marginBottom: space.md }}>
+          <Text style={[type.caption, { marginBottom: 6 }]}>
             {remaining ? `${remaining} left · ` : ""}
             {p.done}/{p.total} missions ({p.percent}%)
           </Text>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${p.percent}%` }]} />
-          </View>
-        </>
+          <ProgressBar percent={p.percent} />
+        </View>
       )}
       {missionList && <ChecklistCard summary={missionList} gameId={gameId} />}
       {sideList && <ChecklistCard summary={sideList} gameId={gameId} />}
@@ -257,34 +288,25 @@ function AchievementsSection({ entryId }: { entryId: string }) {
 
   return (
     <>
-      <Text style={styles.section}>
-        Steam{" "}
+      <SectionTitle>
+        Steam
         {data.steamPlaytimeMinutes != null && data.steamPlaytimeMinutes > 0
-          ? `· ${Math.round((data.steamPlaytimeMinutes / 60) * 10) / 10}h played`
+          ? ` · ${Math.round((data.steamPlaytimeMinutes / 60) * 10) / 10}h played`
           : ""}
-      </Text>
+      </SectionTitle>
       {data.total > 0 && (
         <>
-          <Text style={styles.achievementCount}>
+          <Text style={[type.caption, { marginBottom: 6 }]}>
             {data.unlocked}/{data.total} achievements ({pct}%)
           </Text>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${pct}%` }]} />
-          </View>
+          <ProgressBar percent={pct} />
           <View style={styles.achievementGrid}>
             {data.achievements.map((a) => {
               const icon = a.unlocked ? a.iconUrl : (a.iconGrayUrl ?? a.iconUrl);
               return (
-                <View
-                  key={a.id}
-                  style={[styles.achievementIcon, !a.unlocked && { opacity: 0.35 }]}
-                >
+                <View key={a.id} style={[styles.achievementIcon, !a.unlocked && { opacity: 0.35 }]}>
                   {icon && (
-                    <Image
-                      source={{ uri: icon }}
-                      style={StyleSheet.absoluteFill}
-                      resizeMode="cover"
-                    />
+                    <Image source={{ uri: icon }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                   )}
                 </View>
               );
@@ -315,27 +337,27 @@ function ChecklistsSection({ gameId }: { gameId: string }) {
 
   return (
     <>
-      <Text style={styles.section}>Checklists</Text>
+      <SectionTitle>Checklists</SectionTitle>
       {mine.map((c) => (
         <ChecklistCard key={c.id} summary={c} gameId={gameId} />
       ))}
       {shared.map((c) => (
         <View key={c.id} style={styles.checklistCard}>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.checklistTitle} numberOfLines={1}>
+            <Text style={type.bodyStrong} numberOfLines={2}>
               {c.title}
             </Text>
-            <Text style={styles.checklistMeta}>
+            <Text style={type.micro}>
               {c.itemCount} items{c.authorName ? ` · by ${c.authorName}` : ""}
             </Text>
           </View>
-          <TouchableOpacity
-            style={styles.adoptBtn}
-            disabled={adopt.isPending}
+          <Button
+            label="Adopt"
+            tone="ghost"
+            busy={adopt.isPending}
             onPress={() => adopt.mutate(c.id)}
-          >
-            <Text style={styles.adoptText}>Adopt</Text>
-          </TouchableOpacity>
+            style={styles.adoptBtn}
+          />
         </View>
       ))}
     </>
@@ -387,147 +409,134 @@ function ChecklistCard({ summary, gameId }: { summary: ChecklistSummary; gameId:
 
   return (
     <View style={styles.checklistCardCol}>
-      <TouchableOpacity style={styles.checklistHeader} onPress={() => setOpen(!open)}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        style={styles.checklistHeader}
+        onPress={() => setOpen(!open)}
+      >
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.checklistTitle} numberOfLines={1}>
+          <Text style={type.bodyStrong} numberOfLines={2}>
             {summary.title}
           </Text>
-          <Text style={styles.checklistMeta}>
+          <Text style={type.micro}>
             {summary.doneCount}/{summary.itemCount}
           </Text>
         </View>
-        <View style={[styles.progressTrack, { width: 72, marginTop: 0 }]}>
-          <View style={[styles.progressFill, { width: `${pct}%` }]} />
-        </View>
-        <Text style={styles.chevron}>{open ? "▾" : "▸"}</Text>
-      </TouchableOpacity>
+        <ProgressBar percent={pct} width={72} />
+        <Icon name={open ? "chevron-down" : "chevron-forward"} size={16} color={colors.textGhost} />
+      </Pressable>
       {open &&
         (detail.data?.items ?? []).map((item, i) => (
-          <TouchableOpacity
+          <Pressable
             key={item.id}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: !!item.completedAt }}
             style={styles.checkRow}
-            onPress={() =>
-              check.mutate({ itemId: item.id, completed: !item.completedAt, index: i })
-            }
+            onPress={() => check.mutate({ itemId: item.id, completed: !item.completedAt, index: i })}
           >
-            <Text style={styles.checkBox}>{item.completedAt ? "☑" : "☐"}</Text>
+            <Icon
+              name={item.completedAt ? "checkbox" : "square-outline"}
+              size={18}
+              color={item.completedAt ? colors.accentBorder : colors.textGhost}
+            />
             <Text
-              style={[styles.checkText, item.completedAt ? styles.checkTextDone : null]}
+              style={[type.caption, { flex: 1 }, item.completedAt && styles.checkTextDone]}
               numberOfLines={2}
             >
               {item.category ? `${item.category} · ` : ""}
               {item.text}
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         ))}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#101014" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#101014" },
-  header: { flexDirection: "row", gap: 14 },
-  cover: { width: 96, height: 128, borderRadius: 10, backgroundColor: "#27272a", overflow: "hidden" },
-  title: { color: "#fafafa", fontSize: 20, fontWeight: "700" },
-  subtle: { color: "#71717a", fontSize: 12, marginTop: 4 },
-  section: { color: "#d4d4d8", fontSize: 14, fontWeight: "600", marginTop: 20, marginBottom: 8 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  header: { flexDirection: "row", gap: space.lg },
+  cover: {
+    width: 100,
+    height: 133,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  metaItem: { flexDirection: "row", alignItems: "center", gap: 4 },
+  platformWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 2 },
+  platformTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    maxWidth: 150,
+  },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   chip: {
-    borderRadius: 999,
+    justifyContent: "center",
+    minHeight: 34,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderColor: colors.borderStrong,
+    paddingHorizontal: space.md,
   },
-  chipText: { color: "#a1a1aa", fontSize: 13, fontWeight: "500" },
   ratingChip: {
-    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    minHeight: 34,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderColor: colors.borderStrong,
+    paddingHorizontal: space.sm + 2,
   },
-  ratingActive: { backgroundColor: "#451a03", borderColor: "#fbbf24" },
-  summary: { color: "#a1a1aa", fontSize: 13, lineHeight: 20 },
+  ratingActive: { backgroundColor: "#451a03", borderColor: colors.star },
   notes: {
-    backgroundColor: "#27272a",
+    backgroundColor: colors.surfaceAlt,
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    borderRadius: 10,
-    padding: 12,
-    color: "#fafafa",
-    fontSize: 14,
-    minHeight: 90,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.md,
+    padding: space.md,
+    color: colors.text,
+    minHeight: 96,
     textAlignVertical: "top",
   },
-  saveBtn: {
-    backgroundColor: "#4f46e5",
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-    marginTop: 10,
-  },
-  saveText: { color: "#fff", fontWeight: "600" },
-  deleteBtn: {
-    borderWidth: 1,
-    borderColor: "#7f1d1d",
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-    marginTop: 28,
-  },
-  deleteText: { color: "#f87171", fontWeight: "600" },
-  achievementCount: { color: "#a1a1aa", fontSize: 12, marginBottom: 6 },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#27272a",
-    overflow: "hidden",
-    marginTop: 2,
-  },
-  progressFill: { height: 6, borderRadius: 3, backgroundColor: "#10b981" },
-  achievementGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10 },
+  achievementGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: space.md },
   achievementIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 6,
-    backgroundColor: "#27272a",
+    width: 38,
+    height: 38,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceAlt,
     overflow: "hidden",
   },
   checklistCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    backgroundColor: "#18181b",
-    borderRadius: 12,
+    gap: space.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 12,
-    marginBottom: 8,
+    borderColor: colors.border,
+    padding: space.md,
+    marginBottom: space.sm,
   },
   checklistCardCol: {
-    backgroundColor: "#18181b",
-    borderRadius: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 12,
-    marginBottom: 8,
+    borderColor: colors.border,
+    padding: space.md,
+    marginBottom: space.sm,
   },
-  checklistHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
-  checklistTitle: { color: "#fafafa", fontSize: 14, fontWeight: "600" },
-  checklistMeta: { color: "#71717a", fontSize: 11, marginTop: 2 },
-  adoptBtn: {
-    borderWidth: 1,
-    borderColor: "#818cf8",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  adoptText: { color: "#a5b4fc", fontSize: 12, fontWeight: "600" },
-  chevron: { color: "#52525b", fontSize: 16 },
-  checkRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
-  checkBox: { color: "#818cf8", fontSize: 16 },
-  checkText: { color: "#d4d4d8", fontSize: 13, flex: 1 },
-  checkTextDone: { color: "#52525b", textDecorationLine: "line-through" },
+  checklistHeader: { flexDirection: "row", alignItems: "center", gap: space.md },
+  adoptBtn: { minHeight: 36, paddingHorizontal: space.md },
+  checkRow: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingVertical: 7 },
+  checkTextDone: { color: colors.textGhost, textDecorationLine: "line-through" },
 });

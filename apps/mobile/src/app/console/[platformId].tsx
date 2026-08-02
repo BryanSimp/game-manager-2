@@ -18,13 +18,23 @@ import { api } from "@/lib/api";
 import { formatHours, resolveImage, statusStyle } from "@/lib/ui";
 import { formatReleaseDate } from "@/lib/platforms";
 import { usePreferences } from "@/lib/prefs";
+import { colors, radius, space, type } from "@/lib/theme";
+import {
+  Badge,
+  Chevron,
+  Cover,
+  EmptyState,
+  Icon,
+  Screen,
+  type IconName,
+} from "@/components/ui";
 
 type FormatFilter = "all" | OwnershipFormat;
 
-const FORMAT_FILTERS: Array<{ key: FormatFilter; label: string }> = [
-  { key: "all", label: "Everything" },
-  { key: "physical", label: "📦 Physical" },
-  { key: "digital", label: "💾 Digital" },
+const FORMAT_FILTERS: Array<{ key: FormatFilter; label: string; icon: IconName }> = [
+  { key: "all", label: "Everything", icon: "albums-outline" },
+  { key: "physical", label: "Physical", icon: "cube-outline" },
+  { key: "digital", label: "Digital", icon: "cloud-download-outline" },
 ];
 
 /**
@@ -63,15 +73,18 @@ export default function ConsoleDetailScreen() {
 
   if (!loading && !platform) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.emptyTitle}>Console not found</Text>
-        <Text style={styles.emptyText}>It may have been removed from your consoles list.</Text>
-      </View>
+      <Screen center>
+        <EmptyState
+          icon="help-circle-outline"
+          title="Console not found"
+          text="It may have been removed from your consoles list."
+        />
+      </Screen>
     );
   }
 
   return (
-    <View style={styles.screen}>
+    <Screen>
       <Stack.Screen options={{ title: platform?.name ?? "Console" }} />
       <FlatList
         data={entries}
@@ -79,67 +92,75 @@ export default function ConsoleDetailScreen() {
         refreshControl={
           <RefreshControl refreshing={library.isRefetching} onRefresh={() => library.refetch()} />
         }
-        contentContainerStyle={{ padding: 12, paddingBottom: 32 + insets.bottom }}
+        contentContainerStyle={{ padding: space.md, paddingBottom: space.xxl + insets.bottom }}
         ListHeaderComponent={
-          <View style={{ marginBottom: 4 }}>
-            <View style={styles.card}>
+          <View>
+            <View style={styles.hero}>
               <View style={styles.logo}>
                 {art ? (
                   <Image source={{ uri: art }} style={styles.logoImage} resizeMode="contain" />
                 ) : (
-                  <Text style={styles.logoFallback} numberOfLines={2}>
+                  <Text style={[type.label, styles.logoFallback]} numberOfLines={2}>
                     {platform?.abbreviation ?? platform?.name ?? "—"}
                   </Text>
                 )}
               </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.name} numberOfLines={2}>
+              <View style={styles.heroBody}>
+                <Text style={type.title} numberOfLines={2}>
                   {platform?.name ?? "Console"}
                 </Text>
                 {platform?.parentName && (
-                  <Text style={styles.meta}>{platform.parentName} storefront</Text>
+                  <Text style={type.micro}>{platform.parentName} storefront</Text>
                 )}
-                {released && <Text style={styles.meta}>Released {released}</Text>}
-                <Text style={styles.count}>
+                {released && <Text style={type.micro}>Released {released}</Text>}
+                <Text style={[type.caption, { color: colors.text, marginTop: space.xs }]}>
                   {entries.length} {entries.length === 1 ? "game" : "games"}
                 </Text>
               </View>
             </View>
 
-            {platform?.summary && <Text style={styles.summary}>{platform.summary}</Text>}
+            {platform?.summary && (
+              <Text style={[type.prose, { marginTop: space.md }]}>{platform.summary}</Text>
+            )}
 
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              style={{ flexGrow: 0, marginTop: 12 }}
-              contentContainerStyle={{ gap: 8 }}
+              style={{ flexGrow: 0, marginTop: space.md }}
+              contentContainerStyle={{ gap: space.sm, paddingVertical: 2 }}
             >
-              {FORMAT_FILTERS.map((f) => (
-                <Pressable
-                  key={f.key}
-                  style={[styles.chip, format === f.key && styles.chipActive]}
-                  onPress={() => setFormat(f.key)}
-                >
-                  <Text style={[styles.chipText, format === f.key && styles.chipTextActive]}>
-                    {f.label}
-                  </Text>
-                </Pressable>
-              ))}
+              {FORMAT_FILTERS.map((f) => {
+                const active = format === f.key;
+                const fg = active ? colors.accentText : colors.textMuted;
+                return (
+                  <Pressable
+                    key={f.key}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[styles.chip, active && styles.chipActive]}
+                    onPress={() => setFormat(f.key)}
+                  >
+                    <Icon name={f.icon} size={14} color={fg} />
+                    <Text style={[type.caption, { color: fg }]}>{f.label}</Text>
+                  </Pressable>
+                );
+              })}
             </ScrollView>
           </View>
         }
         ListEmptyComponent={
           loading ? (
-            <ActivityIndicator style={{ marginTop: 32 }} />
+            <ActivityIndicator style={{ marginTop: space.xxl }} color={colors.accentBorder} />
           ) : (
-            <View style={styles.emptyBlock}>
-              <Text style={styles.emptyTitle}>Nothing filed here yet</Text>
-              <Text style={styles.emptyText}>
-                {format === "all"
+            <EmptyState
+              icon="file-tray-outline"
+              title="Nothing filed here yet"
+              text={
+                format === "all"
                   ? "Set a game's platform on its page and it'll show up here."
-                  : "No games in that format on this console."}
-              </Text>
-            </View>
+                  : "No games in that format on this console."
+              }
+            />
           )
         }
         renderItem={({ item }) => (
@@ -152,7 +173,7 @@ export default function ConsoleDetailScreen() {
           />
         )}
       />
-    </View>
+    </Screen>
   );
 }
 
@@ -170,114 +191,103 @@ function GameRow({
   onPress: () => void;
 }) {
   const status = statusStyle(entry.status, badgeOpacity);
-  const cover = resolveImage(entry.game.coverSrc);
   const ttb = formatHours(entry.game.ttbMain);
   // on PC's page, say which store each game came from
   const here = entry.platforms.filter(
     (p) => p.platformId === platformId || p.parentPlatformId === platformId,
   );
-  const formats = here
-    .map((p) => `${p.parentPlatformId ? `${p.abbreviation ?? p.name} ` : ""}${p.format === "physical" ? "📦" : "💾"}`)
-    .join(" · ");
 
   return (
-    <Pressable style={styles.row} onPress={onPress}>
-      <View style={styles.cover}>
-        {cover && (
-          <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        )}
-      </View>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
+    >
+      <Cover src={resolveImage(entry.game.coverSrc)} width={46} height={62} />
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.title} numberOfLines={2}>
+        <Text style={type.bodyStrong} numberOfLines={2}>
           {entry.game.title}
         </Text>
         <View style={styles.metaRow}>
-          <View style={[styles.badge, { backgroundColor: status.bg }]}>
-            <Text style={[styles.badgeText, { color: status.text }]} numberOfLines={1}>
-              {status.label}
-            </Text>
-          </View>
-          {entry.rating != null && showRating && <Text style={styles.rating}>★ {entry.rating}</Text>}
-          {ttb && <Text style={styles.ttb}>⏱ {ttb}</Text>}
+          <Badge label={status.label} bg={status.bg} fg={status.text} />
+          {entry.rating != null && showRating && (
+            <View style={styles.metaItem}>
+              <Icon name="star" size={12} color={colors.star} />
+              <Text style={[type.caption, { color: colors.star }]}>{entry.rating}</Text>
+            </View>
+          )}
+          {ttb && (
+            <View style={styles.metaItem}>
+              <Icon name="time-outline" size={12} color={colors.textMuted} />
+              <Text style={type.caption}>{ttb}</Text>
+            </View>
+          )}
         </View>
-        {formats.length > 0 && (
-          <Text style={styles.formats} numberOfLines={1}>
-            {formats}
-          </Text>
-        )}
+        <View style={styles.metaRow}>
+          {here.map((p) => (
+            <View key={`${p.platformId}-${p.format}`} style={styles.metaItem}>
+              <Icon
+                name={p.format === "physical" ? "cube-outline" : "cloud-download-outline"}
+                size={12}
+                color={colors.textFaint}
+              />
+              <Text style={type.micro}>{p.parentPlatformId ? (p.abbreviation ?? p.name) : p.format}</Text>
+            </View>
+          ))}
+        </View>
       </View>
-      <Text style={styles.chevron}>›</Text>
+      <Chevron />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#101014" },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#101014",
-    padding: 24,
-  },
-  card: {
+  hero: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
-    backgroundColor: "#18181b",
-    borderRadius: 14,
+    gap: space.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 14,
+    borderColor: colors.border,
+    padding: space.md,
   },
+  heroBody: { flex: 1, minWidth: 0, gap: 2 },
   logo: {
     width: 88,
     height: 60,
-    borderRadius: 10,
-    backgroundColor: "#101014",
+    borderRadius: radius.md,
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: "#27272a",
+    borderColor: colors.border,
     alignItems: "center",
     justifyContent: "center",
     padding: 6,
   },
   logoImage: { width: "100%", height: "100%" },
-  logoFallback: { color: "#52525b", fontSize: 11, fontWeight: "700", textAlign: "center" },
-  name: { color: "#fafafa", fontSize: 18, fontWeight: "700" },
-  meta: { color: "#71717a", fontSize: 11, marginTop: 2 },
-  count: { color: "#a1a1aa", fontSize: 12, marginTop: 4, fontWeight: "600" },
-  summary: { color: "#a1a1aa", fontSize: 13, lineHeight: 19, marginTop: 10 },
+  logoFallback: { color: colors.textGhost, textAlign: "center" },
   chip: {
-    borderRadius: 999,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minHeight: 34,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderColor: colors.borderStrong,
+    paddingHorizontal: space.md,
   },
-  chipActive: { backgroundColor: "#312e81", borderColor: "#818cf8" },
-  chipText: { color: "#a1a1aa", fontSize: 13, fontWeight: "500" },
-  chipTextActive: { color: "#c7d2fe" },
+  chipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    backgroundColor: "#18181b",
-    borderRadius: 12,
+    gap: space.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 10,
-    marginTop: 8,
+    borderColor: colors.border,
+    padding: space.sm + 2,
+    marginTop: space.sm,
   },
-  cover: { width: 46, height: 62, borderRadius: 6, backgroundColor: "#27272a", overflow: "hidden" },
-  title: { color: "#fafafa", fontSize: 15, fontWeight: "600" },
-  metaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 4 },
-  badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, maxWidth: 140 },
-  badgeText: { fontSize: 11, fontWeight: "600" },
-  rating: { color: "#fbbf24", fontSize: 12 },
-  ttb: { color: "#a1a1aa", fontSize: 12 },
-  formats: { color: "#71717a", fontSize: 11, marginTop: 3 },
-  chevron: { color: "#52525b", fontSize: 24, paddingLeft: 4 },
-  emptyBlock: { alignItems: "center", marginTop: 40, paddingHorizontal: 24 },
-  emptyTitle: { color: "#fafafa", fontSize: 16, fontWeight: "600", textAlign: "center" },
-  emptyText: { color: "#71717a", fontSize: 13, marginTop: 6, textAlign: "center" },
+  metaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: space.sm, marginTop: 5 },
+  metaItem: { flexDirection: "row", alignItems: "center", gap: 3 },
 });

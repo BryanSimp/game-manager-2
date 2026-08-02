@@ -1,21 +1,19 @@
 import { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BUILTIN_CATEGORIES, GAME_STATUSES, type GameStatus, type ImportCandidate, type ImportItem } from "@gm/shared";
+import {
+  BUILTIN_CATEGORIES,
+  GAME_STATUSES,
+  type GameStatus,
+  type ImportCandidate,
+  type ImportItem,
+} from "@gm/shared";
 import { api } from "@/lib/api";
+import { colors, radius, space, type } from "@/lib/theme";
+import { Button, Cover, Icon, Screen } from "@/components/ui";
 
 interface ReviewItem {
   id: string;
@@ -90,11 +88,7 @@ export default function ImportScreen() {
     try {
       setError(null);
       const blob = await (await fetch(asset.uri)).blob();
-      const created = await api.createImageImport(
-        blob,
-        asset.fileName ?? "photo.jpg",
-        source,
-      );
+      const created = await api.createImageImport(blob, asset.fileName ?? "photo.jpg", source);
       setJobId(created.id);
       setStage("processing");
     } catch (err) {
@@ -129,9 +123,7 @@ export default function ImportScreen() {
     const options = item.candidates.slice(0, 4).map((c) => ({
       text: `${c.title}${c.releaseYear ? ` (${c.releaseYear})` : ""}`,
       onPress: () => {
-        setItems((prev) =>
-          prev.map((it) => (it.id === item.id ? { ...it, selected: c } : it)),
-        );
+        setItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, selected: c } : it)));
       },
     }));
     Alert.alert("Pick the right game", item.raw, [
@@ -139,9 +131,7 @@ export default function ImportScreen() {
       {
         text: `Add "${item.cleaned}" manually`,
         onPress: () =>
-          setItems((prev) =>
-            prev.map((it) => (it.id === item.id ? { ...it, selected: null } : it)),
-          ),
+          setItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, selected: null } : it))),
       },
       { text: "Cancel", style: "cancel" },
     ]);
@@ -151,332 +141,296 @@ export default function ImportScreen() {
 
   if (stage === "processing") {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.processingText}>
+      <Screen center>
+        <ActivityIndicator size="large" color={colors.accentBorder} />
+        <Text style={[type.body, { marginTop: space.lg }]}>
           {STATUS_LABELS[job.data?.status ?? "pending"]}
         </Text>
-      </View>
+      </Screen>
     );
   }
 
   if (stage === "review") {
     return (
-      <View style={styles.screen}>
+      <Screen>
         <FlatList
           data={items}
           keyExtractor={(it) => it.id}
           // the footer floats over the list, so leave room for all of it
-          contentContainerStyle={{ padding: 12, paddingBottom: 190 + insets.bottom }}
-          renderItem={({ item }) => (
-            // the match, its category chip and the skip button used to share a
-            // single row and clipped each other — controls get their own line
-            <View style={[styles.row, item.skipped && { opacity: 0.4 }]}>
-              <View style={styles.rowTop}>
-                <View
-                  style={[
-                    styles.dot,
-                    {
-                      backgroundColor: !item.selected
-                        ? "#fbbf24"
-                        : (item.confidence ?? 1) >= 0.8
-                          ? "#34d399"
-                          : (item.confidence ?? 1) >= 0.55
-                            ? "#fbbf24"
-                            : "#f87171",
-                    },
-                  ]}
-                />
-                <View style={styles.cover}>
-                  {item.selected?.coverSrc?.startsWith("http") && (
-                    <Image
-                      source={{ uri: item.selected.coverSrc }}
-                      style={StyleSheet.absoluteFill}
-                      resizeMode="cover"
-                    />
-                  )}
-                </View>
-                <TouchableOpacity
-                  style={{ flex: 1, minWidth: 0 }}
-                  onPress={() => pickCandidate(item)}
-                >
-                  <Text style={styles.raw} numberOfLines={1}>
-                    {item.raw}
-                  </Text>
-                  <Text style={styles.matched} numberOfLines={2}>
-                    {item.selected
-                      ? `→ ${item.selected.title}${item.selected.releaseYear ? ` (${item.selected.releaseYear})` : ""}`
-                      : `→ "${item.cleaned}" (manual)`}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.skipBtn}
-                  accessibilityLabel={item.skipped ? "Include this game" : "Skip this game"}
-                  onPress={() =>
-                    setItems((prev) =>
-                      prev.map((it) => (it.id === item.id ? { ...it, skipped: !it.skipped } : it)),
-                    )
-                  }
-                >
-                  <Text style={styles.skipText}>{item.skipped ? "＋" : "✕"}</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.rowBottom}>
-                <TouchableOpacity style={styles.changeBtn} onPress={() => pickCandidate(item)}>
-                  <Text style={styles.changeText}>Change match</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.statusChip,
-                    { borderColor: `${STATUS_CHIP[item.status]!.color}66` },
-                  ]}
-                  onPress={() =>
-                    // tap cycles through the built-in categories
-                    setItems((prev) =>
-                      prev.map((it) =>
-                        it.id === item.id
-                          ? {
-                              ...it,
-                              status:
-                                GAME_STATUSES[
-                                  (GAME_STATUSES.indexOf(it.status) + 1) % GAME_STATUSES.length
-                                ]!,
-                            }
-                          : it,
-                      ),
-                    )
-                  }
-                >
-                  <Text
-                    style={[styles.statusChipText, { color: STATUS_CHIP[item.status]!.color }]}
+          contentContainerStyle={{ padding: space.md, paddingBottom: 200 + insets.bottom }}
+          renderItem={({ item }) => {
+            const chip = STATUS_CHIP[item.status]!;
+            const dot = !item.selected
+              ? colors.warning
+              : (item.confidence ?? 1) >= 0.8
+                ? colors.success
+                : (item.confidence ?? 1) >= 0.55
+                  ? colors.warning
+                  : colors.danger;
+            return (
+              // the match, its category chip and the skip button used to share
+              // one row and clipped each other — controls get their own line
+              <View style={[styles.row, item.skipped && { opacity: 0.45 }]}>
+                <View style={styles.rowTop}>
+                  <View style={[styles.dot, { backgroundColor: dot }]} />
+                  <Cover
+                    src={item.selected?.coverSrc?.startsWith("http") ? item.selected.coverSrc : null}
+                    width={38}
+                    height={50}
+                  />
+                  <Pressable style={{ flex: 1, minWidth: 0 }} onPress={() => pickCandidate(item)}>
+                    <Text style={type.micro} numberOfLines={1}>
+                      {item.raw}
+                    </Text>
+                    <Text style={[type.bodyStrong, { marginTop: 2 }]} numberOfLines={2}>
+                      {item.selected
+                        ? item.selected.title
+                        : `"${item.cleaned}" (manual)`}
+                      {item.selected?.releaseYear ? ` (${item.selected.releaseYear})` : ""}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={item.skipped ? "Include this game" : "Skip this game"}
+                    style={styles.skipBtn}
+                    onPress={() =>
+                      setItems((prev) =>
+                        prev.map((it) =>
+                          it.id === item.id ? { ...it, skipped: !it.skipped } : it,
+                        ),
+                      )
+                    }
                   >
-                    {STATUS_CHIP[item.status]!.label}
-                  </Text>
-                </TouchableOpacity>
+                    <Icon
+                      name={item.skipped ? "add" : "close"}
+                      size={16}
+                      color={colors.textMuted}
+                    />
+                  </Pressable>
+                </View>
+                <View style={styles.rowBottom}>
+                  <Pressable style={styles.changeBtn} onPress={() => pickCandidate(item)}>
+                    <Icon name="swap-horizontal" size={13} color={colors.textMuted} />
+                    <Text style={type.micro}>Change match</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.statusChip, { borderColor: `${chip.color}66` }]}
+                    onPress={() =>
+                      // tap cycles through the built-in categories
+                      setItems((prev) =>
+                        prev.map((it) =>
+                          it.id === item.id
+                            ? {
+                                ...it,
+                                status:
+                                  GAME_STATUSES[
+                                    (GAME_STATUSES.indexOf(it.status) + 1) % GAME_STATUSES.length
+                                  ]!,
+                              }
+                            : it,
+                        ),
+                      )
+                    }
+                  >
+                    <Text style={[type.micro, { color: chip.color }]}>{chip.label}</Text>
+                  </Pressable>
+                </View>
               </View>
-            </View>
-          )}
+            );
+          }}
         />
-        <View style={[styles.footer, { paddingBottom: 12 + insets.bottom }]}>
-          <Text style={styles.footerLabel}>Mark all as owned on:</Text>
+        <View style={[styles.footer, { paddingBottom: space.md + insets.bottom }]}>
+          <Text style={[type.micro, { color: colors.textMuted }]}>Mark all as owned on</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 6, paddingVertical: 6 }}
+            contentContainerStyle={{ gap: 6, paddingVertical: space.sm }}
           >
-            <TouchableOpacity
-              style={[styles.platChip, !ownPlatformId && styles.platChipActive]}
+            <PlatChip
+              label="Don't set"
+              active={!ownPlatformId}
               onPress={() => setOwnPlatformId(null)}
-            >
-              <Text style={[styles.platChipText, !ownPlatformId && styles.platChipTextActive]}>
-                Don't set
-              </Text>
-            </TouchableOpacity>
-            {(platforms.data ?? []).map((p) => {
-              const active2 = ownPlatformId === p.id;
-              return (
-                <TouchableOpacity
-                  key={p.id}
-                  style={[styles.platChip, active2 && styles.platChipActive]}
-                  onPress={() => setOwnPlatformId(active2 ? null : p.id)}
-                >
-                  <Text style={[styles.platChipText, active2 && styles.platChipTextActive]}>
-                    {/* storefronts share short names with nothing, but "Steam"
-                        next to "PC" reads better as "PC · Steam" */}
-                    {p.parentName ? `${p.parentName} · ` : ""}
-                    {p.abbreviation ?? p.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+            />
+            {(platforms.data ?? []).map((p) => (
+              <PlatChip
+                key={p.id}
+                // storefronts share short names with nothing, but "Steam" next
+                // to "PC" reads better as "PC · Steam"
+                label={`${p.parentName ? `${p.parentName} · ` : ""}${p.abbreviation ?? p.name}`}
+                active={ownPlatformId === p.id}
+                onPress={() => setOwnPlatformId(ownPlatformId === p.id ? null : p.id)}
+              />
+            ))}
           </ScrollView>
           {ownPlatformId && (
             <View style={styles.formatRow}>
-              <TouchableOpacity
-                style={[styles.formatBtn, ownFormat === "digital" && styles.formatBtnActive]}
+              <Button
+                label="Digital"
+                icon="cloud-download-outline"
+                tone={ownFormat === "digital" ? "primary" : "ghost"}
+                fill
                 onPress={() => setOwnFormat("digital")}
-              >
-                <Text style={styles.platChipText}>💾 Digital</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.formatBtn, ownFormat === "physical" && styles.formatBtnActive]}
+                style={styles.formatBtn}
+              />
+              <Button
+                label="Physical"
+                icon="cube-outline"
+                tone={ownFormat === "physical" ? "primary" : "ghost"}
+                fill
                 onPress={() => setOwnFormat("physical")}
-              >
-                <Text style={styles.platChipText}>📦 Physical</Text>
-              </TouchableOpacity>
+                style={styles.formatBtn}
+              />
             </View>
           )}
-          <TouchableOpacity
-            style={styles.confirmBtn}
-            disabled={confirm.isPending || active.length === 0}
+          <Button
+            label={`Add ${active.length} ${active.length === 1 ? "game" : "games"}`}
+            icon="checkmark"
+            fill
+            disabled={active.length === 0}
+            busy={confirm.isPending}
             onPress={() => confirm.mutate()}
-          >
-            <Text style={styles.confirmText}>
-              {confirm.isPending ? "Adding…" : `Add ${active.length} games`}
-            </Text>
-          </TouchableOpacity>
+          />
         </View>
-      </View>
+      </Screen>
     );
   }
 
   return (
-    <View style={styles.screen}>
-      <View style={{ padding: 16, gap: 12 }}>
-        {error && <Text style={styles.error}>{error}</Text>}
-        <Text style={styles.intro}>
+    <Screen>
+      <View style={{ padding: space.lg, gap: space.md }}>
+        {error && (
+          <View style={styles.error}>
+            <Icon name="alert-circle" size={16} color="#fca5a5" />
+            <Text style={[type.caption, { flex: 1, color: "#fca5a5" }]}>{error}</Text>
+          </View>
+        )}
+        <Text style={type.prose}>
           Photograph your game shelf or upload a library screenshot — titles are read and matched
           automatically, and you review everything before it's added.
         </Text>
-        <ActionButton
-          label="📷 Photograph my game shelf"
+        <Button
+          label="Photograph my game shelf"
+          icon="camera"
+          fill
           onPress={() => pickImage(true, "shelf_photo")}
         />
-        <ActionButton
-          label="🖼 Shelf photo from gallery"
-          secondary
+        <Button
+          label="Shelf photo from gallery"
+          icon="images-outline"
+          tone="ghost"
+          fill
           onPress={() => pickImage(false, "shelf_photo")}
         />
-        <ActionButton
-          label="🖥 Library screenshot from gallery"
-          secondary
+        <Button
+          label="Library screenshot from gallery"
+          icon="desktop-outline"
+          tone="ghost"
+          fill
           onPress={() => pickImage(false, "screenshot")}
         />
       </View>
-    </View>
+    </Screen>
   );
 }
 
-function ActionButton({
+function PlatChip({
   label,
+  active,
   onPress,
-  secondary,
 }: {
   label: string;
+  active: boolean;
   onPress: () => void;
-  secondary?: boolean;
 }) {
   return (
-    <TouchableOpacity style={[styles.action, secondary && styles.actionSecondary]} onPress={onPress}>
-      <Text style={[styles.actionText, secondary && { color: "#d4d4d8" }]}>{label}</Text>
-    </TouchableOpacity>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      style={[styles.platChip, active && styles.platChipActive]}
+      onPress={onPress}
+    >
+      <Text style={[type.micro, { color: active ? colors.accentText : colors.textMuted }]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#101014" },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#101014",
-    gap: 16,
-  },
-  processingText: { color: "#d4d4d8", fontSize: 15, fontWeight: "600" },
-  intro: { color: "#a1a1aa", fontSize: 14, lineHeight: 20, marginBottom: 4 },
-  error: {
-    color: "#fca5a5",
-    backgroundColor: "#450a0a",
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 13,
-  },
-  action: {
-    backgroundColor: "#4f46e5",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  actionSecondary: {
-    backgroundColor: "transparent",
-    borderWidth: 1,
-    borderColor: "#3f3f46",
-  },
-  actionText: { color: "#fff", fontWeight: "600", fontSize: 15 },
   row: {
-    backgroundColor: "#18181b",
-    borderRadius: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 10,
-    marginBottom: 8,
+    borderColor: colors.border,
+    padding: space.sm + 2,
+    marginBottom: space.sm,
   },
-  rowTop: { flexDirection: "row", alignItems: "center", gap: 10 },
+  rowTop: { flexDirection: "row", alignItems: "center", gap: space.sm + 2 },
   rowBottom: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 8,
+    gap: space.sm,
+    marginTop: space.sm,
     // line the controls up with the title rather than the confidence dot
-    paddingLeft: 56,
+    paddingLeft: 60,
   },
   dot: { width: 10, height: 10, borderRadius: 5 },
-  cover: { width: 36, height: 48, borderRadius: 4, backgroundColor: "#27272a", overflow: "hidden" },
-  raw: { color: "#71717a", fontSize: 11 },
-  matched: { color: "#fafafa", fontSize: 14, fontWeight: "500", marginTop: 2 },
   changeBtn: {
-    borderRadius: 999,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    minHeight: 30,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    borderColor: colors.borderStrong,
+    paddingHorizontal: space.md,
   },
-  changeText: { color: "#a1a1aa", fontSize: 11, fontWeight: "600" },
   statusChip: {
-    borderRadius: 999,
+    justifyContent: "center",
+    minHeight: 30,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: space.md,
   },
-  statusChipText: { fontSize: 11, fontWeight: "600" },
   skipBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 34,
+    height: 34,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: "#3f3f46",
+    borderColor: colors.borderStrong,
     alignItems: "center",
     justifyContent: "center",
   },
-  skipText: { color: "#a1a1aa", fontSize: 14 },
   footer: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    gap: space.sm,
     borderTopWidth: 1,
-    borderTopColor: "#27272a",
-    backgroundColor: "#101014f5",
+    borderTopColor: colors.border,
+    backgroundColor: "rgba(9,9,11,0.97)",
   },
-  footerLabel: { color: "#a1a1aa", fontSize: 12, fontWeight: "600" },
   platChip: {
-    borderRadius: 999,
+    justifyContent: "center",
+    minHeight: 32,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderColor: colors.borderStrong,
+    paddingHorizontal: space.md,
   },
-  platChipActive: { backgroundColor: "#312e81", borderColor: "#818cf8" },
-  platChipText: { color: "#a1a1aa", fontSize: 12, fontWeight: "500" },
-  platChipTextActive: { color: "#c7d2fe" },
-  formatRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
-  formatBtn: {
-    flex: 1,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#3f3f46",
-    paddingVertical: 8,
-    alignItems: "center",
+  platChipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
+  formatRow: { flexDirection: "row", gap: space.sm },
+  formatBtn: { minHeight: 40 },
+  error: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: space.sm,
+    backgroundColor: "#450a0a",
+    borderRadius: radius.sm,
+    padding: space.md,
   },
-  formatBtnActive: { backgroundColor: "#312e81", borderColor: "#818cf8" },
-  confirmBtn: {
-    backgroundColor: "#4f46e5",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  confirmText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 });

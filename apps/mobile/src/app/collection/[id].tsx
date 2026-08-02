@@ -1,28 +1,32 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useLocalSearchParams } from "expo-router";
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CollectionNode } from "@gm/shared";
 import { api } from "@/lib/api";
-import { resolveImage, STATUS_COLORS, statusStyle } from "@/lib/ui";
+import { resolveImage, statusStyle } from "@/lib/ui";
 import { useBadgeOpacity } from "@/lib/prefs";
+import { colors, radius, space, type } from "@/lib/theme";
+import {
+  Badge,
+  Cover,
+  EmptyState,
+  Icon,
+  IconButton,
+  Loading,
+  Screen,
+} from "@/components/ui";
 
 /**
  * The web app has the full drag-node graph editor; on mobile we flatten the
  * play-order graph into a list: chain order when links exist (topological-ish
  * walk), layout order otherwise.
  */
-function orderNodes(detail: { games: CollectionNode[]; links: { fromGameId: string; toGameId: string }[] }) {
+function orderNodes(detail: {
+  games: CollectionNode[];
+  links: { fromGameId: string; toGameId: string }[];
+}) {
   const { games, links } = detail;
   if (links.length === 0) {
     return [...games].sort((a, b) => a.y - b.y || a.x - b.x);
@@ -81,62 +85,61 @@ export default function CollectionDetailScreen() {
     onSuccess: invalidate,
   });
 
-  if (collection.isLoading || !collection.data) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
+  if (collection.isLoading || !collection.data) return <Loading />;
 
   const detail = collection.data;
   const ordered = orderNodes(detail);
   const inCollection = new Set(detail.games.map((g) => g.gameId));
-  const accent = detail.accentColor ?? "#4f46e5";
+  const accent = detail.accentColor ?? colors.accent;
   const candidates = (library.data ?? []).filter((e) => !inCollection.has(e.game.id));
 
   return (
-    <View style={styles.screen}>
+    <Screen>
       <FlatList
         data={ordered}
         keyExtractor={(g) => g.gameId}
-        contentContainerStyle={{ padding: 12, paddingBottom: 96 + insets.bottom }}
+        contentContainerStyle={{ padding: space.md, paddingBottom: 96 + insets.bottom }}
         ListHeaderComponent={
-          <View style={{ marginBottom: 8 }}>
-            {detail.description ? <Text style={styles.desc}>{detail.description}</Text> : null}
-            {detail.links.length > 0 && (
-              <Text style={styles.orderNote}>Listed in play order</Text>
-            )}
-          </View>
+          detail.description || detail.links.length > 0 ? (
+            <View style={{ marginBottom: space.sm }}>
+              {detail.description ? <Text style={type.prose}>{detail.description}</Text> : null}
+              {detail.links.length > 0 && (
+                <View style={styles.orderNote}>
+                  <Icon name="git-branch-outline" size={13} color={colors.textFaint} />
+                  <Text style={type.micro}>Listed in play order</Text>
+                </View>
+              )}
+            </View>
+          ) : null
         }
         ListEmptyComponent={
-          <Text style={styles.empty}>No games in this collection yet.</Text>
+          <EmptyState
+            icon="albums-outline"
+            title="No games here yet"
+            text="Tap + to pull games in from your library."
+          />
         }
         renderItem={({ item, index }) => {
-          const cover = resolveImage(item.coverSrc);
           const status = item.status ? statusStyle(item.status, badgeOpacity) : null;
           return (
             <View style={styles.row}>
-              <Text style={[styles.orderNum, { color: accent }]}>{index + 1}</Text>
-              <View style={styles.cover}>
-                {cover && (
-                  <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                )}
-              </View>
+              <Text style={[type.label, styles.orderNum, { color: accent }]}>{index + 1}</Text>
+              <Cover src={resolveImage(item.coverSrc)} width={40} height={53} />
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.title} numberOfLines={1}>
+                <Text style={type.bodyStrong} numberOfLines={2}>
                   {item.title}
                 </Text>
-                {status ? (
-                  <View style={[styles.badge, { backgroundColor: status.bg }]}>
-                    <Text style={[styles.badgeText, { color: status.text }]}>{status.label}</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.notOwned}>Not in library</Text>
-                )}
+                <View style={{ marginTop: 5 }}>
+                  {status ? (
+                    <Badge label={status.label} bg={status.bg} fg={status.text} />
+                  ) : (
+                    <Text style={type.micro}>Not in library</Text>
+                  )}
+                </View>
               </View>
-              <TouchableOpacity
-                hitSlop={8}
+              <IconButton
+                name="close"
+                accessibilityLabel={`Remove ${item.title} from this collection`}
                 onPress={() =>
                   Alert.alert("Remove game", `Remove "${item.title}" from this collection?`, [
                     { text: "Cancel", style: "cancel" },
@@ -147,43 +150,40 @@ export default function CollectionDetailScreen() {
                     },
                   ])
                 }
-              >
-                <Text style={styles.removeX}>✕</Text>
-              </TouchableOpacity>
+              />
             </View>
           );
         }}
       />
 
       {picking && (
-        <View style={[styles.pickerSheet, { paddingBottom: 16 + insets.bottom }]}>
+        <View style={[styles.pickerSheet, { paddingBottom: space.lg + insets.bottom }]}>
           <View style={styles.pickerHeader}>
-            <Text style={styles.pickerTitle}>Add from library</Text>
-            <TouchableOpacity onPress={() => setPicking(false)} hitSlop={8}>
-              <Text style={styles.removeX}>✕</Text>
-            </TouchableOpacity>
+            <Text style={type.heading}>Add from library</Text>
+            <IconButton name="close" accessibilityLabel="Close" onPress={() => setPicking(false)} />
           </View>
           {library.isLoading ? (
-            <ActivityIndicator style={{ marginVertical: 24 }} />
+            <Loading />
           ) : (
             <FlatList
               data={candidates}
               keyExtractor={(e) => e.id}
               style={{ maxHeight: 320 }}
               ListEmptyComponent={
-                <Text style={styles.empty}>Everything in your library is already here.</Text>
+                <Text style={type.caption}>Everything in your library is already here.</Text>
               }
               renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.pickRow}
+                <Pressable
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.pickRow, pressed && { opacity: 0.7 }]}
                   disabled={addGame.isPending}
                   onPress={() => addGame.mutate(item.game.id)}
                 >
-                  <Text style={styles.pickTitle} numberOfLines={1}>
+                  <Text style={[type.body, { flex: 1 }]} numberOfLines={1}>
                     {item.game.title}
                   </Text>
-                  <Text style={[styles.pickAdd, { color: accent }]}>Add</Text>
-                </TouchableOpacity>
+                  <Icon name="add-circle-outline" size={20} color={accent} />
+                </Pressable>
               )}
             />
           )}
@@ -191,86 +191,76 @@ export default function CollectionDetailScreen() {
       )}
 
       {!picking && (
-        <TouchableOpacity
-          style={[styles.fab, { backgroundColor: accent, bottom: 24 + insets.bottom }]}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add a game to this collection"
+          style={({ pressed }) => [
+            styles.fab,
+            { backgroundColor: accent, bottom: 24 + insets.bottom },
+            pressed && { opacity: 0.85 },
+          ]}
           onPress={() => setPicking(true)}
         >
-          <Text style={styles.fabText}>＋</Text>
-        </TouchableOpacity>
+          <Icon name="add" size={30} color="#ffffff" />
+        </Pressable>
       )}
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#101014" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#101014" },
-  desc: { color: "#a1a1aa", fontSize: 13, marginBottom: 4 },
-  orderNote: { color: "#71717a", fontSize: 11 },
-  empty: { color: "#71717a", fontSize: 13, textAlign: "center", marginTop: 32 },
+  orderNote: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: space.xs },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    backgroundColor: "#18181b",
-    borderRadius: 12,
+    gap: space.sm + 2,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 10,
-    marginBottom: 8,
+    borderColor: colors.border,
+    padding: space.sm + 2,
+    marginBottom: space.sm,
   },
-  orderNum: { fontSize: 13, fontWeight: "800", width: 22, textAlign: "center" },
-  cover: { width: 40, height: 53, borderRadius: 5, backgroundColor: "#27272a", overflow: "hidden" },
-  title: { color: "#fafafa", fontSize: 14, fontWeight: "600" },
-  badge: {
-    alignSelf: "flex-start",
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginTop: 4,
-  },
-  badgeText: { fontSize: 10, fontWeight: "600" },
-  notOwned: { color: "#52525b", fontSize: 11, marginTop: 4 },
-  removeX: { color: "#52525b", fontSize: 16, padding: 4 },
+  orderNum: { width: 22, textAlign: "center" },
   pickerSheet: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "#18181b",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 16,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: space.lg,
     borderTopWidth: 1,
-    borderColor: "#27272a",
+    borderColor: colors.border,
   },
   pickerHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: space.sm,
   },
-  pickerTitle: { color: "#fafafa", fontSize: 15, fontWeight: "700" },
   pickRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 10,
+    gap: space.md,
+    paddingVertical: space.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#27272a",
-    gap: 12,
+    borderBottomColor: colors.border,
   },
-  pickTitle: { color: "#e4e4e7", fontSize: 14, flex: 1 },
-  pickAdd: { fontWeight: "700", fontSize: 13 },
   fab: {
     position: "absolute",
-    right: 20,
+    right: space.xl,
     width: 56,
     height: 56,
     borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
     elevation: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
   },
-  fabText: { color: "#fff", fontSize: 28, lineHeight: 32 },
 });

@@ -16,6 +16,8 @@ import type { ConsoleSummary } from "@gm/shared";
 import { api } from "@/lib/api";
 import { resolveImage } from "@/lib/ui";
 import { formatReleaseDate, groupConsoles, type ConsoleGroup } from "@/lib/platforms";
+import { colors, radius, space, type } from "@/lib/theme";
+import { Card, Chevron, Cover, EmptyState, Icon, type IconName } from "@/components/ui";
 
 /**
  * The consoles you own, each opening a page of the games filed under it.
@@ -34,18 +36,16 @@ export default function ConsolesScreen() {
       refreshControl={
         <RefreshControl refreshing={consoles.isRefetching} onRefresh={() => consoles.refetch()} />
       }
-      contentContainerStyle={{ padding: 12, paddingBottom: 32 + insets.bottom }}
+      contentContainerStyle={{ padding: space.md, paddingBottom: space.xxl + insets.bottom }}
       ListEmptyComponent={
         consoles.isLoading ? (
-          <ActivityIndicator style={{ marginTop: 48 }} />
+          <ActivityIndicator style={{ marginTop: 48 }} color={colors.accentBorder} />
         ) : (
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>No consoles yet</Text>
-            <Text style={styles.emptyText}>
-              Add the consoles you own on the web app — they become the platforms you can file
-              games under.
-            </Text>
-          </View>
+          <EmptyState
+            icon="game-controller-outline"
+            title="No consoles yet"
+            text="Add the consoles you own on the web app — they become the platforms you can file games under."
+          />
         )
       }
       renderItem={({ item }) => <ConsoleGroupCard group={item} />}
@@ -66,6 +66,15 @@ function ConsoleGroupCard({ group }: { group: ConsoleGroup }) {
   );
 }
 
+function Stat({ icon, value }: { icon: IconName; value: number }) {
+  return (
+    <View style={styles.stat}>
+      <Icon name={icon} size={12} color={colors.textFaint} />
+      <Text style={type.micro}>{value}</Text>
+    </View>
+  );
+}
+
 function ConsoleCard({ row, compact }: { row: ConsoleSummary; compact?: boolean }) {
   const router = useRouter();
   const p = row.platform;
@@ -74,39 +83,40 @@ function ConsoleCard({ row, compact }: { row: ConsoleSummary; compact?: boolean 
   const logo = resolveImage(row.customImageSrc ?? p.logoUrl);
 
   return (
-    <Pressable
-      style={styles.card}
-      accessibilityLabel={`${p.name}, ${row.gameCount} games`}
+    <Card
       onPress={() => router.push(`/console/${p.id}`)}
+      accessibilityLabel={`${p.name}, ${row.gameCount} games`}
     >
       <View style={styles.header}>
         <View style={[styles.logo, compact && styles.logoCompact]}>
           {logo ? (
             <Image source={{ uri: logo }} style={styles.logoImage} resizeMode="contain" />
           ) : (
-            <Text style={styles.logoFallback} numberOfLines={2}>
+            <Text style={[type.micro, styles.logoFallback]} numberOfLines={2}>
               {p.abbreviation ?? p.name}
             </Text>
           )}
         </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.name} numberOfLines={2}>
+        <View style={styles.headerBody}>
+          <Text style={compact ? type.bodyStrong : type.heading} numberOfLines={2}>
             {p.name}
           </Text>
-          {p.parentName && <Text style={styles.released}>{p.parentName} storefront</Text>}
-          {released && !compact && <Text style={styles.released}>Released {released}</Text>}
-          <Text style={styles.counts} numberOfLines={2}>
-            {row.gameCount} {row.gameCount === 1 ? "game" : "games"}
-            {row.storefrontCount > 0 && ` · 🛒 ${row.storefrontCount}`}
-            {row.physicalCount > 0 && ` · 📦 ${row.physicalCount}`}
-            {row.digitalCount > 0 && ` · 💾 ${row.digitalCount}`}
-          </Text>
+          {p.parentName && <Text style={type.micro}>{p.parentName} storefront</Text>}
+          {released && !compact && <Text style={type.micro}>Released {released}</Text>}
+          <View style={styles.stats}>
+            <Text style={[type.caption, { color: colors.text }]}>
+              {row.gameCount} {row.gameCount === 1 ? "game" : "games"}
+            </Text>
+            {row.storefrontCount > 0 && <Stat icon="storefront-outline" value={row.storefrontCount} />}
+            {row.physicalCount > 0 && <Stat icon="cube-outline" value={row.physicalCount} />}
+            {row.digitalCount > 0 && <Stat icon="cloud-download-outline" value={row.digitalCount} />}
+          </View>
         </View>
-        <Text style={styles.chevron}>›</Text>
+        <Chevron />
       </View>
 
       {p.summary && !compact && (
-        <Text style={styles.summary} numberOfLines={4}>
+        <Text style={[type.prose, { marginTop: space.md }]} numberOfLines={4}>
           {p.summary}
         </Text>
       )}
@@ -115,79 +125,45 @@ function ConsoleCard({ row, compact }: { row: ConsoleSummary; compact?: boolean 
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ gap: 8, paddingTop: 10 }}
+          contentContainerStyle={{ gap: space.sm, paddingTop: space.md }}
         >
-          {row.preview.map((game) => {
-            const cover = resolveImage(game.coverSrc);
-            return (
-              <Pressable
-                key={game.entryId}
-                style={styles.cover}
-                onPress={() => router.push(`/game/${game.entryId}`)}
-              >
-                {cover ? (
-                  <Image
-                    source={{ uri: cover }}
-                    style={StyleSheet.absoluteFill}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <Text style={styles.coverFallback} numberOfLines={3}>
-                    {game.title}
-                  </Text>
-                )}
-              </Pressable>
-            );
-          })}
+          {row.preview.map((game) => (
+            <Pressable
+              key={game.entryId}
+              accessibilityRole="button"
+              accessibilityLabel={game.title}
+              onPress={() => router.push(`/game/${game.entryId}`)}
+            >
+              <Cover src={resolveImage(game.coverSrc)} width={52} height={70} title={game.title} />
+            </Pressable>
+          ))}
         </ScrollView>
       )}
-    </Pressable>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#101014" },
-  group: { marginBottom: 10 },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  group: { marginBottom: space.md },
   // storefronts sit visibly under the platform they sell for
-  storefront: { marginTop: 6, marginLeft: 16 },
-  card: {
-    backgroundColor: "#18181b",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 14,
-  },
-  header: { flexDirection: "row", gap: 12, alignItems: "center" },
+  storefront: { marginTop: 6, marginLeft: space.lg },
+  header: { flexDirection: "row", gap: space.md, alignItems: "center" },
+  headerBody: { flex: 1, minWidth: 0, gap: 2 },
   logo: {
     width: 76,
     height: 52,
-    borderRadius: 10,
-    backgroundColor: "#101014",
+    borderRadius: radius.md,
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: "#27272a",
+    borderColor: colors.border,
     alignItems: "center",
     justifyContent: "center",
     padding: 6,
   },
   logoCompact: { width: 56, height: 40 },
   logoImage: { width: "100%", height: "100%" },
-  logoFallback: { color: "#52525b", fontSize: 10, fontWeight: "700", textAlign: "center" },
-  name: { color: "#fafafa", fontSize: 16, fontWeight: "700" },
-  released: { color: "#71717a", fontSize: 11, marginTop: 2 },
-  counts: { color: "#a1a1aa", fontSize: 12, marginTop: 4 },
-  chevron: { color: "#52525b", fontSize: 22 },
-  summary: { color: "#a1a1aa", fontSize: 13, lineHeight: 19, marginTop: 10 },
-  cover: {
-    width: 52,
-    height: 70,
-    borderRadius: 6,
-    backgroundColor: "#27272a",
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  coverFallback: { color: "#71717a", fontSize: 9, textAlign: "center", padding: 2 },
-  empty: { alignItems: "center", marginTop: 64, paddingHorizontal: 24 },
-  emptyTitle: { color: "#fafafa", fontSize: 16, fontWeight: "600" },
-  emptyText: { color: "#71717a", fontSize: 13, marginTop: 6, textAlign: "center" },
+  logoFallback: { color: colors.textGhost, textAlign: "center" },
+  stats: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: space.sm, marginTop: 3 },
+  stat: { flexDirection: "row", alignItems: "center", gap: 3 },
 });
