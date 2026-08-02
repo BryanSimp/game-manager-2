@@ -12,7 +12,8 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery } from "@tanstack/react-query";
+import * as ImagePicker from "expo-image-picker";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { LibraryEntry, OwnershipFormat } from "@gm/shared";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, statusStyle } from "@/lib/ui";
@@ -21,11 +22,14 @@ import { usePreferences } from "@/lib/prefs";
 import { colors, radius, space, type } from "@/lib/theme";
 import {
   Badge,
+  Button,
   Chevron,
   Cover,
   EmptyState,
   Icon,
   Screen,
+  Sheet,
+  SheetSection,
   type IconName,
 } from "@/components/ui";
 
@@ -48,6 +52,7 @@ export default function ConsoleDetailScreen() {
   const insets = useSafeAreaInsets();
   const prefs = usePreferences();
   const [format, setFormat] = useState<FormatFilter>("all");
+  const [artOpen, setArtOpen] = useState(false);
 
   const library = useQuery({ queryKey: ["library"], queryFn: () => api.getLibrary() });
   const consoles = useQuery({ queryKey: ["consoles"], queryFn: () => api.getConsoles() });
@@ -96,7 +101,12 @@ export default function ConsoleDetailScreen() {
         ListHeaderComponent={
           <View>
             <View style={styles.hero}>
-              <View style={styles.logo}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Change console art"
+                style={styles.logo}
+                onPress={() => setArtOpen(true)}
+              >
                 {art ? (
                   <Image source={{ uri: art }} style={styles.logoImage} resizeMode="contain" />
                 ) : (
@@ -104,7 +114,11 @@ export default function ConsoleDetailScreen() {
                     {platform?.abbreviation ?? platform?.name ?? "—"}
                   </Text>
                 )}
-              </View>
+                <View style={styles.logoEdit}>
+                  <Icon name="image-outline" size={12} color={colors.text} />
+                  <Text style={[type.micro, { color: colors.text }]}>Art</Text>
+                </View>
+              </Pressable>
               <View style={styles.heroBody}>
                 <Text style={type.title} numberOfLines={2}>
                   {platform?.name ?? "Console"}
@@ -173,7 +187,130 @@ export default function ConsoleDetailScreen() {
           />
         )}
       />
+
+      <ConsoleArtSheet
+        platformId={platformId}
+        platformName={platform?.name ?? "this console"}
+        hasCustomArt={!!row?.customImageSrc}
+        visible={artOpen}
+        onClose={() => setArtOpen(false)}
+      />
     </Screen>
+  );
+}
+
+/**
+ * Console art: browse IGDB platform logos and Wikimedia Commons, or upload
+ * your own. Art is per user (`user_consoles.custom_image_id`), so one person's
+ * Steam logo isn't everyone's — the same rule the web app follows.
+ */
+function ConsoleArtSheet({
+  platformId,
+  platformName,
+  hasCustomArt,
+  visible,
+  onClose,
+}: {
+  platformId: string;
+  platformName: string;
+  hasCustomArt: boolean;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const art = useQuery({
+    queryKey: ["console-art", platformId],
+    queryFn: () => api.getConsoleArt(platformId),
+    enabled: visible,
+  });
+
+  const done = () => {
+    queryClient.invalidateQueries({ queryKey: ["consoles"] });
+    onClose();
+  };
+
+  const setFromUrl = useMutation({
+    mutationFn: (url: string) => api.setConsoleImageFromUrl(platformId, url),
+    onSuccess: done,
+  });
+  const reset = useMutation({
+    mutationFn: () => api.removeConsoleImage(platformId),
+    onSuccess: done,
+  });
+  const upload = useMutation({
+    mutationFn: async () => {
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.9,
+      });
+      if (picked.canceled || !picked.assets[0]) return null;
+      const asset = picked.assets[0];
+      const blob = await (await fetch(asset.uri)).blob();
+      return api.uploadConsoleImage(platformId, blob, asset.fileName ?? "console.png");
+    },
+    onSuccess: (res) => {
+      if (res) done();
+    },
+  });
+
+  const busy = setFromUrl.isPending || upload.isPending || reset.isPending;
+
+  return (
+    <Sheet visible={visible} title="Console art" onClose={onClose}>
+      <Button
+        label="Upload from my photos"
+        icon="cloud-upload-outline"
+        fill
+        busy={upload.isPending}
+        onPress={() => upload.mutate()}
+      />
+      {hasCustomArt && (
+        <Button
+          label="Reset to the stock logo"
+          icon="refresh-outline"
+          tone="ghost"
+          fill
+          style={{ marginTop: space.sm }}
+          busy={reset.isPending}
+          onPress={() => reset.mutate()}
+        />
+      )}
+
+      <SheetSection label="Browse" />
+      {art.isLoading && <ActivityIndicator color={colors.accentBorder} />}
+      {art.data && art.data.images.length === 0 && (
+        <Text style={type.caption}>Nothing found for {platformName}.</Text>
+      )}
+      {(art.data?.images.length ?? 0) > 0 && (
+        <Text style={[type.micro, { marginBottom: space.sm }]}>
+          IGDB logos first, then Wikimedia Commons — a plain text search, so the odd unrelated file
+          turns up.
+        </Text>
+      )}
+      <View style={styles.artGrid}>
+        {(art.data?.images ?? []).map((image) => (
+          <Pressable
+            key={image.id}
+            accessibilityRole="button"
+            accessibilityLabel={image.label ?? "Use this art"}
+            disabled={busy}
+            style={({ pressed }) => [styles.artOption, pressed && { opacity: 0.6 }]}
+            onPress={() => setFromUrl.mutate(image.url)}
+          >
+            <Image
+              source={{ uri: image.thumbUrl }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="contain"
+            />
+          </Pressable>
+        ))}
+      </View>
+      {(setFromUrl.isError || upload.isError) && (
+        <Text style={[type.caption, { color: colors.danger, marginTop: space.sm }]}>
+          Couldn't set that art.
+        </Text>
+      )}
+    </Sheet>
   );
 }
 
@@ -266,6 +403,29 @@ const styles = StyleSheet.create({
   },
   logoImage: { width: "100%", height: "100%" },
   logoFallback: { color: colors.textGhost, textAlign: "center" },
+  logoEdit: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    paddingVertical: 2,
+    backgroundColor: "rgba(9,9,11,0.78)",
+  },
+  artGrid: { flexDirection: "row", flexWrap: "wrap", gap: space.sm, marginTop: space.xs },
+  artOption: {
+    width: 96,
+    height: 66,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+    padding: 4,
+    overflow: "hidden",
+  },
   chip: {
     flexDirection: "row",
     alignItems: "center",

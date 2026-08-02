@@ -1,21 +1,33 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocalSearchParams } from "expo-router";
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CollectionNode } from "@gm/shared";
+import type { AddCollectionGameInput, CollectionNode } from "@gm/shared";
 import { api } from "@/lib/api";
 import { resolveImage, statusStyle } from "@/lib/ui";
 import { useBadgeOpacity } from "@/lib/prefs";
 import { colors, radius, space, type } from "@/lib/theme";
 import {
   Badge,
+  Button,
   Cover,
   EmptyState,
+  Field,
   Icon,
   IconButton,
   Loading,
   Screen,
+  Sheet,
+  SheetSection,
 } from "@/components/ui";
 
 /**
@@ -66,23 +78,20 @@ export default function CollectionDetailScreen() {
     queryKey: ["collection", id],
     queryFn: () => api.getCollection(id),
   });
-  const library = useQuery({
-    queryKey: ["library"],
-    queryFn: () => api.getLibrary(),
-    enabled: picking,
-  });
-
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["collection", id] });
     queryClient.invalidateQueries({ queryKey: ["collections"] });
   };
-  const addGame = useMutation({
-    mutationFn: (gameId: string) => api.addCollectionGame(id, gameId),
-    onSuccess: invalidate,
-  });
   const removeGame = useMutation({
     mutationFn: (gameId: string) => api.removeCollectionGame(id, gameId),
     onSuccess: invalidate,
+  });
+  const setPublic = useMutation({
+    mutationFn: (isPublic: boolean) => api.updateCollection(id, { isPublic }),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["public-collections"] });
+    },
   });
 
   if (collection.isLoading || !collection.data) return <Loading />;
@@ -91,7 +100,6 @@ export default function CollectionDetailScreen() {
   const ordered = orderNodes(detail);
   const inCollection = new Set(detail.games.map((g) => g.gameId));
   const accent = detail.accentColor ?? colors.accent;
-  const candidates = (library.data ?? []).filter((e) => !inCollection.has(e.game.id));
 
   return (
     <Screen>
@@ -100,17 +108,31 @@ export default function CollectionDetailScreen() {
         keyExtractor={(g) => g.gameId}
         contentContainerStyle={{ padding: space.md, paddingBottom: 96 + insets.bottom }}
         ListHeaderComponent={
-          detail.description || detail.links.length > 0 ? (
-            <View style={{ marginBottom: space.sm }}>
-              {detail.description ? <Text style={type.prose}>{detail.description}</Text> : null}
-              {detail.links.length > 0 && (
-                <View style={styles.orderNote}>
-                  <Icon name="git-branch-outline" size={13} color={colors.textFaint} />
-                  <Text style={type.micro}>Listed in play order</Text>
+          <View style={{ marginBottom: space.sm, gap: space.sm }}>
+            {detail.description ? <Text style={type.prose}>{detail.description}</Text> : null}
+            {detail.links.length > 0 && (
+              <View style={styles.orderNote}>
+                <Icon name="git-branch-outline" size={13} color={colors.textFaint} />
+                <Text style={type.micro}>Listed in play order</Text>
+              </View>
+            )}
+            <View style={styles.headerRow}>
+              <Button
+                label={detail.isPublic ? "Published" : "Publish"}
+                icon={detail.isPublic ? "star" : "star-outline"}
+                tone={detail.isPublic ? "primary" : "ghost"}
+                busy={setPublic.isPending}
+                onPress={() => setPublic.mutate(!detail.isPublic)}
+                style={styles.headerBtn}
+              />
+              {detail.adoptedFromId && (
+                <View style={styles.copiedTag}>
+                  <Icon name="copy-outline" size={12} color={colors.textFaint} />
+                  <Text style={type.micro}>Your copy</Text>
                 </View>
               )}
             </View>
-          ) : null
+          </View>
         }
         ListEmptyComponent={
           <EmptyState
@@ -156,39 +178,14 @@ export default function CollectionDetailScreen() {
         }}
       />
 
-      {picking && (
-        <View style={[styles.pickerSheet, { paddingBottom: space.lg + insets.bottom }]}>
-          <View style={styles.pickerHeader}>
-            <Text style={type.heading}>Add from library</Text>
-            <IconButton name="close" accessibilityLabel="Close" onPress={() => setPicking(false)} />
-          </View>
-          {library.isLoading ? (
-            <Loading />
-          ) : (
-            <FlatList
-              data={candidates}
-              keyExtractor={(e) => e.id}
-              style={{ maxHeight: 320 }}
-              ListEmptyComponent={
-                <Text style={type.caption}>Everything in your library is already here.</Text>
-              }
-              renderItem={({ item }) => (
-                <Pressable
-                  accessibilityRole="button"
-                  style={({ pressed }) => [styles.pickRow, pressed && { opacity: 0.7 }]}
-                  disabled={addGame.isPending}
-                  onPress={() => addGame.mutate(item.game.id)}
-                >
-                  <Text style={[type.body, { flex: 1 }]} numberOfLines={1}>
-                    {item.game.title}
-                  </Text>
-                  <Icon name="add-circle-outline" size={20} color={accent} />
-                </Pressable>
-              )}
-            />
-          )}
-        </View>
-      )}
+      <AddGameSheet
+        collectionId={id}
+        excludeGameIds={inCollection}
+        accent={accent}
+        visible={picking}
+        onClose={() => setPicking(false)}
+        onAdded={invalidate}
+      />
 
       {!picking && (
         <Pressable
@@ -208,8 +205,160 @@ export default function CollectionDetailScreen() {
   );
 }
 
+/**
+ * Add a game by searching, not by scrolling a dropdown of everything you own —
+ * and a collection isn't limited to your library, so IGDB results sit
+ * underneath. Adding one of those pulls the game into the shared catalog but
+ * deliberately not into your library.
+ */
+function AddGameSheet({
+  collectionId,
+  excludeGameIds,
+  accent,
+  visible,
+  onClose,
+  onAdded,
+}: {
+  collectionId: string;
+  excludeGameIds: Set<string>;
+  accent: string;
+  visible: boolean;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [input, setInput] = useState("");
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(input.trim()), 350);
+    return () => clearTimeout(t);
+  }, [input]);
+
+  const library = useQuery({
+    queryKey: ["library"],
+    queryFn: () => api.getLibrary(),
+    enabled: visible,
+  });
+  const igdb = useQuery({
+    queryKey: ["game-search", query],
+    queryFn: () => api.searchGames(query),
+    enabled: visible && query.length >= 2,
+  });
+
+  const add = useMutation({
+    mutationFn: (input: AddCollectionGameInput) => api.addCollectionGame(collectionId, input),
+    onSuccess: () => {
+      setInput("");
+      setQuery("");
+      onAdded();
+    },
+  });
+
+  const needle = query.toLowerCase();
+  const mine = (library.data ?? [])
+    .filter((e) => !excludeGameIds.has(e.game.id))
+    .filter((e) => !needle || e.game.title.toLowerCase().includes(needle))
+    .slice(0, 8);
+  const mineTitles = new Set(mine.map((e) => e.game.title.toLowerCase()));
+  const external = (igdb.data?.results ?? [])
+    .filter((r) => !mineTitles.has(r.title.toLowerCase()))
+    .filter((r) => !r.gameId || !excludeGameIds.has(r.gameId))
+    .slice(0, 8);
+
+  return (
+    <Sheet visible={visible} title="Add a game" onClose={onClose}>
+      <Field
+        value={input}
+        onChangeText={setInput}
+        placeholder="Search your library or IGDB…"
+        autoCapitalize="none"
+        returnKeyType="search"
+      />
+      {add.isError && (
+        <Text style={[type.caption, { color: colors.danger, marginTop: space.sm }]}>
+          {add.error instanceof Error ? add.error.message : "Couldn't add that game"}
+        </Text>
+      )}
+
+      {mine.length > 0 && <SheetSection label="In your library" />}
+      {mine.map((e) => (
+        <AddRow
+          key={e.game.id}
+          title={e.game.title}
+          coverSrc={resolveImage(e.game.coverSrc)}
+          accent={accent}
+          busy={add.isPending}
+          onPress={() => add.mutate({ gameId: e.game.id })}
+        />
+      ))}
+
+      {query.length >= 2 && (
+        <>
+          <SheetSection label="From IGDB · this collection only" />
+          {igdb.isLoading && <ActivityIndicator color={colors.accentBorder} />}
+          {!igdb.isLoading && external.length === 0 && (
+            <Text style={type.caption}>No other matches.</Text>
+          )}
+          {external.map((r) => (
+            <AddRow
+              key={`${r.igdbId ?? r.gameId ?? r.title}`}
+              title={r.title}
+              year={r.releaseYear}
+              coverSrc={resolveImage(r.coverSrc)}
+              accent={accent}
+              busy={add.isPending}
+              onPress={() => add.mutate(r.igdbId ? { igdbId: r.igdbId } : { gameId: r.gameId! })}
+            />
+          ))}
+        </>
+      )}
+
+      {query.length < 2 && mine.length === 0 && (
+        <Text style={[type.caption, { marginTop: space.sm }]}>
+          Type to search. Games you don't own can be added too.
+        </Text>
+      )}
+    </Sheet>
+  );
+}
+
+function AddRow({
+  title,
+  year,
+  coverSrc,
+  accent,
+  busy,
+  onPress,
+}: {
+  title: string;
+  year?: number | null;
+  coverSrc: string | null;
+  accent: string;
+  busy: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={busy}
+      onPress={onPress}
+      style={({ pressed }) => [styles.pickRow, pressed && { opacity: 0.7 }]}
+    >
+      <Cover src={coverSrc} width={34} height={45} />
+      <Text style={[type.body, { flex: 1 }]} numberOfLines={2}>
+        {title}
+        {year ? ` (${year})` : ""}
+      </Text>
+      <Icon name="add-circle-outline" size={20} color={accent} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   orderNote: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: space.xs },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  headerBtn: { minHeight: 38, paddingHorizontal: space.md },
+  copiedTag: { flexDirection: "row", alignItems: "center", gap: 4 },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -222,24 +371,6 @@ const styles = StyleSheet.create({
     marginBottom: space.sm,
   },
   orderNum: { width: 22, textAlign: "center" },
-  pickerSheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: space.lg,
-    borderTopWidth: 1,
-    borderColor: colors.border,
-  },
-  pickerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: space.sm,
-  },
   pickRow: {
     flexDirection: "row",
     justifyContent: "space-between",

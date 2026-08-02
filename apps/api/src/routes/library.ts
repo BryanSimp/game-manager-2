@@ -6,6 +6,7 @@ import {
   OWNERSHIP_FORMATS,
   PROGRESS_BASES,
   estimateProgress,
+  normalizeTtb,
   ttbForBasis,
 } from "@gm/shared";
 import { db, schema } from "../db/index.js";
@@ -641,5 +642,77 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       .returning({ id: schema.userGames.id });
     if (deleted.length === 0) return reply.status(404).send({ message: "Not found" });
     return { ok: true };
+  });
+
+  /**
+   * Correct a game's how-long-to-beat figures by hand, for when IGDB is wrong
+   * or has nothing.
+   *
+   * This writes the **shared catalog** row, not a per-user override: `games`
+   * is one row per real-world game, and how long a game takes is a fact about
+   * the game rather than about you. Nothing overwrites it today — the only
+   * other writer is `upsertGameFromIgdb`, which returns early for a game
+   * that's already in the catalog — and `ttb_source = 'manual'` records that
+   * a human set these so a future refresh has something to check.
+   *
+   * Values are seconds. Sending null clears one. The ordering invariant
+   * (main <= main+extras <= completionist) is enforced by `normalizeTtb`, the
+   * same as on ingest, so a typo can't invert the columns.
+   */
+  app.put<{ Params: { id: string } }>("/api/library/:id/time-to-beat", async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return;
+
+    const entry = await db.query.userGames.findFirst({
+      where: (ug, { and: andW, eq: eqW }) =>
+        andW(eqW(ug.id, request.params.id), eqW(ug.userId, user.id)),
+      columns: { gameId: true },
+    });
+    if (!entry) return reply.status(404).send({ message: "Not found" });
+
+    // a day is already a stretch for a single figure; the cap is there to
+    // catch a stray "3600" typed into a field that wanted hours
+    const seconds = z.number().int().min(0).max(60 * 60 * 1000).nullable();
+    const parsed = z
+      .object({
+        ttbMain: seconds.optional(),
+        ttbMainExtra: seconds.optional(),
+        ttbCompletionist: seconds.optional(),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ message: "Invalid times" });
+
+    const current = await db.query.games.findFirst({
+      where: (g, { eq: eqW }) => eqW(g.id, entry.gameId),
+      columns: { ttbMain: true, ttbMainExtra: true, ttbCompletionist: true },
+    });
+    if (!current) return reply.status(404).send({ message: "Game not found" });
+
+    // an omitted key keeps what's there; an explicit null clears it
+    const merged = normalizeTtb({
+      ttbMain: parsed.data.ttbMain === undefined ? current.ttbMain : parsed.data.ttbMain,
+      ttbMainExtra:
+        parsed.data.ttbMainExtra === undefined ? current.ttbMainExtra : parsed.data.ttbMainExtra,
+      ttbCompletionist:
+        parsed.data.ttbCompletionist === undefined
+          ? current.ttbCompletionist
+          : parsed.data.ttbCompletionist,
+    });
+
+    const anySet =
+      merged.ttbMain != null || merged.ttbMainExtra != null || merged.ttbCompletionist != null;
+    await db
+      .update(schema.games)
+      .set({
+        ttbMain: merged.ttbMain,
+        ttbMainExtra: merged.ttbMainExtra,
+        ttbCompletionist: merged.ttbCompletionist,
+        // clearing every figure hands the game back to IGDB rather than
+        // pinning it to an empty manual override
+        ttbSource: anySet ? "manual" : null,
+      })
+      .where(eq(schema.games.id, entry.gameId));
+
+    return { ok: true, ...merged };
   });
 }

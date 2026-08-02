@@ -1,4 +1,5 @@
 import type {
+  AddCollectionGameInput,
   AddGameInput,
   AdminSettings,
   BarcodeLookupResult,
@@ -33,10 +34,12 @@ import type {
   OwnershipFormat,
   Platform,
   Preferences,
+  PublicCollection,
   SearchOptions,
   SearchResponse,
   Tag,
   TagInput,
+  TimeToBeatInput,
   UpdateEntryInput,
   User,
 } from "@gm/shared";
@@ -214,6 +217,18 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Correct a game's how-long-to-beat figures by hand, in seconds. Writes the
+   * shared catalog row (a game's length is a fact about the game), stamped
+   * `ttb_source = 'manual'`.
+   */
+  saveTimeToBeat(entryId: string, input: TimeToBeatInput): Promise<{ ok: true }> {
+    return this.request(`/api/library/${entryId}/time-to-beat`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
   updateEntry(id: string, input: UpdateEntryInput): Promise<{ ok: true }> {
     return this.request(`/api/library/${id}`, {
       method: "PATCH",
@@ -282,9 +297,24 @@ export class ApiClient {
 
   updateCollection(
     id: string,
-    input: Partial<{ name: string; description: string | null; accentColor: string | null }>,
+    input: Partial<{
+      name: string;
+      description: string | null;
+      accentColor: string | null;
+      isPublic: boolean;
+    }>,
   ): Promise<CollectionSummary> {
     return this.request(`/api/collections/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+  }
+
+  /** Every published collection, anyone's — yours are flagged, not hidden. */
+  getPublicCollections(): Promise<PublicCollection[]> {
+    return this.request<PublicCollection[]>("/api/collections/public");
+  }
+
+  /** Take a private, independently editable copy of a public collection. */
+  adoptCollection(id: string): Promise<{ id: string; name: string }> {
+    return this.request(`/api/collections/${id}/adopt`, { method: "POST" });
   }
 
   deleteCollection(id: string): Promise<{ ok: true }> {
@@ -295,10 +325,15 @@ export class ApiClient {
     return this.request<CollectionDetail>(`/api/collections/${id}`);
   }
 
-  addCollectionGame(id: string, gameId: string): Promise<{ ok: true }> {
+  /**
+   * Add a game to a collection. Pass `igdbId` for something not in the
+   * catalog yet — a collection can list games you don't own, so this never
+   * touches your library.
+   */
+  addCollectionGame(id: string, input: AddCollectionGameInput): Promise<{ ok: true; gameId: string }> {
     return this.request(`/api/collections/${id}/games`, {
       method: "POST",
-      body: JSON.stringify({ gameId }),
+      body: JSON.stringify(input),
     });
   }
 
