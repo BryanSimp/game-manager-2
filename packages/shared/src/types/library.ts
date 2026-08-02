@@ -267,8 +267,15 @@ export interface CollectionNode {
   gameId: string;
   title: string;
   coverSrc: string | null;
+  /** node position on the play-order graph */
   x: number;
   y: number;
+  /** 1-based place in the flat list view's custom order */
+  sortOrder: number;
+  /** so the list can sort by release date without a second request */
+  releaseDate: string | null;
+  ttbMain: number | null;
+  /** null when the game isn't in your library — the list says so and links to add it */
   userGameId: string | null;
   status: string | null;
 }
@@ -296,6 +303,23 @@ export interface CollectionDetail {
 export interface AddCollectionGameInput {
   gameId?: string;
   igdbId?: number;
+}
+/**
+ * Pull a whole collection into your library — the point of browsing someone
+ * else's. Games you already own are left alone rather than re-filed, except
+ * for the platform, which is applied to them too (the same rule
+ * `POST /api/library/bulk` follows).
+ */
+export interface AddCollectionToLibraryInput {
+  /** category the new entries land in — a built-in key or a custom category id */
+  status: string;
+  platforms?: Array<{ platformId: string; format: OwnershipFormat }>;
+}
+export interface AddCollectionToLibraryResult {
+  added: number;
+  /** already in your library */
+  skipped: number;
+  errors: string[];
 }
 export interface CollectionLayoutInput {
   nodes: Array<{ gameId: string; x: number; y: number }>;

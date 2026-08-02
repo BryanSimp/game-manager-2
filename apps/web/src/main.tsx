@@ -36,7 +36,16 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/console/$platformId", component: ConsoleDetailPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/collections", component: CollectionsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/collection/$id", component: CollectionDetailPage }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/add", component: AddGamePage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/add",
+    component: AddGamePage,
+    // ?q= seeds the search box, so a collection can link straight to "add this
+    // one" for a game you don't own yet
+    validateSearch: (search: Record<string, unknown>): { q?: string } => ({
+      q: typeof search.q === "string" && search.q ? search.q : undefined,
+    }),
+  }),
   createRoute({ getParentRoute: () => rootRoute, path: "/game/$id", component: GameDetailPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/import", component: ImportPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage }),

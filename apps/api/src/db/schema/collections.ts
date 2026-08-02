@@ -1,6 +1,7 @@
 import {
   boolean,
   index,
+  integer,
   pgTable,
   primaryKey,
   real,
@@ -44,7 +45,15 @@ export const collections = pgTable(
   (t) => [unique().on(t.userId, t.name), index("collections_public_idx").on(t.isPublic)],
 );
 
-/** Games in a collection; x/y are node positions on the play-order graph. */
+/**
+ * Games in a collection.
+ *
+ * Two independent orderings live here, because they answer different
+ * questions. `position_x`/`position_y` place a node on the play-order *graph*,
+ * which is about branches ("do either of these, then this"). `sort_order` is
+ * the flat list order — what you get when you just want a numbered run of
+ * games — and is what the list view's "Custom order" sorts by.
+ */
 export const collectionGames = pgTable(
   "collection_games",
   {
@@ -56,6 +65,8 @@ export const collectionGames = pgTable(
       .references(() => games.id, { onDelete: "cascade" }),
     positionX: real("position_x").notNull().default(0),
     positionY: real("position_y").notNull().default(0),
+    /** 1-based place in the flat list; ties fall back to title */
+    sortOrder: integer("sort_order").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.collectionId, t.gameId] })],
 );
