@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   RefreshControl,
   ScrollView,
@@ -11,9 +12,15 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CollectionSummary, PublicCollection } from "@gm/shared";
+import {
+  BUILTIN_CATEGORIES,
+  type CollectionSummary,
+  type OwnershipFormat,
+  type PublicCollection,
+} from "@gm/shared";
 import { api } from "@/lib/api";
 import { resolveImage } from "@/lib/ui";
+import { groupConsoles } from "@/lib/platforms";
 import { colors, radius, space, type } from "@/lib/theme";
 import {
   Button,
@@ -25,8 +32,11 @@ import {
   EmptyState,
   Field,
   Icon,
+  OptionRow,
   ProgressBar,
   Screen,
+  Sheet,
+  SheetSection,
 } from "@/components/ui";
 
 type Tab = "mine" | "public";
@@ -37,6 +47,7 @@ export default function CollectionsScreen() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("mine");
   const [name, setName] = useState("");
+  const [addingAll, setAddingAll] = useState<PublicCollection | null>(null);
 
   const collections = useQuery({ queryKey: ["collections"], queryFn: () => api.getCollections() });
   const publicOnes = useQuery({
@@ -151,11 +162,135 @@ export default function CollectionsScreen() {
               busy={adopt.isPending}
               onAdopt={() => adopt.mutate(item.id)}
               onOpen={() => router.push(`/collection/${item.id}`)}
+              onAddAll={() => setAddingAll(item)}
             />
           )}
         />
       )}
+
+      <AddAllSheet collection={addingAll} onClose={() => setAddingAll(null)} />
     </Screen>
+  );
+}
+
+/**
+ * "Add every game in this collection to my library" — the reason to browse
+ * someone else's. Category and platform are chosen up front, because dropping
+ * a dozen games into Uncategorized on no console is worse than no button.
+ */
+function AddAllSheet({
+  collection,
+  onClose,
+}: {
+  collection: PublicCollection | null;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState("wishlist");
+  const [platformId, setPlatformId] = useState<string | null>(null);
+  const [format, setFormat] = useState<OwnershipFormat>("digital");
+
+  const consoles = useQuery({
+    queryKey: ["consoles"],
+    queryFn: () => api.getConsoles(),
+    enabled: !!collection,
+  });
+
+  const add = useMutation({
+    mutationFn: () =>
+      api.addCollectionToLibrary(collection!.id, {
+        status,
+        platforms: platformId ? [{ platformId, format }] : undefined,
+      }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["library"] });
+      queryClient.invalidateQueries({ queryKey: ["consoles"] });
+      queryClient.invalidateQueries({ queryKey: ["collections"] });
+      Alert.alert(
+        "Added to your library",
+        `${res.added} added${res.skipped > 0 ? ` · ${res.skipped} already yours` : ""}`,
+        [{ text: "OK", onPress: onClose }],
+      );
+    },
+  });
+
+  const platforms = groupConsoles(consoles.data ?? []).flatMap((group) => [
+    { id: group.console.platform.id, label: group.console.platform.name, child: false },
+    ...group.storefronts.map((s) => ({ id: s.platform.id, label: s.platform.name, child: true })),
+  ]);
+
+  return (
+    <Sheet
+      visible={!!collection}
+      title={collection ? `Add ${collection.total} games` : "Add games"}
+      onClose={onClose}
+    >
+      <Text style={type.caption}>
+        Games you already own are left as they are — only the platform is applied to those.
+      </Text>
+
+      <SheetSection label="Category" />
+      {BUILTIN_CATEGORIES.map((c) => (
+        <OptionRow
+          key={c.key}
+          label={c.label}
+          tint={c.color}
+          selected={status === c.key}
+          onPress={() => setStatus(c.key)}
+        />
+      ))}
+
+      <SheetSection label="Platform · optional" />
+      <OptionRow
+        label="Don't set a platform"
+        selected={platformId === null}
+        onPress={() => setPlatformId(null)}
+      />
+      {platforms.map((p) => (
+        <OptionRow
+          key={p.id}
+          label={p.label}
+          icon={p.child ? "storefront-outline" : undefined}
+          indent={p.child}
+          selected={platformId === p.id}
+          onPress={() => setPlatformId(platformId === p.id ? null : p.id)}
+        />
+      ))}
+      {platformId && (
+        <View style={styles.formatRow}>
+          <Button
+            label="Digital"
+            icon="cloud-download-outline"
+            tone={format === "digital" ? "primary" : "ghost"}
+            fill
+            onPress={() => setFormat("digital")}
+            style={styles.formatBtn}
+          />
+          <Button
+            label="Physical"
+            icon="cube-outline"
+            tone={format === "physical" ? "primary" : "ghost"}
+            fill
+            onPress={() => setFormat("physical")}
+            style={styles.formatBtn}
+          />
+        </View>
+      )}
+
+      {add.isError && (
+        <Text style={[type.caption, { color: colors.danger, marginTop: space.sm }]}>
+          {add.error instanceof Error ? add.error.message : "Couldn't add those games"}
+        </Text>
+      )}
+      <Button
+        label={collection ? `Add ${collection.total} to library` : "Add"}
+        icon="download-outline"
+        fill
+        busy={add.isPending}
+        style={{ marginTop: space.md }}
+        onPress={() => add.mutate()}
+      />
+    </Sheet>
   );
 }
 
@@ -224,11 +359,13 @@ function PublicCard({
   busy,
   onAdopt,
   onOpen,
+  onAddAll,
 }: {
   collection: PublicCollection;
   busy: boolean;
   onAdopt: () => void;
   onOpen: () => void;
+  onAddAll: () => void;
 }) {
   const accent = c.accentColor ?? colors.accent;
   return (
@@ -253,15 +390,25 @@ function PublicCard({
         </View>
       </View>
       <Covers preview={c.preview} />
-      <Button
-        label={c.mine ? "Open yours" : c.adopted ? "Save another copy" : "Save a copy"}
-        icon={c.mine ? "open-outline" : "download-outline"}
-        tone="ghost"
-        fill
-        busy={busy}
-        style={{ marginTop: space.md }}
-        onPress={c.mine ? onOpen : onAdopt}
-      />
+      <View style={styles.cardActions}>
+        <Button
+          label={c.mine ? "Open yours" : c.adopted ? "Copy again" : "Save a copy"}
+          icon={c.mine ? "open-outline" : "duplicate-outline"}
+          tone="ghost"
+          fill
+          busy={busy}
+          onPress={c.mine ? onOpen : onAdopt}
+          style={styles.cardBtn}
+        />
+        <Button
+          label="Add all"
+          icon="library-outline"
+          fill
+          disabled={c.total === 0}
+          onPress={onAddAll}
+          style={styles.cardBtn}
+        />
+      </View>
     </Card>
   );
 }
@@ -285,4 +432,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 1,
   },
+  cardActions: { flexDirection: "row", gap: space.sm, marginTop: space.md },
+  cardBtn: { minHeight: 40 },
+  formatRow: { flexDirection: "row", gap: space.sm, marginTop: space.sm },
+  formatBtn: { minHeight: 40 },
 });

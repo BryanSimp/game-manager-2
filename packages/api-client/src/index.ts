@@ -1,5 +1,7 @@
 import type {
   AddCollectionGameInput,
+  AddCollectionToLibraryInput,
+  AddCollectionToLibraryResult,
   AddGameInput,
   AdminSettings,
   BarcodeLookupResult,
@@ -345,6 +347,29 @@ export class ApiClient {
     return this.request(`/api/collections/${id}/layout`, {
       method: "PUT",
       body: JSON.stringify(layout),
+    });
+  }
+
+  /**
+   * Set the flat list order. Separate from the graph layout — the list is a
+   * numbered run, the graph is branches. Games left out keep their place at
+   * the end.
+   */
+  saveCollectionOrder(id: string, gameIds: string[]): Promise<{ ok: true; ordered: number }> {
+    return this.request(`/api/collections/${id}/order`, {
+      method: "PUT",
+      body: JSON.stringify({ gameIds }),
+    });
+  }
+
+  /** Add every game in a collection to your library, in one category. */
+  addCollectionToLibrary(
+    id: string,
+    input: AddCollectionToLibraryInput,
+  ): Promise<AddCollectionToLibraryResult> {
+    return this.request(`/api/collections/${id}/add-to-library`, {
+      method: "POST",
+      body: JSON.stringify(input),
     });
   }
 
