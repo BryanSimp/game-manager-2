@@ -170,6 +170,8 @@ was dev-only). Never use `db push`.
 
 | 12 mobile parity + polish | see git log | **Friends on mobile**: `friends.tsx` (code + `Share`, requests both ways, unfriend) and `friend/[userId].tsx` (their library, everything/common/theirs, search). **Consoles on mobile**: cards nest storefronts under their platform and open a new `console/[platformId]` page (format filter, per-store badges), and the library gained a **console filter row** that rolls storefronts into their parent — `lib/platforms.ts` owns `onPlatform`/`groupConsoles` so both screens agree. **Batch barcode scanning**: `scan.tsx` queues game after game and writes the batch only when confirmed. **Layout fixes**: safe-area bottom insets on every screen (FABs, sheets, the import footer), sort moved off the search row into a picker, dashboard category tiles widened from a fifth to a third so "Uncategorized" stops clipping, import review split onto two lines, header icons wrapped in a row |
 
+| 12b design system + barcode titles | see git log | **`lib/theme.ts` + `components/ui.tsx`**: colour/space/radius tokens and a type scale where every entry has a `lineHeight`, plus shared `Screen`/`Card`/`Chip`/`Badge`/`Button`/`Field`/`EmptyState`/`Cover`/`ProgressBar`. Fourteen screens stopped hand-rolling StyleSheets, which is what had been clipping descenders and emoji. **Emoji chrome became Ionicons** (`@expo/vector-icons`, pinned 15.1.1) — a glyph centres in its box and takes a colour. **Barcode titles**: `services/product-title.ts` strips SKUs/editions/platform from a retail listing and offers publisher-dropped `variants` that only win if IGDB scores them higher; `check:titles` covers 18 cases |
+
 **Next: Phase 6 (skipped for now, still open)** — email verification/password reset
 (better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
 filters, admin panel (users, password resets, registration toggle, settings).
@@ -191,6 +193,17 @@ file to be provided for reference).
 - Play-order graph *editing* is web-only; mobile flattens the graph to an ordered list.
 - UPCitemdb trial tier is ~100 lookups/day per IP (results cached in-process); a paid
   key or alternate provider is the upgrade path if scanning whole shelves.
+- **Retail listings are not game titles** (`services/product-title.ts`):
+  "Pokemon Sun Nintendo 09109480" used to go to the matcher verbatim because
+  only the platform was ever stripped. Now the platform, a 5+ digit SKU (four
+  digits stays — "Metro 2033", "NBA 2K24"), edition/condition words and
+  corporate suffixes come off. **Publishers are deliberately *not* stripped
+  from the confident result** — "Nintendo Land" and "Sega Bass Fishing" are
+  real titles — they become `variants`, and `lookupUpc` keeps whichever scores
+  better against IGDB, the same trick `matcher.ts` uses for OCR junk. Platform
+  aliases are word-bounded now; without that the "nes" alias turned
+  "Chinese Chess" into "Chi e Chess". `pnpm --filter @gm/api check:titles`
+  runs the cases (18 of them, no DB needed).
 - Steam import leftovers resolved through the review UI don't get `steam_app_id`
   linked (review's bulk-add path has no item context) — those games won't sync
   achievements until matched confidently on a later import.
@@ -312,3 +325,18 @@ file to be provided for reference).
   already mounts the `SafeAreaProvider`); the navigator is pinned to a dark
   theme because every screen paints its own zinc-950 background and following
   the system scheme gave a white header on a light phone.
+- **Mobile styling goes through `lib/theme.ts` + `components/ui.tsx`.** Every
+  entry in the `type` scale carries an explicit `lineHeight` (~1.4×): without
+  one, React Native sizes a line from the font's own metrics, clipping
+  descenders in tight rows and cropping emoji outright. Screens hand-rolling a
+  bare `fontSize` is what caused the "text and emoji cut off" bug, so new text
+  should use `type.*` rather than a local `fontSize`.
+- **UI icons are `@expo/vector-icons` (Ionicons), not emoji.** An icon-font
+  glyph centres predictably in its box and takes a colour; emoji did neither,
+  and no line height reliably contained them. The dependency ships with the
+  Expo SDK — it's pinned to 15.1.1 to stay in step with SDK 54.
+- Running the mobile app under `expo start --web` renders and is useful for
+  measuring type metrics, but **React Query's persisted cache doesn't rehydrate
+  there**, so data-backed screens sit empty. Auth works (better-auth's expo
+  client defers to the browser cookie jar on web). Treat web as a layout
+  harness only; real verification is Expo Go on a device.

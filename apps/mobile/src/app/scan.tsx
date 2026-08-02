@@ -3,11 +3,10 @@ import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
-  Image,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,6 +16,8 @@ import { ApiError } from "@gm/api-client";
 import type { BarcodeLookupResult, ImportCandidate } from "@gm/shared";
 import { api } from "@/lib/api";
 import { resolveImage } from "@/lib/ui";
+import { colors, radius, space, type } from "@/lib/theme";
+import { Button, Cover, Icon, IconButton, Screen } from "@/components/ui";
 
 type Phase =
   | { name: "scanning" }
@@ -64,22 +65,19 @@ export default function ScanScreen() {
     busy.current = false;
   }, []);
 
-  const lookup = useCallback(
-    async (code: string) => {
-      setPhase({ name: "looking-up", code });
-      try {
-        const found = await api.lookupBarcode(code);
-        setPhase({ name: "result", code, result: found });
-      } catch (err) {
-        setPhase({
-          name: "error",
-          code,
-          message: err instanceof Error ? err.message : "Lookup failed",
-        });
-      }
-    },
-    [],
-  );
+  const lookup = useCallback(async (code: string) => {
+    setPhase({ name: "looking-up", code });
+    try {
+      const found = await api.lookupBarcode(code);
+      setPhase({ name: "result", code, result: found });
+    } catch (err) {
+      setPhase({
+        name: "error",
+        code,
+        message: err instanceof Error ? err.message : "Lookup failed",
+      });
+    }
+  }, []);
 
   const onBarcodeScanned = useCallback(
     (scan: BarcodeScanningResult) => {
@@ -157,26 +155,28 @@ export default function ScanScreen() {
 
   if (!permission) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-      </View>
+      <Screen center>
+        <ActivityIndicator color={colors.accentBorder} />
+      </Screen>
     );
   }
   if (!permission.granted) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.permissionTitle}>Camera access needed</Text>
-        <Text style={styles.permissionText}>
+      <Screen center>
+        <View style={styles.permissionIcon}>
+          <Icon name="camera-outline" size={28} color={colors.textGhost} />
+        </View>
+        <Text style={[type.heading, styles.center]}>Camera access needed</Text>
+        <Text style={[type.caption, styles.center, { marginTop: space.xs, marginBottom: space.lg }]}>
           Point the camera at a game's barcode to add it to your library.
         </Text>
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => requestPermission()}>
-          <Text style={styles.primaryText}>Allow camera</Text>
-        </TouchableOpacity>
-      </View>
+        <Button label="Allow camera" icon="camera" onPress={() => requestPermission()} />
+      </Screen>
     );
   }
 
-  const sheetPad = { paddingBottom: 16 + insets.bottom };
+  const sheetPad = { paddingBottom: space.lg + insets.bottom };
+  const scanning = phase.name === "scanning" && !reviewing && !result;
 
   return (
     <View style={styles.screen}>
@@ -184,106 +184,104 @@ export default function ScanScreen() {
         style={StyleSheet.absoluteFill}
         facing="back"
         barcodeScannerSettings={{ barcodeTypes: ["upc_a", "upc_e", "ean13", "ean8"] }}
-        onBarcodeScanned={
-          phase.name === "scanning" && !reviewing && !result && !confirm.isPending
-            ? onBarcodeScanned
-            : undefined
-        }
+        onBarcodeScanned={scanning && !confirm.isPending ? onBarcodeScanned : undefined}
       />
 
-      {phase.name === "scanning" && !reviewing && !result && (
-        <View style={styles.reticleWrap} pointerEvents="none">
-          <View style={styles.reticle} />
-          <Text style={styles.hint}>
-            {queue.length === 0
-              ? "Line up the barcode on the back of the case"
-              : "Next case — the batch is kept until you add it"}
-          </Text>
+      {scanning && (
+        <View style={styles.reticleWrap}>
+          <View style={styles.reticle}>
+            <View style={[styles.corner, styles.cornerTL]} />
+            <View style={[styles.corner, styles.cornerTR]} />
+            <View style={[styles.corner, styles.cornerBL]} />
+            <View style={[styles.corner, styles.cornerBR]} />
+          </View>
+          <View style={styles.hint}>
+            <Icon name="barcode-outline" size={15} color={colors.text} />
+            <Text style={[type.caption, { color: colors.text }]}>
+              {queue.length === 0
+                ? "Line up the barcode on the back of the case"
+                : "Next case — the batch is kept until you add it"}
+            </Text>
+          </View>
         </View>
       )}
 
       {/* the batch bar is always there once something's queued, so the count
           and the way out are visible without leaving the camera */}
-      {queue.length > 0 && !reviewing && !result && phase.name === "scanning" && (
-        <View style={[styles.batchBar, { paddingBottom: 12 + insets.bottom }]}>
-          <TouchableOpacity style={styles.batchCount} onPress={() => setReviewing(true)}>
-            <Text style={styles.batchCountText}>
-              {queue.length} queued · review ›
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.primaryBtn}
-            disabled={confirm.isPending}
-            onPress={() => confirm.mutate()}
+      {queue.length > 0 && scanning && (
+        <View style={[styles.batchBar, { paddingBottom: space.md + insets.bottom }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Review ${queue.length} queued games`}
+            style={styles.batchCount}
+            onPress={() => setReviewing(true)}
           >
-            <Text style={styles.primaryText}>
-              {confirm.isPending ? "Adding…" : `Add ${queue.length}`}
-            </Text>
-          </TouchableOpacity>
+            <View style={styles.batchPill}>
+              <Text style={[type.label, { color: "#ffffff" }]}>{queue.length}</Text>
+            </View>
+            <Text style={[type.label, { color: colors.accentText }]}>queued · review</Text>
+            <Icon name="chevron-forward" size={15} color={colors.accentText} />
+          </Pressable>
+          <Button
+            label={`Add ${queue.length}`}
+            icon="checkmark"
+            busy={confirm.isPending}
+            onPress={() => confirm.mutate()}
+          />
         </View>
       )}
 
       {reviewing && (
         <View style={[styles.sheet, sheetPad]}>
           <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>Batch ({queue.length})</Text>
-            <TouchableOpacity onPress={() => setReviewing(false)} hitSlop={10}>
-              <Text style={styles.close}>✕</Text>
-            </TouchableOpacity>
+            <Text style={type.heading}>Batch ({queue.length})</Text>
+            <IconButton
+              name="close"
+              accessibilityLabel="Back to scanning"
+              onPress={() => setReviewing(false)}
+            />
           </View>
           {confirm.isError && (
-            <Text style={styles.errorText}>
+            <Text style={[type.caption, { color: colors.danger }]}>
               {confirm.error instanceof Error ? confirm.error.message : "Couldn't add the batch"}
             </Text>
           )}
           <ScrollView style={{ maxHeight: 300 }}>
             {queue.length === 0 && (
-              <Text style={styles.sheetSubtle}>Nothing queued yet — scan a case.</Text>
+              <Text style={type.caption}>Nothing queued yet — scan a case.</Text>
             )}
-            {queue.map((game) => {
-              const cover = resolveImage(game.coverSrc);
-              return (
-                <View key={game.code} style={styles.candidate}>
-                  <View style={styles.cover}>
-                    {cover && (
-                      <Image
-                        source={{ uri: cover }}
-                        style={StyleSheet.absoluteFill}
-                        resizeMode="cover"
-                      />
-                    )}
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={styles.candidateTitle} numberOfLines={2}>
-                      {game.title}
-                    </Text>
-                    <Text style={styles.sheetSubtle} numberOfLines={1}>
-                      {game.releaseYear ? `${game.releaseYear} · ` : ""}
-                      {game.platform ? `📦 ${game.platform.name}` : "no platform"}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    hitSlop={8}
-                    onPress={() => setQueue((prev) => prev.filter((q) => q.code !== game.code))}
-                  >
-                    <Text style={styles.close}>✕</Text>
-                  </TouchableOpacity>
+            {queue.map((game) => (
+              <View key={game.code} style={styles.queueRow}>
+                <Cover src={resolveImage(game.coverSrc)} width={38} height={50} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={type.label} numberOfLines={2}>
+                    {game.title}
+                  </Text>
+                  <Text style={type.micro} numberOfLines={1}>
+                    {game.releaseYear ? `${game.releaseYear} · ` : ""}
+                    {game.platform ? game.platform.name : "no platform"}
+                  </Text>
                 </View>
-              );
-            })}
+                <IconButton
+                  name="trash-outline"
+                  accessibilityLabel={`Remove ${game.title} from the batch`}
+                  onPress={() => setQueue((prev) => prev.filter((q) => q.code !== game.code))}
+                />
+              </View>
+            ))}
           </ScrollView>
           <View style={styles.btnRow}>
-            <TouchableOpacity
-              style={[styles.primaryBtn, { flex: 1 }]}
-              disabled={confirm.isPending || queue.length === 0}
+            <Button
+              label={`Add ${queue.length} games`}
+              icon="checkmark"
+              fill
+              disabled={queue.length === 0}
+              busy={confirm.isPending}
               onPress={() => confirm.mutate()}
-            >
-              <Text style={styles.primaryText}>
-                {confirm.isPending ? "Adding…" : `Add ${queue.length} games`}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.ghostBtn}
+            />
+            <Button
+              label="Discard"
+              tone="ghost"
               onPress={() =>
                 Alert.alert("Discard batch", `Throw away all ${queue.length} scanned games?`, [
                   { text: "Cancel", style: "cancel" },
@@ -297,9 +295,7 @@ export default function ScanScreen() {
                   },
                 ])
               }
-            >
-              <Text style={styles.ghostText}>Discard</Text>
-            </TouchableOpacity>
+            />
           </View>
         </View>
       )}
@@ -307,30 +303,30 @@ export default function ScanScreen() {
       {result && (
         <View style={[styles.sheet, sheetPad]}>
           <View style={styles.sheetCenter}>
-            <Text style={styles.addedText}>✓ {result.added} added</Text>
+            <View style={styles.successIcon}>
+              <Icon name="checkmark" size={26} color={colors.success} />
+            </View>
+            <Text style={type.heading}>{result.added} added</Text>
             {result.duplicates > 0 && (
-              <Text style={styles.sheetSubtle}>
+              <Text style={[type.caption, styles.center]}>
                 {result.duplicates} were already in your library
               </Text>
             )}
             {result.failed.length > 0 && (
-              <Text style={styles.errorText} numberOfLines={3}>
+              <Text style={[type.caption, styles.center, { color: colors.danger }]} numberOfLines={3}>
                 Couldn't add: {result.failed.join(", ")}
               </Text>
             )}
             <View style={styles.btnRow}>
-              <TouchableOpacity
-                style={styles.primaryBtn}
+              <Button
+                label="Keep scanning"
+                icon="barcode-outline"
                 onPress={() => {
                   setResult(null);
                   resumeScanning();
                 }}
-              >
-                <Text style={styles.primaryText}>Keep scanning</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.ghostBtn} onPress={() => router.back()}>
-                <Text style={styles.ghostText}>Done</Text>
-              </TouchableOpacity>
+              />
+              <Button label="Done" tone="ghost" onPress={() => router.back()} />
             </View>
           </View>
         </View>
@@ -340,92 +336,83 @@ export default function ScanScreen() {
         <View style={[styles.sheet, sheetPad]}>
           {phase.name === "looking-up" && (
             <View style={styles.sheetCenter}>
-              <ActivityIndicator />
-              <Text style={styles.sheetSubtle}>Looking up {phase.code}…</Text>
+              <ActivityIndicator color={colors.accentBorder} />
+              <Text style={type.caption}>Looking up {phase.code}…</Text>
             </View>
           )}
 
           {phase.name === "error" && (
             <View style={styles.sheetCenter}>
-              <Text style={styles.sheetTitle}>Lookup failed</Text>
-              <Text style={styles.sheetSubtle}>{phase.message}</Text>
+              <Text style={type.heading}>Lookup failed</Text>
+              <Text style={[type.caption, styles.center]}>{phase.message}</Text>
               <View style={styles.btnRow}>
-                <TouchableOpacity style={styles.primaryBtn} onPress={resumeScanning}>
-                  <Text style={styles.primaryText}>Scan again</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.ghostBtn} onPress={() => router.replace("/add")}>
-                  <Text style={styles.ghostText}>Search instead</Text>
-                </TouchableOpacity>
+                <Button label="Scan again" icon="barcode-outline" onPress={resumeScanning} />
+                <Button label="Search instead" tone="ghost" onPress={() => router.replace("/add")} />
               </View>
             </View>
           )}
 
           {phase.name === "result" && !phase.result.found && (
             <View style={styles.sheetCenter}>
-              <Text style={styles.sheetTitle}>Barcode not recognized</Text>
-              <Text style={styles.sheetSubtle}>
+              <Text style={type.heading}>Barcode not recognized</Text>
+              <Text style={[type.caption, styles.center]}>
                 {phase.code} isn't in the UPC database. Try searching by title.
               </Text>
               <View style={styles.btnRow}>
-                <TouchableOpacity style={styles.primaryBtn} onPress={resumeScanning}>
-                  <Text style={styles.primaryText}>Scan again</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.ghostBtn} onPress={() => router.replace("/add")}>
-                  <Text style={styles.ghostText}>Search instead</Text>
-                </TouchableOpacity>
+                <Button label="Scan again" icon="barcode-outline" onPress={resumeScanning} />
+                <Button label="Search instead" tone="ghost" onPress={() => router.replace("/add")} />
               </View>
             </View>
           )}
 
           {phase.name === "result" && phase.result.found && (
             <>
-              <Text style={styles.sheetSubtle} numberOfLines={2}>
+              {/* the query is the cleaned-up title the server actually
+                  searched; the raw shelf listing is the small print */}
+              <Text style={type.heading} numberOfLines={2}>
+                {phase.result.query ?? phase.result.product}
+              </Text>
+              <Text style={type.micro} numberOfLines={2}>
                 {phase.result.product}
               </Text>
               {phase.result.platformHint && (
                 <View style={styles.platformChip}>
-                  <Text style={styles.platformChipText}>
-                    📦 {phase.result.platformHint.name} · physical
+                  <Icon name="cube-outline" size={13} color={colors.accentText} />
+                  <Text style={[type.micro, { color: colors.accentText }]}>
+                    {phase.result.platformHint.name} · physical
                   </Text>
                 </View>
               )}
 
               <ScrollView style={{ maxHeight: 240 }}>
                 {phase.result.candidates.length === 0 && (
-                  <Text style={styles.sheetSubtle}>No matches for “{phase.result.query}”.</Text>
+                  <Text style={type.caption}>No matches for “{phase.result.query}”.</Text>
                 )}
                 {phase.result.candidates.map((c) => {
-                  const cover = resolveImage(c.coverSrc);
                   const found = phase.result;
                   return (
-                    <TouchableOpacity
+                    <Pressable
                       key={`${c.igdbId ?? c.gameId ?? c.title}`}
-                      style={styles.candidate}
+                      accessibilityRole="button"
+                      style={({ pressed }) => [styles.candidate, pressed && { opacity: 0.7 }]}
                       onPress={() => enqueue(phase.code, c, found)}
                     >
-                      <View style={styles.cover}>
-                        {cover && (
-                          <Image
-                            source={{ uri: cover }}
-                            style={StyleSheet.absoluteFill}
-                            resizeMode="cover"
-                          />
-                        )}
-                      </View>
+                      <Cover src={resolveImage(c.coverSrc)} width={38} height={50} />
                       <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={styles.candidateTitle} numberOfLines={2}>
+                        <Text style={type.label} numberOfLines={2}>
                           {c.title}
                         </Text>
-                        {c.releaseYear && <Text style={styles.sheetSubtle}>{c.releaseYear}</Text>}
+                        {c.releaseYear && <Text style={type.micro}>{c.releaseYear}</Text>}
                       </View>
-                      <Text style={styles.addLabel}>Queue</Text>
-                    </TouchableOpacity>
+                      <View style={styles.queueTag}>
+                        <Icon name="add" size={14} color={colors.accentBorder} />
+                        <Text style={[type.micro, { color: colors.accentBorder }]}>Queue</Text>
+                      </View>
+                    </Pressable>
                   );
                 })}
               </ScrollView>
-              <TouchableOpacity style={styles.ghostBtn} onPress={resumeScanning}>
-                <Text style={styles.ghostText}>Skip this one</Text>
-              </TouchableOpacity>
+              <Button label="Skip this one" tone="ghost" fill onPress={resumeScanning} />
             </>
           )}
         </View>
@@ -436,20 +423,17 @@ export default function ScanScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000" },
-  center: {
-    flex: 1,
+  center: { textAlign: "center" },
+  permissionIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#101014",
-    padding: 24,
-  },
-  permissionTitle: { color: "#fafafa", fontSize: 17, fontWeight: "700" },
-  permissionText: {
-    color: "#a1a1aa",
-    fontSize: 13,
-    textAlign: "center",
-    marginTop: 8,
-    marginBottom: 16,
+    marginBottom: space.md,
   },
   reticleWrap: {
     position: "absolute",
@@ -459,23 +443,26 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: "center",
     justifyContent: "center",
+    // the overlay must never swallow a tap meant for the camera below it
+    pointerEvents: "none",
   },
-  reticle: {
-    width: "78%",
-    height: 130,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: "rgba(129,140,248,0.9)",
-  },
+  reticle: { width: "78%", height: 140 },
+  // corner brackets read as a scanner frame without boxing in the whole shot
+  corner: { position: "absolute", width: 28, height: 28, borderColor: colors.accentBorder },
+  cornerTL: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 12 },
+  cornerTR: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 12 },
+  cornerBL: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 12 },
+  cornerBR: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 12 },
   hint: {
-    color: "#e4e4e7",
-    fontSize: 13,
-    marginTop: 14,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    overflow: "hidden",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: space.lg,
+    maxWidth: "84%",
+    backgroundColor: "rgba(0,0,0,0.62)",
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
   },
   batchBar: {
     position: "absolute",
@@ -484,66 +471,70 @@ const styles = StyleSheet.create({
     bottom: 0,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    backgroundColor: "rgba(24,24,27,0.94)",
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    backgroundColor: "rgba(24,24,27,0.95)",
   },
-  batchCount: { flex: 1 },
-  batchCountText: { color: "#c7d2fe", fontSize: 14, fontWeight: "700" },
+  batchCount: { flex: 1, flexDirection: "row", alignItems: "center", gap: 6 },
+  batchPill: {
+    minWidth: 26,
+    height: 26,
+    borderRadius: 13,
+    paddingHorizontal: 6,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   sheet: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "#18181b",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 16,
-    gap: 10,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+    padding: space.lg,
+    gap: space.sm,
   },
   sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sheetCenter: { alignItems: "center", gap: 10, paddingVertical: 8 },
-  sheetTitle: { color: "#fafafa", fontSize: 16, fontWeight: "700" },
-  sheetSubtle: { color: "#a1a1aa", fontSize: 12 },
-  close: { color: "#71717a", fontSize: 16, padding: 4 },
+  sheetCenter: { alignItems: "center", gap: space.sm, paddingVertical: space.sm },
+  successIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#022c22",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   platformChip: {
     alignSelf: "flex-start",
-    backgroundColor: "#312e81",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.md,
+    paddingVertical: 5,
   },
-  platformChipText: { color: "#c7d2fe", fontSize: 12, fontWeight: "600" },
   candidate: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingVertical: 8,
+    gap: space.md,
+    paddingVertical: space.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#27272a",
+    borderBottomColor: colors.border,
   },
-  cover: { width: 38, height: 50, borderRadius: 5, backgroundColor: "#27272a", overflow: "hidden" },
-  candidateTitle: { color: "#fafafa", fontSize: 14, fontWeight: "600" },
-  addLabel: { color: "#818cf8", fontWeight: "700", fontSize: 13 },
-  addedText: { color: "#6ee7b7", fontSize: 16, fontWeight: "700" },
-  errorText: { color: "#f87171", fontSize: 12 },
-  btnRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
-  primaryBtn: {
-    backgroundColor: "#4f46e5",
-    borderRadius: 10,
-    paddingHorizontal: 18,
-    paddingVertical: 11,
+  queueRow: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: space.md,
+    paddingVertical: space.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
-  primaryText: { color: "#fff", fontWeight: "600" },
-  ghostBtn: {
-    borderWidth: 1,
-    borderColor: "#3f3f46",
-    borderRadius: 10,
-    paddingHorizontal: 18,
-    paddingVertical: 11,
-    alignItems: "center",
-  },
-  ghostText: { color: "#a1a1aa", fontWeight: "600" },
+  queueTag: { flexDirection: "row", alignItems: "center", gap: 2 },
+  btnRow: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: space.xs },
 });

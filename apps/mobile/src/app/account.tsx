@@ -1,17 +1,19 @@
 import { useRouter, type Href } from "expo-router";
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "@/lib/auth";
+import { colors, radius, space, type } from "@/lib/theme";
+import { Button, Card, Chevron, Icon, Screen, type IconName } from "@/components/ui";
 
-const LINKS: Array<{ href: Href; icon: string; label: string; note: string }> = [
-  { href: "/dashboard", icon: "📊", label: "Dashboard", note: "Stats, backlog hours, recent finishes" },
-  { href: "/consoles", icon: "🕹️", label: "Consoles", note: "What you own, and your games on each" },
-  { href: "/friends", icon: "👥", label: "Friends", note: "Your code, requests, their libraries" },
-  { href: "/collections", icon: "🗂️", label: "Collections", note: "Series and play-order lists" },
-  { href: "/tags", icon: "🏷️", label: "Tags", note: "Create, recolor, delete" },
-  { href: "/scan", icon: "🔖", label: "Scan barcodes", note: "Batch-scan a shelf of cases" },
-  { href: "/import", icon: "📷", label: "Import", note: "Screenshot / shelf photo OCR" },
+const LINKS: Array<{ href: Href; icon: IconName; label: string; note: string }> = [
+  { href: "/dashboard", icon: "stats-chart-outline", label: "Dashboard", note: "Stats, backlog hours, recent finishes" },
+  { href: "/consoles", icon: "game-controller-outline", label: "Consoles", note: "What you own, and your games on each" },
+  { href: "/friends", icon: "people-outline", label: "Friends", note: "Your code, requests, their libraries" },
+  { href: "/collections", icon: "albums-outline", label: "Collections", note: "Series and play-order lists" },
+  { href: "/tags", icon: "pricetags-outline", label: "Tags", note: "Create, recolor, delete" },
+  { href: "/scan", icon: "barcode-outline", label: "Scan barcodes", note: "Batch-scan a shelf of cases" },
+  { href: "/import", icon: "camera-outline", label: "Import", note: "Screenshot / shelf photo OCR" },
 ];
 
 export default function AccountScreen() {
@@ -19,112 +21,96 @@ export default function AccountScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { data: session } = authClient.useSession();
+  const name = session?.user.name ?? session?.user.email ?? "?";
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={{ padding: 16, paddingBottom: 32 + insets.bottom }}
-    >
-      <View style={styles.userCard}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {(session?.user.name ?? session?.user.email ?? "?").slice(0, 1).toUpperCase()}
-          </Text>
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.name} numberOfLines={1}>
-            {session?.user.name ?? "—"}
-          </Text>
-          <Text style={styles.email} numberOfLines={1}>
-            {session?.user.email ?? ""}
-          </Text>
-        </View>
-      </View>
-
-      {LINKS.map((link) => (
-        <TouchableOpacity key={link.label} style={styles.row} onPress={() => router.push(link.href)}>
-          <Text style={styles.icon}>{link.icon}</Text>
+    <Screen>
+      <ScrollView contentContainerStyle={{ padding: space.lg, paddingBottom: space.xxl + insets.bottom }}>
+        <Card style={styles.userCard}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{name.slice(0, 1).toUpperCase()}</Text>
+          </View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.label} numberOfLines={1}>
-              {link.label}
+            <Text style={type.heading} numberOfLines={1}>
+              {session?.user.name ?? "—"}
             </Text>
-            <Text style={styles.note} numberOfLines={2}>
-              {link.note}
+            <Text style={type.caption} numberOfLines={1}>
+              {session?.user.email ?? ""}
             </Text>
           </View>
-          <Text style={styles.chevron}>›</Text>
-        </TouchableOpacity>
-      ))}
+        </Card>
 
-      <TouchableOpacity
-        style={styles.signOut}
-        onPress={() =>
-          Alert.alert("Sign out", "Sign out of this device?", [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Sign out",
-              style: "destructive",
-              onPress: async () => {
-                await authClient.signOut();
-                queryClient.clear();
-                router.replace("/login");
+        {LINKS.map((link) => (
+          <Card
+            key={link.label}
+            style={styles.row}
+            onPress={() => router.push(link.href)}
+            accessibilityLabel={link.label}
+          >
+            <View style={styles.iconWell}>
+              <Icon name={link.icon} size={18} color={colors.accentText} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={type.bodyStrong} numberOfLines={1}>
+                {link.label}
+              </Text>
+              <Text style={type.micro} numberOfLines={2}>
+                {link.note}
+              </Text>
+            </View>
+            <Chevron />
+          </Card>
+        ))}
+
+        <Button
+          label="Sign out"
+          tone="danger"
+          icon="log-out-outline"
+          style={{ marginTop: space.lg }}
+          onPress={() =>
+            Alert.alert("Sign out", "Sign out of this device?", [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Sign out",
+                style: "destructive",
+                onPress: async () => {
+                  await authClient.signOut();
+                  queryClient.clear();
+                  router.replace("/login");
+                },
               },
-            },
-          ])
-        }
-      >
-        <Text style={styles.signOutText}>Sign out</Text>
-      </TouchableOpacity>
-    </ScrollView>
+            ])
+          }
+        />
+      </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#101014" },
   userCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    backgroundColor: "#18181b",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 14,
-    marginBottom: 16,
+    gap: space.md,
+    padding: space.lg,
+    marginBottom: space.lg,
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#312e81",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.accentSoft,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: "#c7d2fe", fontSize: 18, fontWeight: "800" },
-  name: { color: "#fafafa", fontSize: 16, fontWeight: "700" },
-  email: { color: "#71717a", fontSize: 12, marginTop: 2 },
-  row: {
-    flexDirection: "row",
+  avatarText: { color: colors.accentText, fontSize: 20, lineHeight: 27, fontWeight: "800" },
+  row: { flexDirection: "row", alignItems: "center", gap: space.md, marginBottom: space.sm },
+  iconWell: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.md,
+    backgroundColor: colors.accentSoft,
     alignItems: "center",
-    gap: 12,
-    backgroundColor: "#18181b",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 12,
-    marginBottom: 8,
+    justifyContent: "center",
   },
-  icon: { fontSize: 18 },
-  label: { color: "#fafafa", fontSize: 14, fontWeight: "600" },
-  note: { color: "#71717a", fontSize: 11, marginTop: 2 },
-  chevron: { color: "#52525b", fontSize: 22 },
-  signOut: {
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: "#7f1d1d",
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  signOutText: { color: "#f87171", fontWeight: "600" },
 });

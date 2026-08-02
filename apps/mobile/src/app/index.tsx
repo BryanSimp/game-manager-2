@@ -3,14 +3,10 @@ import { Redirect, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,6 +17,19 @@ import { api } from "@/lib/api";
 import { formatHours, resolveImage, STATUS_COLORS, statusStyle } from "@/lib/ui";
 import { groupConsoles, onPlatform } from "@/lib/platforms";
 import { usePreferences } from "@/lib/prefs";
+import { colors, radius, space, type } from "@/lib/theme";
+import {
+  Badge,
+  Chevron,
+  Chip,
+  ChipBar,
+  Cover,
+  EmptyState,
+  Field,
+  Icon,
+  Loading,
+  Screen,
+} from "@/components/ui";
 
 const SORTS = [
   { key: "added", label: "Recent" },
@@ -58,11 +67,7 @@ export default function LibraryScreen() {
     () =>
       groupConsoles(consoles.data ?? []).flatMap((group) => [
         { id: group.console.platform.id, label: group.console.platform.name, child: false },
-        ...group.storefronts.map((s) => ({
-          id: s.platform.id,
-          label: s.platform.name,
-          child: true,
-        })),
+        ...group.storefronts.map((s) => ({ id: s.platform.id, label: s.platform.name, child: true })),
       ]),
     [consoles.data],
   );
@@ -84,56 +89,57 @@ export default function LibraryScreen() {
       return b.createdAt.localeCompare(a.createdAt);
     });
 
-  if (isPending) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
+  if (isPending) return <Loading />;
   if (!session) return <Redirect href="/login" />;
 
+  const filtered = statusFilter !== "all" || platformFilter !== "all" || needle.length > 0;
+
   return (
-    <View style={styles.screen}>
+    <Screen>
       <View style={styles.searchRow}>
-        <TextInput
-          style={styles.search}
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search library…"
-          placeholderTextColor="#71717a"
-          autoCapitalize="none"
-        />
+        <View style={styles.searchWrap}>
+          <Icon name="search" size={16} color={colors.textFaint} />
+          <Field
+            style={styles.search}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search library…"
+            autoCapitalize="none"
+            returnKeyType="search"
+          />
+        </View>
         {/* four sort buttons used to share this row with the search box and
             squeezed it to a sliver — one button that cycles instead. A picker
             would be an Alert, and Android only renders three of its buttons */}
-        <TouchableOpacity
-          style={styles.sortBtn}
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={`Sorted by ${SORTS[sortIndex]!.label}, tap to change`}
           onPress={() => setSort(SORTS[(sortIndex + 1) % SORTS.length]!.key)}
+          style={({ pressed }) => [styles.sortBtn, pressed && { opacity: 0.7 }]}
         >
-          <Text style={styles.sortText} numberOfLines={1}>
-            ⇅ {SORTS[sortIndex]!.label}
+          <Icon name="swap-vertical" size={15} color={colors.accentText} />
+          <Text style={[type.caption, { color: colors.accentText }]} numberOfLines={1}>
+            {SORTS[sortIndex]!.label}
           </Text>
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
-      <ChipBar>
+      <ChipBar style={{ marginTop: space.sm }}>
         <Chip
-          label={`All (${all.length})`}
+          label={`All ${all.length}`}
           active={statusFilter === "all"}
           onPress={() => setStatusFilter("all")}
         />
         {GAME_STATUSES.map((s) => {
           const n = all.filter((e) => e.status === s).length;
           // empty categories only clutter the bar — except the one you're in,
-          // so you can always click back out of it
+          // so you can always tap back out of it
           if (n === 0 && statusFilter !== s) return null;
           const meta = STATUS_COLORS[s];
           return (
             <Chip
               key={s}
-              label={`${meta.label} (${n})`}
+              label={`${meta.label} ${n}`}
               active={statusFilter === s}
               activeColor={meta.text}
               activeBg={meta.bg}
@@ -144,10 +150,10 @@ export default function LibraryScreen() {
       </ChipBar>
 
       {platformChips.length > 0 && (
-        <ChipBar>
-          <Text style={styles.barLabel}>Console</Text>
+        <ChipBar style={{ marginTop: 6 }}>
           <Chip
-            label="Any"
+            label="Any console"
+            icon="game-controller-outline"
             active={platformFilter === "all"}
             onPress={() => setPlatformFilter("all")}
           />
@@ -157,7 +163,8 @@ export default function LibraryScreen() {
             return (
               <Chip
                 key={p.id}
-                label={`${p.child ? "↳ " : ""}${p.label} (${n})`}
+                label={`${p.label} ${n}`}
+                icon={p.child ? "storefront-outline" : undefined}
                 active={platformFilter === p.id}
                 onPress={() => setPlatformFilter(platformFilter === p.id ? "all" : p.id)}
               />
@@ -167,14 +174,16 @@ export default function LibraryScreen() {
       )}
 
       {platformFilter !== "all" && (
-        <TouchableOpacity
+        <Pressable
+          accessibilityRole="link"
           style={styles.consoleLink}
           onPress={() => router.push(`/console/${platformFilter}`)}
         >
-          <Text style={styles.consoleLinkText}>
-            Open the {platformChips.find((p) => p.id === platformFilter)?.label ?? "console"} page ›
+          <Text style={[type.caption, { color: colors.accentBorder }]}>
+            Open the {platformChips.find((p) => p.id === platformFilter)?.label ?? "console"} page
           </Text>
-        </TouchableOpacity>
+          <Icon name="arrow-forward" size={13} color={colors.accentBorder} />
+        </Pressable>
       )}
 
       <FlatList
@@ -183,21 +192,22 @@ export default function LibraryScreen() {
         refreshControl={
           <RefreshControl refreshing={library.isRefetching} onRefresh={() => library.refetch()} />
         }
-        contentContainerStyle={{ padding: 12, paddingBottom: 96 + insets.bottom }}
+        contentContainerStyle={{ padding: space.md, paddingBottom: 96 + insets.bottom }}
         ListEmptyComponent={
           library.isLoading ? (
-            <ActivityIndicator style={{ marginTop: 48 }} />
+            <ActivityIndicator style={{ marginTop: 48 }} color={colors.accentBorder} />
+          ) : filtered ? (
+            <EmptyState
+              icon="filter-outline"
+              title="Nothing matches those filters"
+              text="Clear a filter to see more games."
+            />
           ) : (
-            <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>
-                {all.length === 0 ? "Your library is empty" : "Nothing matches those filters"}
-              </Text>
-              <Text style={styles.emptyText}>
-                {all.length === 0
-                  ? "Tap + to add your first game."
-                  : "Clear a filter to see more games."}
-              </Text>
-            </View>
+            <EmptyState
+              icon="library-outline"
+              title="Your library is empty"
+              text="Tap the + button to add your first game."
+            />
           )
         }
         renderItem={({ item }) => (
@@ -205,180 +215,131 @@ export default function LibraryScreen() {
         )}
       />
 
-      <TouchableOpacity
-        style={[styles.fab, { bottom: 24 + insets.bottom }]}
+      <Pressable
+        accessibilityRole="button"
         accessibilityLabel="Add a game"
+        style={({ pressed }) => [styles.fab, { bottom: 24 + insets.bottom }, pressed && { opacity: 0.85 }]}
         onPress={() => router.push("/add")}
       >
-        <Text style={styles.fabText}>＋</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-/** A horizontally scrolling row of chips that never squeezes its neighbours. */
-function ChipBar({ children }: { children: React.ReactNode }) {
-  return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={styles.chipBar}
-      contentContainerStyle={styles.chipBarContent}
-    >
-      {children}
-    </ScrollView>
-  );
-}
-
-function Chip({
-  label,
-  active,
-  onPress,
-  activeColor,
-  activeBg,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  activeColor?: string;
-  activeBg?: string;
-}) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      style={[
-        styles.chip,
-        active && {
-          backgroundColor: activeBg ?? "#312e81",
-          borderColor: activeColor ?? "#818cf8",
-        },
-      ]}
-    >
-      <Text style={[styles.chipText, active && { color: activeColor ?? "#c7d2fe" }]}>{label}</Text>
-    </TouchableOpacity>
+        <Icon name="add" size={30} color="#ffffff" />
+      </Pressable>
+    </Screen>
   );
 }
 
 function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => void }) {
   const prefs = usePreferences();
   const status = statusStyle(entry.status, prefs?.badgeOpacity ?? 100);
-  const cover = resolveImage(entry.game.coverSrc);
   const ttb = formatHours(entry.game.ttbMain);
   return (
-    <Pressable style={styles.row} onPress={onPress}>
-      <View style={styles.cover}>
-        {cover && (
-          <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        )}
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.title} numberOfLines={2}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
+    >
+      <Cover src={resolveImage(entry.game.coverSrc)} width={48} height={64} />
+      <View style={styles.rowBody}>
+        <Text style={type.bodyStrong} numberOfLines={2}>
           {entry.game.title}
         </Text>
         <View style={styles.metaRow}>
-          <View style={[styles.badge, { backgroundColor: status.bg }]}>
-            <Text style={[styles.badgeText, { color: status.text }]} numberOfLines={1}>
-              {status.label}
-            </Text>
-          </View>
+          <Badge label={status.label} bg={status.bg} fg={status.text} />
           {entry.rating != null && (prefs?.showRating ?? true) && (
-            <Text style={styles.rating}>★ {entry.rating}</Text>
+            <View style={styles.metaItem}>
+              <Icon name="star" size={12} color={colors.star} />
+              <Text style={[type.caption, { color: colors.star }]}>{entry.rating}</Text>
+            </View>
           )}
-          {ttb && <Text style={styles.ttb}>⏱ {ttb}</Text>}
+          {ttb && (
+            <View style={styles.metaItem}>
+              <Icon name="time-outline" size={12} color={colors.textMuted} />
+              <Text style={type.caption}>{ttb}</Text>
+            </View>
+          )}
         </View>
         {entry.platforms.length > 0 && (
-          <Text style={styles.platforms} numberOfLines={1}>
+          <Text style={[type.micro, { marginTop: 3 }]} numberOfLines={1}>
             {entry.platforms.map((p) => p.abbreviation ?? p.name).join(" · ")}
           </Text>
         )}
       </View>
-      <Text style={styles.chevron}>›</Text>
+      <Chevron />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#101014" },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingTop: 10,
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingTop: space.sm,
   },
+  searchWrap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.md,
+    paddingLeft: space.md,
+  },
+  // the wrapper draws the border, so the input inside it is bare
   search: {
     flex: 1,
-    backgroundColor: "#27272a",
-    borderWidth: 1,
-    borderColor: "#3f3f46",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    color: "#fafafa",
-    fontSize: 15,
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    paddingRight: space.md,
   },
   sortBtn: {
-    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    minHeight: 42,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    backgroundColor: "#18181b",
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+    paddingHorizontal: space.md,
   },
-  sortText: { color: "#c7d2fe", fontSize: 13, fontWeight: "600" },
-  consoleLink: { paddingHorizontal: 12, paddingTop: 10 },
-  consoleLinkText: { color: "#818cf8", fontSize: 12, fontWeight: "600" },
-  chipBar: { flexGrow: 0, marginTop: 8 },
-  chipBarContent: { paddingHorizontal: 12, gap: 8, alignItems: "center" },
-  barLabel: { color: "#52525b", fontSize: 11, fontWeight: "700", textTransform: "uppercase" },
-  chip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#3f3f46",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+  consoleLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: space.md,
+    paddingTop: space.md,
   },
-  chipText: { color: "#a1a1aa", fontSize: 13, fontWeight: "500" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#101014" },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    backgroundColor: "#18181b",
-    borderRadius: 12,
+    gap: space.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 10,
-    marginBottom: 8,
+    borderColor: colors.border,
+    padding: space.sm + 2,
+    marginBottom: space.sm,
   },
-  cover: {
-    width: 48,
-    height: 64,
-    borderRadius: 6,
-    backgroundColor: "#27272a",
-    overflow: "hidden",
-  },
-  title: { color: "#fafafa", fontSize: 15, fontWeight: "600" },
-  metaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 4 },
-  badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, maxWidth: 140 },
-  badgeText: { fontSize: 11, fontWeight: "600" },
-  rating: { color: "#fbbf24", fontSize: 12 },
-  ttb: { color: "#a1a1aa", fontSize: 12 },
-  platforms: { color: "#71717a", fontSize: 11, marginTop: 3 },
-  chevron: { color: "#52525b", fontSize: 24, paddingLeft: 4 },
-  empty: { alignItems: "center", marginTop: 64, paddingHorizontal: 24 },
-  emptyTitle: { color: "#fafafa", fontSize: 16, fontWeight: "600", textAlign: "center" },
-  emptyText: { color: "#71717a", fontSize: 13, marginTop: 4, textAlign: "center" },
+  rowBody: { flex: 1, minWidth: 0 },
+  metaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: space.sm, marginTop: 5 },
+  metaItem: { flexDirection: "row", alignItems: "center", gap: 3 },
   fab: {
     position: "absolute",
-    right: 20,
+    right: space.xl,
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#4f46e5",
+    backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
     elevation: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
   },
-  fabText: { color: "#fff", fontSize: 28, lineHeight: 32 },
 });

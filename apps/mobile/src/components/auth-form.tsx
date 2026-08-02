@@ -2,12 +2,14 @@ import type { ReactNode } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
+import { colors, radius, space, type } from "@/lib/theme";
+import { Button, Icon } from "@/components/ui";
 
 export function AuthScreen({ subtitle, children }: { subtitle: string; children: ReactNode }) {
   return (
@@ -15,11 +17,20 @@ export function AuthScreen({ subtitle, children }: { subtitle: string; children:
       style={styles.screen}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={styles.card}>
-        <Text style={styles.title}>🎮 Game Manager</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
-        {children}
-      </View>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.card}>
+          <View style={styles.logo}>
+            <Icon name="game-controller" size={26} color={colors.accentText} />
+          </View>
+          <Text style={[type.title, styles.center]}>Game Manager</Text>
+          <Text style={[type.caption, styles.center, styles.subtitle]}>{subtitle}</Text>
+          {children}
+        </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -34,16 +45,16 @@ export function AuthInput(props: {
 }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.label}>{props.label}</Text>
+      <Text style={[type.label, { color: colors.textMuted }]}>{props.label}</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, type.body]}
         value={props.value}
         onChangeText={props.onChangeText}
         secureTextEntry={props.secureTextEntry}
         keyboardType={props.keyboardType ?? "default"}
         autoComplete={props.autoComplete}
         autoCapitalize="none"
-        placeholderTextColor="#71717a"
+        placeholderTextColor={colors.textFaint}
       />
     </View>
   );
@@ -58,76 +69,58 @@ export function AuthButton({
   onPress: () => void;
   busy: boolean;
 }) {
-  return (
-    <TouchableOpacity style={[styles.button, busy && styles.buttonBusy]} onPress={onPress} disabled={busy}>
-      <Text style={styles.buttonText}>{busy ? "…" : label}</Text>
-    </TouchableOpacity>
-  );
+  return <Button label={label} fill busy={busy} onPress={onPress} style={{ marginTop: space.sm }} />;
 }
 
 export function AuthError({ message }: { message: string | null }) {
   if (!message) return null;
-  return <Text style={styles.error}>{message}</Text>;
+  return (
+    <View style={styles.error}>
+      <Icon name="alert-circle" size={16} color="#fca5a5" />
+      <Text style={[type.caption, { flex: 1, color: "#fca5a5" }]}>{message}</Text>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    justifyContent: "center",
-    padding: 16,
-    backgroundColor: "#101014",
-  },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flexGrow: 1, justifyContent: "center", padding: space.lg },
   card: {
-    backgroundColor: "#18181b",
-    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
     borderWidth: 1,
-    borderColor: "#27272a",
-    padding: 24,
+    borderColor: colors.border,
+    padding: space.xxl,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: "700",
-    textAlign: "center",
-    color: "#fafafa",
+  logo: {
+    alignSelf: "center",
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: space.md,
   },
-  subtitle: {
-    fontSize: 14,
-    textAlign: "center",
-    color: "#a1a1aa",
-    marginTop: 4,
-    marginBottom: 20,
-  },
-  field: { marginBottom: 14 },
-  label: { color: "#d4d4d8", fontSize: 13, fontWeight: "500", marginBottom: 6 },
+  center: { textAlign: "center" },
+  subtitle: { marginTop: space.xs, marginBottom: space.xl },
+  field: { marginBottom: space.md, gap: 6 },
   input: {
-    backgroundColor: "#27272a",
+    backgroundColor: colors.surfaceAlt,
     borderWidth: 1,
-    borderColor: "#3f3f46",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: "#fafafa",
-    fontSize: 16,
-  },
-  button: {
-    backgroundColor: "#4f46e5",
-    borderRadius: 10,
-    paddingVertical: 12,
-    marginTop: 8,
-  },
-  buttonBusy: { opacity: 0.5 },
-  buttonText: {
-    color: "#ffffff",
-    textAlign: "center",
-    fontWeight: "600",
-    fontSize: 16,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.md,
+    paddingHorizontal: space.md,
+    paddingVertical: 11,
+    color: colors.text,
   },
   error: {
-    color: "#fca5a5",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: space.sm,
     backgroundColor: "#450a0a",
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 12,
-    fontSize: 13,
+    borderRadius: radius.sm,
+    padding: space.md,
+    marginBottom: space.md,
   },
 });

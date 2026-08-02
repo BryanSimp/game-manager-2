@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { registerSchema } from "@gm/shared";
 import { authClient } from "@/lib/auth";
 import { AuthButton, AuthError, AuthInput, AuthScreen } from "@/components/auth-form";
+import { colors, space, type } from "@/lib/theme";
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -49,18 +50,14 @@ export default function RegisterScreen() {
         autoComplete="new-password"
       />
       <AuthButton label="Create account" onPress={onSubmit} busy={busy} />
-      <TouchableOpacity onPress={() => router.push("/login")}>
-        <Text style={styles.link}>Already have an account? Sign in</Text>
+      <TouchableOpacity onPress={() => router.push("/login")} style={styles.linkRow}>
+        <Text style={[type.label, styles.link]}>Already have an account? Sign in</Text>
       </TouchableOpacity>
     </AuthScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  link: {
-    color: "#818cf8",
-    textAlign: "center",
-    marginTop: 16,
-    fontSize: 14,
-  },
+  linkRow: { minHeight: 40, justifyContent: "center", marginTop: space.sm },
+  link: { color: colors.accentBorder, textAlign: "center" },
 });
