@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GAME_STATUSES, type ChecklistSummary, type UpdateEntryInput } from "@gm/shared";
 import { api } from "@/lib/api";
@@ -21,6 +22,7 @@ const RATINGS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 export default function GameDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
 
   const entry = useQuery({ queryKey: ["entry", id], queryFn: () => api.getEntry(id) });
@@ -69,7 +71,10 @@ export default function GameDetailScreen() {
   const ttbMain = formatHours(e.game.ttbMain);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={{ padding: 16, paddingBottom: 40 + insets.bottom }}
+    >
       <View style={styles.header}>
         <View style={styles.cover}>
           {cover && <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />}

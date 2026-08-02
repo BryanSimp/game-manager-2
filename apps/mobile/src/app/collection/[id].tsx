@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CollectionNode } from "@gm/shared";
 import { api } from "@/lib/api";
@@ -52,6 +53,7 @@ function orderNodes(detail: { games: CollectionNode[]; links: { fromGameId: stri
 
 export default function CollectionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [picking, setPicking] = useState(false);
   const badgeOpacity = useBadgeOpacity();
@@ -98,7 +100,7 @@ export default function CollectionDetailScreen() {
       <FlatList
         data={ordered}
         keyExtractor={(g) => g.gameId}
-        contentContainerStyle={{ padding: 12, paddingBottom: 96 }}
+        contentContainerStyle={{ padding: 12, paddingBottom: 96 + insets.bottom }}
         ListHeaderComponent={
           <View style={{ marginBottom: 8 }}>
             {detail.description ? <Text style={styles.desc}>{detail.description}</Text> : null}
@@ -154,7 +156,7 @@ export default function CollectionDetailScreen() {
       />
 
       {picking && (
-        <View style={styles.pickerSheet}>
+        <View style={[styles.pickerSheet, { paddingBottom: 16 + insets.bottom }]}>
           <View style={styles.pickerHeader}>
             <Text style={styles.pickerTitle}>Add from library</Text>
             <TouchableOpacity onPress={() => setPicking(false)} hitSlop={8}>
@@ -190,7 +192,7 @@ export default function CollectionDetailScreen() {
 
       {!picking && (
         <TouchableOpacity
-          style={[styles.fab, { backgroundColor: accent }]}
+          style={[styles.fab, { backgroundColor: accent, bottom: 24 + insets.bottom }]}
           onPress={() => setPicking(true)}
         >
           <Text style={styles.fabText}>＋</Text>
@@ -239,7 +241,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 16,
-    paddingBottom: 28,
     borderTopWidth: 1,
     borderColor: "#27272a",
   },
@@ -264,7 +265,6 @@ const styles = StyleSheet.create({
   fab: {
     position: "absolute",
     right: 20,
-    bottom: 28,
     width: 56,
     height: 56,
     borderRadius: 28,

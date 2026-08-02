@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SearchResult } from "@gm/shared";
 import { api } from "@/lib/api";
@@ -17,6 +18,7 @@ import { resolveImage } from "@/lib/ui";
 
 export default function AddGameScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
@@ -58,7 +60,7 @@ export default function AddGameScreen() {
         autoCapitalize="none"
       />
       <TouchableOpacity style={styles.scanBtn} onPress={() => router.replace("/scan")}>
-        <Text style={styles.scanText}>🏷️  Scan a barcode instead</Text>
+        <Text style={styles.scanText}>🏷️  Scan barcodes instead</Text>
       </TouchableOpacity>
       {search.isLoading && <ActivityIndicator style={{ marginTop: 24 }} />}
       {search.data && !search.data.igdb && (
@@ -69,7 +71,8 @@ export default function AddGameScreen() {
       <FlatList
         data={search.data?.results ?? []}
         keyExtractor={(item) => String(item.igdbId ?? item.gameId ?? item.title)}
-        contentContainerStyle={{ padding: 12 }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ padding: 12, paddingBottom: 24 + insets.bottom }}
         renderItem={({ item }) => {
           const isAdded = item.inLibrary || added.has(item.title);
           const cover = resolveImage(item.coverSrc);
@@ -81,7 +84,7 @@ export default function AddGameScreen() {
                 )}
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.title} numberOfLines={1}>
+                <Text style={styles.title} numberOfLines={2}>
                   {item.title} {item.releaseYear ? `(${item.releaseYear})` : ""}
                 </Text>
                 <Text style={styles.platforms} numberOfLines={1}>

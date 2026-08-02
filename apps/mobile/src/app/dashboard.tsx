@@ -1,10 +1,12 @@
 import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { GAME_STATUSES } from "@gm/shared";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, STATUS_COLORS } from "@/lib/ui";
 
 export default function DashboardScreen() {
+  const insets = useSafeAreaInsets();
   const dashboard = useQuery({ queryKey: ["dashboard"], queryFn: () => api.getDashboard() });
 
   if (dashboard.isLoading || !dashboard.data) {
@@ -19,19 +21,28 @@ export default function DashboardScreen() {
   const backlogHours = formatHours(d.backlogSeconds);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={{ padding: 16, paddingBottom: 32 + insets.bottom }}
+    >
       <View style={styles.tileRow}>
         <View style={styles.tile}>
-          <Text style={styles.tileValue}>{d.total}</Text>
+          <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
+            {d.total}
+          </Text>
           <Text style={styles.tileLabel}>games</Text>
         </View>
         <View style={styles.tile}>
-          <Text style={styles.tileValue}>{backlogHours ?? "—"}</Text>
+          <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
+            {backlogHours ?? "—"}
+          </Text>
           <Text style={styles.tileLabel}>backlog time</Text>
         </View>
       </View>
 
-      <View style={styles.tileRow}>
+      {/* seven categories at a fifth of the width each clipped "Uncategorized"
+          to "Uncateg…" — three per row, and the label shrinks rather than cuts */}
+      <View style={styles.statusGrid}>
         {GAME_STATUSES.map((s) => {
           const meta = STATUS_COLORS[s];
           return (
@@ -39,7 +50,14 @@ export default function DashboardScreen() {
               <Text style={[styles.statusValue, { color: meta.text }]}>
                 {d.statusCounts[s] ?? 0}
               </Text>
-              <Text style={[styles.statusLabel, { color: meta.text }]}>{meta.label}</Text>
+              <Text
+                style={[styles.statusLabel, { color: meta.text }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+              >
+                {meta.label}
+              </Text>
             </View>
           );
         })}
@@ -50,7 +68,9 @@ export default function DashboardScreen() {
           <Text style={styles.section}>By platform</Text>
           {d.platformCounts.map((p) => (
             <View key={p.name} style={styles.platformRow}>
-              <Text style={styles.platformName}>{p.abbreviation ?? p.name}</Text>
+              <Text style={styles.platformName} numberOfLines={1}>
+                {p.abbreviation ?? p.name}
+              </Text>
               <View style={styles.barTrack}>
                 <View
                   style={[
@@ -119,15 +139,17 @@ const styles = StyleSheet.create({
   },
   tileValue: { color: "#fafafa", fontSize: 24, fontWeight: "800" },
   tileLabel: { color: "#71717a", fontSize: 12, marginTop: 2 },
+  statusGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
   statusTile: {
     flexGrow: 1,
-    flexBasis: "17%",
+    flexBasis: "28%",
     borderRadius: 12,
     paddingVertical: 10,
+    paddingHorizontal: 6,
     alignItems: "center",
   },
   statusValue: { fontSize: 17, fontWeight: "800" },
-  statusLabel: { fontSize: 10, fontWeight: "600", marginTop: 1 },
+  statusLabel: { fontSize: 11, fontWeight: "600", marginTop: 1, textAlign: "center" },
   section: { color: "#d4d4d8", fontSize: 14, fontWeight: "600", marginTop: 20, marginBottom: 10 },
   platformRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
   platformName: { color: "#a1a1aa", fontSize: 12, width: 72 },

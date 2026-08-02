@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BUILTIN_CATEGORIES, GAME_STATUSES, type GameStatus, type ImportCandidate, type ImportItem } from "@gm/shared";
@@ -40,6 +41,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function ImportScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [jobId, setJobId] = useState<string | null>(null);
   const [stage, setStage] = useState<"input" | "processing" | "review">("input");
@@ -164,83 +166,98 @@ export default function ImportScreen() {
         <FlatList
           data={items}
           keyExtractor={(it) => it.id}
-          contentContainerStyle={{ padding: 12, paddingBottom: 100 }}
+          // the footer floats over the list, so leave room for all of it
+          contentContainerStyle={{ padding: 12, paddingBottom: 190 + insets.bottom }}
           renderItem={({ item }) => (
+            // the match, its category chip and the skip button used to share a
+            // single row and clipped each other — controls get their own line
             <View style={[styles.row, item.skipped && { opacity: 0.4 }]}>
-              <View
-                style={[
-                  styles.dot,
-                  {
-                    backgroundColor: !item.selected
-                      ? "#fbbf24"
-                      : (item.confidence ?? 1) >= 0.8
-                        ? "#34d399"
-                        : (item.confidence ?? 1) >= 0.55
-                          ? "#fbbf24"
-                          : "#f87171",
-                  },
-                ]}
-              />
-              <View style={styles.cover}>
-                {item.selected?.coverSrc && (
-                  <Image
-                    source={{
-                      uri: item.selected.coverSrc.startsWith("http")
-                        ? item.selected.coverSrc
-                        : undefined,
-                    }}
-                    style={StyleSheet.absoluteFill}
-                    resizeMode="cover"
-                  />
-                )}
+              <View style={styles.rowTop}>
+                <View
+                  style={[
+                    styles.dot,
+                    {
+                      backgroundColor: !item.selected
+                        ? "#fbbf24"
+                        : (item.confidence ?? 1) >= 0.8
+                          ? "#34d399"
+                          : (item.confidence ?? 1) >= 0.55
+                            ? "#fbbf24"
+                            : "#f87171",
+                    },
+                  ]}
+                />
+                <View style={styles.cover}>
+                  {item.selected?.coverSrc?.startsWith("http") && (
+                    <Image
+                      source={{ uri: item.selected.coverSrc }}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode="cover"
+                    />
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={{ flex: 1, minWidth: 0 }}
+                  onPress={() => pickCandidate(item)}
+                >
+                  <Text style={styles.raw} numberOfLines={1}>
+                    {item.raw}
+                  </Text>
+                  <Text style={styles.matched} numberOfLines={2}>
+                    {item.selected
+                      ? `→ ${item.selected.title}${item.selected.releaseYear ? ` (${item.selected.releaseYear})` : ""}`
+                      : `→ "${item.cleaned}" (manual)`}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.skipBtn}
+                  accessibilityLabel={item.skipped ? "Include this game" : "Skip this game"}
+                  onPress={() =>
+                    setItems((prev) =>
+                      prev.map((it) => (it.id === item.id ? { ...it, skipped: !it.skipped } : it)),
+                    )
+                  }
+                >
+                  <Text style={styles.skipText}>{item.skipped ? "＋" : "✕"}</Text>
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity style={{ flex: 1, minWidth: 0 }} onPress={() => pickCandidate(item)}>
-                <Text style={styles.raw} numberOfLines={1}>
-                  {item.raw}
-                </Text>
-                <Text style={styles.matched} numberOfLines={1}>
-                  {item.selected
-                    ? `→ ${item.selected.title}${item.selected.releaseYear ? ` (${item.selected.releaseYear})` : ""}`
-                    : `→ "${item.cleaned}" (manual)`}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.statusChip, { borderColor: `${STATUS_CHIP[item.status].color}66` }]}
-                onPress={() =>
-                  // tap cycles wishlist → backlog → playing → finished → dropped
-                  setItems((prev) =>
-                    prev.map((it) =>
-                      it.id === item.id
-                        ? {
-                            ...it,
-                            status:
-                              GAME_STATUSES[
-                                (GAME_STATUSES.indexOf(it.status) + 1) % GAME_STATUSES.length
-                              ]!,
-                          }
-                        : it,
-                    ),
-                  )
-                }
-              >
-                <Text style={[styles.statusChipText, { color: STATUS_CHIP[item.status].color }]}>
-                  {STATUS_CHIP[item.status].label}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.skipBtn}
-                onPress={() =>
-                  setItems((prev) =>
-                    prev.map((it) => (it.id === item.id ? { ...it, skipped: !it.skipped } : it)),
-                  )
-                }
-              >
-                <Text style={styles.skipText}>{item.skipped ? "＋" : "✕"}</Text>
-              </TouchableOpacity>
+              <View style={styles.rowBottom}>
+                <TouchableOpacity style={styles.changeBtn} onPress={() => pickCandidate(item)}>
+                  <Text style={styles.changeText}>Change match</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.statusChip,
+                    { borderColor: `${STATUS_CHIP[item.status]!.color}66` },
+                  ]}
+                  onPress={() =>
+                    // tap cycles through the built-in categories
+                    setItems((prev) =>
+                      prev.map((it) =>
+                        it.id === item.id
+                          ? {
+                              ...it,
+                              status:
+                                GAME_STATUSES[
+                                  (GAME_STATUSES.indexOf(it.status) + 1) % GAME_STATUSES.length
+                                ]!,
+                            }
+                          : it,
+                      ),
+                    )
+                  }
+                >
+                  <Text
+                    style={[styles.statusChipText, { color: STATUS_CHIP[item.status]!.color }]}
+                  >
+                    {STATUS_CHIP[item.status]!.label}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         />
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: 12 + insets.bottom }]}>
           <Text style={styles.footerLabel}>Mark all as owned on:</Text>
           <ScrollView
             horizontal
@@ -264,6 +281,9 @@ export default function ImportScreen() {
                   onPress={() => setOwnPlatformId(active2 ? null : p.id)}
                 >
                   <Text style={[styles.platChipText, active2 && styles.platChipTextActive]}>
+                    {/* storefronts share short names with nothing, but "Steam"
+                        next to "PC" reads better as "PC · Steam" */}
+                    {p.parentName ? `${p.parentName} · ` : ""}
                     {p.abbreviation ?? p.name}
                   </Text>
                 </TouchableOpacity>
@@ -374,9 +394,6 @@ const styles = StyleSheet.create({
   },
   actionText: { color: "#fff", fontWeight: "600", fontSize: 15 },
   row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
     backgroundColor: "#18181b",
     borderRadius: 12,
     borderWidth: 1,
@@ -384,20 +401,38 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 8,
   },
+  rowTop: { flexDirection: "row", alignItems: "center", gap: 10 },
+  rowBottom: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+    // line the controls up with the title rather than the confidence dot
+    paddingLeft: 56,
+  },
   dot: { width: 10, height: 10, borderRadius: 5 },
   cover: { width: 36, height: 48, borderRadius: 4, backgroundColor: "#27272a", overflow: "hidden" },
   raw: { color: "#71717a", fontSize: 11 },
   matched: { color: "#fafafa", fontSize: 14, fontWeight: "500", marginTop: 2 },
+  changeBtn: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#3f3f46",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  changeText: { color: "#a1a1aa", fontSize: 11, fontWeight: "600" },
   statusChip: {
     borderRadius: 999,
     borderWidth: 1,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
   },
   statusChipText: { fontSize: 11, fontWeight: "600" },
   skipBtn: {
-    width: 30,
-    height: 30,
+    width: 32,
+    height: 32,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "#3f3f46",
@@ -410,9 +445,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    padding: 16,
+    paddingHorizontal: 16,
     paddingTop: 8,
-    backgroundColor: "#101014ee",
+    borderTopWidth: 1,
+    borderTopColor: "#27272a",
+    backgroundColor: "#101014f5",
   },
   footerLabel: { color: "#a1a1aa", fontSize: 12, fontWeight: "600" },
   platChip: {

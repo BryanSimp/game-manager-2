@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
@@ -19,6 +20,7 @@ const TAG_COLORS = [
 ];
 
 export default function TagsScreen() {
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [color, setColor] = useState<string>(TAG_COLORS[6]!);
@@ -73,7 +75,7 @@ export default function TagsScreen() {
       <FlatList
         data={tags.data ?? []}
         keyExtractor={(t) => t.id}
-        contentContainerStyle={{ padding: 12 }}
+        contentContainerStyle={{ padding: 12, paddingBottom: 24 + insets.bottom }}
         ListEmptyComponent={
           tags.isLoading ? (
             <ActivityIndicator style={{ marginTop: 48 }} />
