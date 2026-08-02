@@ -100,9 +100,9 @@ export default function RootLayout() {
               // one way in, top left: the account hub already lists consoles,
               // friends, scanning and import, so a second row of header icons
               // was duplicating it
-              headerLeft: () => (
-                <HeaderIcon href="/account" name="person-circle-outline" label="Account" />
-              ),
+              // a hamburger rather than an avatar: this opens the menu of
+              // everything else, not a profile page
+              headerLeft: () => <HeaderIcon href="/account" name="menu" label="Menu" />,
             }}
           />
           <Stack.Screen name="add" options={{ title: "Add game" }} />

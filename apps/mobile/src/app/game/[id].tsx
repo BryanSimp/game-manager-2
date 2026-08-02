@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Pressable,
@@ -11,22 +12,41 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as ImagePicker from "expo-image-picker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GAME_STATUSES, type ChecklistSummary, type UpdateEntryInput } from "@gm/shared";
+import {
+  GAME_STATUSES,
+  type ChecklistSummary,
+  type LibraryEntry,
+  type UpdateEntryInput,
+} from "@gm/shared";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, STATUS_COLORS } from "@/lib/ui";
 import { colors, radius, space, type } from "@/lib/theme";
 import {
   Button,
-  Cover,
   Icon,
   Loading,
   ProgressBar,
   Screen,
   SectionTitle,
+  Sheet,
+  SheetSection,
+  StarRating,
 } from "@/components/ui";
 
-const RATINGS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
+/** seconds → the hours string the play-time editor shows, e.g. 5400 → "1.5" */
+function toHours(seconds: number | null): string {
+  if (!seconds) return "";
+  return String(Math.round((seconds / 3600) * 10) / 10);
+}
+
+/** "" clears the figure; anything unparseable counts as cleared too. */
+function toSeconds(hours: string): number | null {
+  const value = Number(hours.trim());
+  if (!hours.trim() || Number.isNaN(value) || value <= 0) return null;
+  return Math.round(value * 3600);
+}
 
 export default function GameDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -39,6 +59,7 @@ export default function GameDetailScreen() {
 
   const [notes, setNotes] = useState("");
   const [notesDirty, setNotesDirty] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   useEffect(() => {
     if (entry.data && !notesDirty) setNotes(entry.data.notes ?? "");
   }, [entry.data, notesDirty]);
@@ -77,13 +98,22 @@ export default function GameDetailScreen() {
     <Screen>
       <ScrollView contentContainerStyle={{ padding: space.lg, paddingBottom: space.xl + insets.bottom }}>
         <View style={styles.header}>
-          <View style={styles.cover}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Change cover art"
+            style={styles.cover}
+            onPress={() => setCoverOpen(true)}
+          >
             {cover ? (
               <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />
             ) : (
               <Icon name="game-controller-outline" size={28} color={colors.textGhost} />
             )}
-          </View>
+            <View style={styles.coverEdit}>
+              <Icon name="image-outline" size={13} color={colors.text} />
+              <Text style={[type.micro, { color: colors.text }]}>Cover</Text>
+            </View>
+          </Pressable>
           <View style={{ flex: 1, minWidth: 0, gap: space.xs }}>
             <Text style={type.title}>{e.game.title}</Text>
             {e.game.releaseDate && (
@@ -137,22 +167,11 @@ export default function GameDetailScreen() {
         </View>
 
         <SectionTitle>Rating</SectionTitle>
-        <View style={styles.chips}>
-          {RATINGS.map((r) => {
-            const active = e.rating === r;
-            return (
-              <Pressable
-                key={r}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                style={[styles.ratingChip, active && styles.ratingActive]}
-                onPress={() => update.mutate({ rating: active ? null : r })}
-              >
-                <Icon name="star" size={12} color={active ? colors.star : colors.textGhost} />
-                <Text style={[type.caption, active && { color: colors.star }]}>{r}</Text>
-              </Pressable>
-            );
-          })}
+        <View style={styles.ratingRow}>
+          <StarRating value={e.rating} onChange={(rating) => update.mutate({ rating })} />
+          {e.rating != null && (
+            <Text style={[type.caption, { color: colors.star }]}>{e.rating.toFixed(1)}</Text>
+          )}
         </View>
 
         {(allTags.data?.length ?? 0) > 0 && (
@@ -216,6 +235,7 @@ export default function GameDetailScreen() {
           />
         )}
 
+        <TimeToBeatSection entry={e} />
         <ProgressSection entryId={id} gameId={e.game.id} />
         <AchievementsSection entryId={id} />
         <ChecklistsSection gameId={e.game.id} />
@@ -234,7 +254,269 @@ export default function GameDetailScreen() {
           }
         />
       </ScrollView>
+
+      <CoverSheet
+        entryId={id}
+        gameTitle={e.game.title}
+        hasCustomCover={e.hasCustomCover}
+        visible={coverOpen}
+        onClose={() => setCoverOpen(false)}
+      />
     </Screen>
+  );
+}
+
+/**
+ * How long to beat, editable. IGDB doesn't have times for everything and isn't
+ * always right; the figures belong to the game rather than to your copy of it,
+ * so saving writes the shared catalog row (see the API route).
+ */
+function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [main, setMain] = useState("");
+  const [extra, setExtra] = useState("");
+  const [full, setFull] = useState("");
+
+  const g = entry.game;
+  const hasAny = g.ttbMain != null || g.ttbMainExtra != null || g.ttbCompletionist != null;
+
+  function startEditing() {
+    setMain(toHours(g.ttbMain));
+    setExtra(toHours(g.ttbMainExtra));
+    setFull(toHours(g.ttbCompletionist));
+    setEditing(true);
+  }
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveTimeToBeat(entry.id, {
+        ttbMain: toSeconds(main),
+        ttbMainExtra: toSeconds(extra),
+        ttbCompletionist: toSeconds(full),
+      }),
+    onSuccess: () => {
+      setEditing(false);
+      queryClient.invalidateQueries({ queryKey: ["entry", entry.id] });
+      queryClient.invalidateQueries({ queryKey: ["library"] });
+      queryClient.invalidateQueries({ queryKey: ["progress"] });
+    },
+  });
+
+  if (!hasAny && !editing) {
+    return (
+      <>
+        <SectionTitle>Play time</SectionTitle>
+        <View style={styles.ttbCard}>
+          <Text style={type.caption}>IGDB has no play time for this game.</Text>
+          <Button
+            label="Add play time"
+            icon="add"
+            tone="ghost"
+            fill
+            style={{ marginTop: space.md }}
+            onPress={startEditing}
+          />
+        </View>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SectionTitle>Play time</SectionTitle>
+      <View style={styles.ttbCard}>
+        {editing ? (
+          <>
+            <HoursField label="Main story" value={main} onChange={setMain} />
+            <HoursField label="Main + extras" value={extra} onChange={setExtra} />
+            <HoursField label="Completionist" value={full} onChange={setFull} />
+            <Text style={[type.micro, { marginTop: space.sm }]}>
+              Hours. Leave a field empty to clear it — these are shared, so the correction applies
+              wherever the game appears.
+            </Text>
+            {save.isError && (
+              <Text style={[type.caption, { color: colors.danger, marginTop: space.xs }]}>
+                {save.error instanceof Error ? save.error.message : "Couldn't save"}
+              </Text>
+            )}
+            <View style={styles.ttbButtons}>
+              <Button
+                label="Save"
+                icon="checkmark"
+                fill
+                busy={save.isPending}
+                onPress={() => save.mutate()}
+              />
+              <Button label="Cancel" tone="ghost" onPress={() => setEditing(false)} />
+            </View>
+          </>
+        ) : (
+          <>
+            <TtbRow label="Main story" value={formatHours(g.ttbMain)} />
+            <TtbRow label="Main + extras" value={formatHours(g.ttbMainExtra)} />
+            <TtbRow label="Completionist" value={formatHours(g.ttbCompletionist)} />
+            <View style={styles.ttbFooter}>
+              <Text style={type.micro}>
+                {g.ttbSource === "manual" ? "Set by hand" : "From IGDB"}
+              </Text>
+              <Button
+                label="Edit"
+                icon="create-outline"
+                tone="ghost"
+                onPress={startEditing}
+                style={styles.ttbEditBtn}
+              />
+            </View>
+          </>
+        )}
+      </View>
+    </>
+  );
+}
+
+function TtbRow({ label, value }: { label: string; value: string | null }) {
+  if (!value) return null;
+  return (
+    <View style={styles.ttbRow}>
+      <Text style={type.caption}>{label}</Text>
+      <Text style={type.bodyStrong}>{value}</Text>
+    </View>
+  );
+}
+
+function HoursField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <View style={styles.ttbRow}>
+      <Text style={type.caption}>{label}</Text>
+      <View style={styles.hoursWrap}>
+        <TextInput
+          style={[styles.hoursInput, type.body]}
+          value={value}
+          onChangeText={onChange}
+          keyboardType="decimal-pad"
+          placeholder="—"
+          placeholderTextColor={colors.textFaint}
+          textAlign="right"
+        />
+        <Text style={type.caption}>h</Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Cover art: browse SteamGridDB, or upload your own. Both already existed on
+ * the web app and in the shared API client — mobile just had no way in.
+ */
+function CoverSheet({
+  entryId,
+  gameTitle,
+  hasCustomCover,
+  visible,
+  onClose,
+}: {
+  entryId: string;
+  gameTitle: string;
+  hasCustomCover: boolean;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const options = useQuery({
+    queryKey: ["cover-options", entryId],
+    queryFn: () => api.getCoverOptions(entryId),
+    enabled: visible,
+  });
+
+  const done = () => {
+    queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
+    queryClient.invalidateQueries({ queryKey: ["library"] });
+    onClose();
+  };
+
+  const pickFromUrl = useMutation({
+    mutationFn: (url: string) => api.setCoverFromUrl(entryId, url),
+    onSuccess: done,
+  });
+  const removeCover = useMutation({ mutationFn: () => api.removeCover(entryId), onSuccess: done });
+  const upload = useMutation({
+    mutationFn: async () => {
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.9,
+      });
+      if (picked.canceled || !picked.assets[0]) return null;
+      const asset = picked.assets[0];
+      const blob = await (await fetch(asset.uri)).blob();
+      return api.uploadCover(entryId, blob, asset.fileName ?? "cover.jpg");
+    },
+    onSuccess: (res) => {
+      if (res) done();
+    },
+  });
+
+  const busy = pickFromUrl.isPending || upload.isPending || removeCover.isPending;
+
+  return (
+    <Sheet visible={visible} title="Cover art" onClose={onClose}>
+      <Button
+        label="Upload from my photos"
+        icon="cloud-upload-outline"
+        fill
+        busy={upload.isPending}
+        onPress={() => upload.mutate()}
+      />
+      {hasCustomCover && (
+        <Button
+          label="Reset to the original"
+          icon="refresh-outline"
+          tone="ghost"
+          fill
+          style={{ marginTop: space.sm }}
+          busy={removeCover.isPending}
+          onPress={() => removeCover.mutate()}
+        />
+      )}
+
+      <SheetSection label="Browse SteamGridDB" />
+      {options.isLoading && <ActivityIndicator color={colors.accentBorder} />}
+      {options.data && !options.data.configured && (
+        <Text style={type.caption}>
+          No SteamGridDB key configured — an admin can add one in web Settings.
+        </Text>
+      )}
+      {options.data?.configured && options.data.covers.length === 0 && (
+        <Text style={type.caption}>No covers found for “{gameTitle}”.</Text>
+      )}
+      <View style={styles.coverGrid}>
+        {(options.data?.covers ?? []).map((c) => (
+          <Pressable
+            key={c.id}
+            accessibilityRole="button"
+            accessibilityLabel="Use this cover"
+            disabled={busy}
+            style={({ pressed }) => [styles.coverOption, pressed && { opacity: 0.6 }]}
+            onPress={() => pickFromUrl.mutate(c.url)}
+          >
+            <Image source={{ uri: c.thumbUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          </Pressable>
+        ))}
+      </View>
+      {(pickFromUrl.isError || upload.isError) && (
+        <Text style={[type.caption, { color: colors.danger, marginTop: space.sm }]}>
+          Couldn't set that cover.
+        </Text>
+      )}
+    </Sheet>
   );
 }
 
@@ -487,17 +769,63 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong,
     paddingHorizontal: space.md,
   },
-  ratingChip: {
+  ratingRow: { flexDirection: "row", alignItems: "center", gap: space.md },
+  coverEdit: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
-    minHeight: 34,
-    borderRadius: radius.sm,
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 4,
+    backgroundColor: "rgba(9,9,11,0.78)",
+  },
+  ttbCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: space.md,
+  },
+  ttbRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space.md,
+    minHeight: 36,
+  },
+  ttbFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: space.sm,
+    paddingTop: space.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  ttbEditBtn: { minHeight: 36, paddingHorizontal: space.md },
+  ttbButtons: { flexDirection: "row", gap: space.sm, marginTop: space.md },
+  hoursWrap: { flexDirection: "row", alignItems: "center", gap: 5 },
+  hoursInput: {
+    width: 74,
+    backgroundColor: colors.surfaceAlt,
     borderWidth: 1,
     borderColor: colors.borderStrong,
-    paddingHorizontal: space.sm + 2,
+    borderRadius: radius.sm,
+    paddingHorizontal: space.sm,
+    paddingVertical: 6,
+    color: colors.text,
   },
-  ratingActive: { backgroundColor: "#451a03", borderColor: colors.star },
+  coverGrid: { flexDirection: "row", flexWrap: "wrap", gap: space.sm, marginTop: space.sm },
+  coverOption: {
+    width: 84,
+    height: 112,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceAlt,
+    overflow: "hidden",
+  },
   notes: {
     backgroundColor: colors.surfaceAlt,
     borderWidth: 1,

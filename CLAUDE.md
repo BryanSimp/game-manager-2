@@ -172,6 +172,8 @@ was dev-only). Never use `db push`.
 
 | 12b design system + barcode titles | see git log | **`lib/theme.ts` + `components/ui.tsx`**: colour/space/radius tokens and a type scale where every entry has a `lineHeight`, plus shared `Screen`/`Card`/`Chip`/`Badge`/`Button`/`Field`/`EmptyState`/`Cover`/`ProgressBar`. Fourteen screens stopped hand-rolling StyleSheets, which is what had been clipping descenders and emoji. **Emoji chrome became Ionicons** (`@expo/vector-icons`, pinned 15.1.1) — a glyph centres in its box and takes a colour. **Barcode titles**: `services/product-title.ts` strips SKUs/editions/platform from a retail listing and offers publisher-dropped `variants` that only win if IGDB scores them higher; `check:titles` covers 18 cases |
 
+| 13 sharing + corrections | see git log | **Collections publish/adopt** (migration 0015): `is_public` + `adopted_from_id`, `GET /api/collections/public`, `POST /:id/adopt` deep-copying games and links, star badge on both apps, Yours/Public tabs. Adding a game is now a **search** (library first, IGDB underneath) and accepts `igdbId`, so a collection can list games you don't own. **Manual play times** (`PUT /api/library/:id/time-to-beat`) with an "Add play time" affordance when IGDB has none. Mobile caught up on three things web had: a **half-star rating** widget, **cover browsing/upload**, and **console art browsing/upload**. Header button became a hamburger |
+
 **Next: Phase 6 (skipped for now, still open)** — email verification/password reset
 (better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
 filters, admin panel (users, password resets, registration toggle, settings).
@@ -191,6 +193,27 @@ file to be provided for reference).
 - Barcode scan flow verified end-to-end at the API level (real BOTW/GoW barcodes) but
   the camera screen itself needs an on-device Expo Go run — simulators have no camera.
 - Play-order graph *editing* is web-only; mobile flattens the graph to an ordered list.
+- **Collections publish and adopt like checklists do** (migration 0015:
+  `collections.is_public`, `adopted_from_id`). Adopting takes a **deep copy** —
+  games, node positions and play-order links — not a live reference: your edits
+  mustn't reach the original, and the author rearranging their order mustn't
+  rearrange a marathon you're halfway through. A copy starts private (
+  publishing someone else's list is their call) and gets `(2)`, `(3)`… appended
+  if the name is taken, since `(user_id, name)` is unique. `adopted_from_id` is
+  `on delete set null`, so provenance survives the source being deleted.
+- **A collection can list games you don't own.** `POST /api/collections/:id/games`
+  takes `igdbId` as well as `gameId` and pulls the game into the shared catalog
+  via `upsertGameFromIgdb` — deliberately *without* adding it to your library,
+  because "the Zelda games in order" is a reading list, not an inventory.
+  `CollectionNode.userGameId` is null for those, which is what the UI uses to
+  say "not in library".
+- **Manual play times** (`PUT /api/library/:id/time-to-beat`) write the
+  **shared `games` row**, not a per-user override: how long a game takes is a
+  fact about the game. Values are seconds, `normalizeTtb` enforces
+  main ≤ main+extras ≤ completionist so a typo can't invert the columns, and
+  clearing every figure resets `ttb_source` to null rather than pinning an
+  empty manual override. Nothing overwrites a manual figure today —
+  `upsertGameFromIgdb` returns early for a game already in the catalog.
 - UPCitemdb trial tier is ~100 lookups/day per IP (results cached in-process); a paid
   key or alternate provider is the upgrade path if scanning whole shelves.
 - **Retail listings are not game titles** (`services/product-title.ts`):
@@ -251,7 +274,9 @@ file to be provided for reference).
 - Migration 0013's Steam backfill only moves games it can *prove* came from
   Steam (they carry a `steam_app_id`). Anything else you filed under plain PC
   stays there — a bulk platform edit in the library's select mode is the fix.
-- Console art is web-only to change; mobile shows whatever you uploaded.
+- Console art and game covers are browsable and uploadable on **both** apps now
+  (mobile uses `expo-image-picker` for the upload and the same
+  `getConsoleArt`/`getCoverOptions` endpoints for browsing).
 - **Cover browsing** (`services/steamgriddb.ts`) needs a free SteamGridDB key in
   admin Settings (`steamgriddb_api_key`, DB-first with `STEAMGRIDDB_API_KEY`
   fallback). No key = `configured:false` and the browser hides itself rather

@@ -315,6 +315,65 @@ export function Chevron() {
 }
 
 /**
+ * Half-star rating, 0.5–5.0 — the same interaction as the web app's
+ * `StarRating`: tap the left half of a star for the half value, the right half
+ * for the whole, and tap the current value again to clear it. Ten chips
+ * labelled "0.5★ 1★ 1.5★…" said the same thing in far more space and didn't
+ * look like a rating.
+ */
+export function StarRating({
+  value,
+  onChange,
+  size = 30,
+}: {
+  value: number | null;
+  onChange?: (value: number | null) => void;
+  size?: number;
+}) {
+  const pick = (v: number) => onChange?.(v === value ? null : v);
+
+  return (
+    <View style={styles.stars} accessibilityRole={onChange ? "radiogroup" : undefined}>
+      {[1, 2, 3, 4, 5].map((star) => {
+        const filled = value != null && value >= star;
+        const half = value != null && !filled && value >= star - 0.5;
+        return (
+          <View key={star} style={{ width: size, height: size }}>
+            <Icon
+              name={filled ? "star" : half ? "star-half" : "star-outline"}
+              size={size}
+              color={filled || half ? colors.star : colors.borderStrong}
+            />
+            {onChange && (
+              // two invisible halves over each star; the glyph underneath is
+              // what's actually drawn
+              <View style={StyleSheet.absoluteFill}>
+                <View style={styles.starHalves}>
+                  <Pressable
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: value === star - 0.5 }}
+                    accessibilityLabel={`${star - 0.5} stars`}
+                    style={styles.starHalf}
+                    onPress={() => pick(star - 0.5)}
+                  />
+                  <Pressable
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: value === star }}
+                    accessibilityLabel={`${star} stars`}
+                    style={styles.starHalf}
+                    onPress={() => pick(star)}
+                  />
+                </View>
+              </View>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
  * A bottom sheet. Filters and sort live in here rather than in rows of chips:
  * seven categories plus a console per platform made a scrolling bar that was
  * too cramped to read, and a chip row can only ever show what fits.
@@ -546,6 +605,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   fill: { height: 6, borderRadius: 3 },
+  stars: { flexDirection: "row", gap: 6 },
+  starHalves: { flex: 1, flexDirection: "row" },
+  starHalf: { flex: 1 },
   scrim: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
   sheet: {
     backgroundColor: colors.surface,

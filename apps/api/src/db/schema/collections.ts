@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   pgTable,
   primaryKey,
@@ -7,11 +8,21 @@ import {
   timestamp,
   unique,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth.js";
 import { games } from "./catalog.js";
 
-/** User-defined groupings (franchises, marathons) with a visual play-order graph. */
+/**
+ * User-defined groupings (franchises, marathons) with a visual play-order graph.
+ *
+ * Publishing and adopting follow the checklist rules exactly: `is_public` puts
+ * a collection in everyone's browse list, and adopting takes a **private
+ * copy** — games, links and all — rather than a live reference. Editing your
+ * copy can't touch the original, and the original changing can't rearrange
+ * your marathon halfway through it. `adopted_from_id` is provenance only,
+ * which is why it survives the source being deleted (`set null`).
+ */
 export const collections = pgTable(
   "collections",
   {
@@ -22,9 +33,15 @@ export const collections = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     accentColor: text("accent_color"),
+    /** listed for everyone to browse and adopt */
+    isPublic: boolean("is_public").notNull().default(false),
+    /** the public collection this was copied from, if any */
+    adoptedFromId: uuid("adopted_from_id").references((): AnyPgColumn => collections.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique().on(t.userId, t.name)],
+  (t) => [unique().on(t.userId, t.name), index("collections_public_idx").on(t.isPublic)],
 );
 
 /** Games in a collection; x/y are node positions on the play-order graph. */

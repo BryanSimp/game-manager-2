@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BUILTIN_CATEGORIES, type CollectionLink, type CollectionNode } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
+import { AddCollectionGame } from "../components/AddCollectionGame.js";
 
 const NODE_W = 92;
 const NODE_H = 122;
@@ -22,7 +23,6 @@ export function CollectionDetailPage() {
   const queryClient = useQueryClient();
 
   const collection = useQuery({ queryKey: ["collection", id], queryFn: () => api.getCollection(id) });
-  const library = useQuery({ queryKey: ["library"], queryFn: () => api.getLibrary() });
 
   const [nodes, setNodes] = useState<LocalNode[]>([]);
   const [links, setLinks] = useState<CollectionLink[]>([]);
@@ -56,11 +56,12 @@ export function CollectionDetailPage() {
     },
   });
 
-  const addGame = useMutation({
-    mutationFn: (gameId: string) => api.addCollectionGame(id, gameId),
+  const setPublic = useMutation({
+    mutationFn: (isPublic: boolean) => api.updateCollection(id, { isPublic }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["collection", id] });
       queryClient.invalidateQueries({ queryKey: ["collections"] });
+      queryClient.invalidateQueries({ queryKey: ["public-collections"] });
     },
   });
 
@@ -164,7 +165,6 @@ export function CollectionDetailPage() {
   }
 
   const inCollection = new Set(nodes.map((n) => n.gameId));
-  const addable = (library.data ?? []).filter((e) => !inCollection.has(e.game.id));
   const nodeById = new Map(nodes.map((n) => [n.gameId, n]));
   const canvasW = Math.max(1000, ...nodes.map((n) => n.x + NODE_W + 60));
   const canvasH = Math.max(560, ...nodes.map((n) => n.y + NODE_H + 60));
@@ -172,24 +172,39 @@ export function CollectionDetailPage() {
   return (
     <Shell>
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <h1 className="mr-auto text-xl font-bold">{collection.data.name}</h1>
-        <select
-          onChange={(e) => {
-            if (e.target.value) addGame.mutate(e.target.value);
-            e.target.value = "";
-          }}
-          defaultValue=""
-          className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+        <h1 className="mr-auto flex items-center gap-2 text-xl font-bold">
+          {collection.data.isPublic && (
+            <span className="text-amber-400" title="Published — anyone can browse and copy this">
+              ★
+            </span>
+          )}
+          {collection.data.name}
+          {collection.data.adoptedFromId && (
+            <span
+              className="rounded-full border border-zinc-700 px-2 py-0.5 text-xs font-normal text-zinc-500"
+              title="Your own copy — edits here don't affect the original"
+            >
+              copied
+            </span>
+          )}
+        </h1>
+        <AddCollectionGame collectionId={id} excludeGameIds={inCollection} />
+        <button
+          onClick={() => setPublic.mutate(!collection.data!.isPublic)}
+          disabled={setPublic.isPending}
+          title={
+            collection.data.isPublic
+              ? "Unpublish — existing copies people made stay theirs"
+              : "Publish so anyone can browse and copy it"
+          }
+          className={`rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+            collection.data.isPublic
+              ? "border-amber-500/60 bg-amber-500/10 text-amber-300"
+              : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+          }`}
         >
-          <option value="" disabled>
-            ＋ Add game from library…
-          </option>
-          {addable.map((e) => (
-            <option key={e.game.id} value={e.game.id}>
-              {e.game.title}
-            </option>
-          ))}
-        </select>
+          {collection.data.isPublic ? "★ Published" : "☆ Publish"}
+        </button>
         <button
           onClick={() => {
             setConnectMode(!connectMode);
@@ -222,8 +237,8 @@ export function CollectionDetailPage() {
         <div className="rounded-2xl border border-dashed border-zinc-700 p-12 text-center">
           <p className="mb-2 text-lg font-semibold">No games yet</p>
           <p className="text-sm text-zinc-400">
-            Add games from your library above, drag them into an order, then use "Connect play
-            order" to draw the path.
+            Use "Add game" above — your library, or anything on IGDB you don't own yet — then drag
+            them into an order and use "Connect play order" to draw the path.
           </p>
         </div>
       ) : (

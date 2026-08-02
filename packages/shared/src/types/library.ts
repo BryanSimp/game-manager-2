@@ -135,6 +135,17 @@ export interface AddGameInput {
    */
   platforms?: Array<{ platformId: string; format: OwnershipFormat }>;
 }
+/**
+ * Manual how-long-to-beat figures, in **seconds**, matching the columns they
+ * land in. `games` is the shared catalog, so this corrects the figure for
+ * everyone — that's the point of `ttbSource: 'manual'`, which stops a later
+ * IGDB refresh putting the wrong number back. A null clears that figure.
+ */
+export interface TimeToBeatInput {
+  ttbMain?: number | null;
+  ttbMainExtra?: number | null;
+  ttbCompletionist?: number | null;
+}
 export interface UpdateEntryInput {
   status?: string;
   rating?: number | null;
@@ -228,6 +239,29 @@ export interface CollectionSummary {
   accentColor: string | null;
   total: number;
   finished: number;
+  /** listed for everyone to browse and adopt */
+  isPublic: boolean;
+  /** set when this is your copy of someone else's public collection */
+  adoptedFromId: string | null;
+  /** a few covers for the card, in play order */
+  preview: Array<{ gameId: string; title: string; coverSrc: string | null }>;
+}
+/**
+ * A public collection as it appears in the browse list. Deliberately narrower
+ * than your own: no per-game status, because that's the author's business.
+ */
+export interface PublicCollection {
+  id: string;
+  name: string;
+  description: string | null;
+  accentColor: string | null;
+  authorName: string;
+  total: number;
+  /** true when you've already taken a copy */
+  adopted: boolean;
+  /** true when it's yours */
+  mine: boolean;
+  preview: Array<{ gameId: string; title: string; coverSrc: string | null }>;
 }
 export interface CollectionNode {
   gameId: string;
@@ -249,8 +283,19 @@ export interface CollectionDetail {
   name: string;
   description: string | null;
   accentColor: string | null;
+  isPublic: boolean;
+  adoptedFromId: string | null;
   games: CollectionNode[];
   links: CollectionLink[];
+}
+/**
+ * Adding a game to a collection. `gameId` for something already in the
+ * catalog, `igdbId` to pull one in — a collection can list games you don't
+ * own, so this deliberately doesn't touch your library.
+ */
+export interface AddCollectionGameInput {
+  gameId?: string;
+  igdbId?: number;
 }
 export interface CollectionLayoutInput {
   nodes: Array<{ gameId: string; x: number; y: number }>;

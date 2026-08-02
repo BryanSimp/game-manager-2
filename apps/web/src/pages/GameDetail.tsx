@@ -6,6 +6,7 @@ import {
   PLATFORM_FAMILIES,
   PROGRESS_BASIS_LABELS,
   type GameStatus,
+  type LibraryEntry,
   type OwnershipFormat,
   type UpdateEntryInput,
 } from "@gm/shared";
@@ -203,33 +204,7 @@ export function GameDetailPage() {
             )}
           </div>
 
-          {(e.game.ttbMain || e.game.ttbCompletionist) && (
-            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-sm">
-              <p className="mb-2 font-semibold text-zinc-300">How long to beat</p>
-              <Ttb label="Main story" value={formatHours(e.game.ttbMain)} />
-              <Ttb label="Main + extras" value={formatHours(e.game.ttbMainExtra)} />
-              <Ttb label="Completionist" value={formatHours(e.game.ttbCompletionist)} />
-              {e.estimatedRemainingSeconds !== null && (
-                <div className="mt-2 flex justify-between border-t border-zinc-800 pt-2">
-                  <span className="text-indigo-300">Estimated left</span>
-                  <span
-                    className="font-semibold text-indigo-300"
-                    title={`${e.missionsDone}/${e.missionsTotal} missions done · based on ${PROGRESS_BASIS_LABELS[e.progressBasis].toLowerCase()}`}
-                  >
-                    {formatHours(e.estimatedRemainingSeconds) ?? "0h"}
-                  </span>
-                </div>
-              )}
-              <label className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
-                <input
-                  type="checkbox"
-                  checked={!e.ttbEnabled}
-                  onChange={() => update.mutate({ ttbEnabled: !e.ttbEnabled })}
-                />
-                Endless game (exclude from backlog time)
-              </label>
-            </div>
-          )}
+          <TimeToBeatCard entry={e} onToggleEndless={() => update.mutate({ ttbEnabled: !e.ttbEnabled })} />
         </div>
 
         <div className="min-w-0">
@@ -509,5 +484,183 @@ function Ttb({ label, value }: { label: string; value: string | null }) {
       <span>{label}</span>
       <span className="font-medium text-zinc-200">{value}</span>
     </div>
+  );
+}
+
+/** seconds → the hours string the editor shows, e.g. 5400 → "1.5" */
+function toHours(seconds: number | null): string {
+  if (!seconds) return "";
+  return String(Math.round((seconds / 3600) * 10) / 10);
+}
+
+/** "" clears the figure; anything unparseable is treated as cleared too. */
+function toSeconds(hours: string): number | null {
+  const value = Number(hours.trim());
+  if (!hours.trim() || Number.isNaN(value) || value <= 0) return null;
+  return Math.round(value * 3600);
+}
+
+/**
+ * How long to beat, with a manual override.
+ *
+ * IGDB doesn't have times for everything and isn't always right, so the three
+ * figures are editable. They're a property of the *game*, not of your copy of
+ * it, so saving writes the shared catalog row and stamps it `manual`.
+ */
+function TimeToBeatCard({
+  entry,
+  onToggleEndless,
+}: {
+  entry: LibraryEntry;
+  onToggleEndless: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [main, setMain] = useState("");
+  const [extra, setExtra] = useState("");
+  const [full, setFull] = useState("");
+
+  const g = entry.game;
+  const hasAny = g.ttbMain != null || g.ttbMainExtra != null || g.ttbCompletionist != null;
+
+  function startEditing() {
+    setMain(toHours(g.ttbMain));
+    setExtra(toHours(g.ttbMainExtra));
+    setFull(toHours(g.ttbCompletionist));
+    setEditing(true);
+  }
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveTimeToBeat(entry.id, {
+        ttbMain: toSeconds(main),
+        ttbMainExtra: toSeconds(extra),
+        ttbCompletionist: toSeconds(full),
+      }),
+    onSuccess: () => {
+      setEditing(false);
+      queryClient.invalidateQueries({ queryKey: ["entry", entry.id] });
+      queryClient.invalidateQueries({ queryKey: ["library"] });
+      queryClient.invalidateQueries({ queryKey: ["progress"] });
+    },
+  });
+
+  if (!hasAny && !editing) {
+    return (
+      <div className="mt-4 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/50 p-4 text-sm">
+        <p className="font-semibold text-zinc-300">How long to beat</p>
+        <p className="mt-1 text-xs text-zinc-500">
+          IGDB has no play time for this game.
+        </p>
+        <button
+          onClick={startEditing}
+          className="mt-3 rounded-lg border border-indigo-500/50 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-600/20"
+        >
+          + Add play time
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-sm">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="font-semibold text-zinc-300">How long to beat</p>
+        {!editing && (
+          <button
+            onClick={startEditing}
+            className="text-xs text-zinc-500 hover:text-indigo-300"
+            title={g.ttbSource === "manual" ? "Set by hand" : "From IGDB"}
+          >
+            {g.ttbSource === "manual" ? "Edit ✎" : "Edit"}
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <form
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            save.mutate();
+          }}
+        >
+          <HoursField label="Main story" value={main} onChange={setMain} />
+          <HoursField label="Main + extras" value={extra} onChange={setExtra} />
+          <HoursField label="Completionist" value={full} onChange={setFull} />
+          <p className="mt-2 text-xs text-zinc-500">
+            Hours. Leave a field empty to clear it — these are shared, so the correction applies
+            wherever the game appears.
+          </p>
+          {save.isError && (
+            <p className="mt-2 text-xs text-red-400">
+              {save.error instanceof Error ? save.error.message : "Couldn't save"}
+            </p>
+          )}
+          <div className="mt-3 flex gap-2">
+            <button
+              type="submit"
+              disabled={save.isPending}
+              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <>
+          <Ttb label="Main story" value={formatHours(g.ttbMain)} />
+          <Ttb label="Main + extras" value={formatHours(g.ttbMainExtra)} />
+          <Ttb label="Completionist" value={formatHours(g.ttbCompletionist)} />
+          {entry.estimatedRemainingSeconds !== null && (
+            <div className="mt-2 flex justify-between border-t border-zinc-800 pt-2">
+              <span className="text-indigo-300">Estimated left</span>
+              <span
+                className="font-semibold text-indigo-300"
+                title={`${entry.missionsDone}/${entry.missionsTotal} missions done · based on ${PROGRESS_BASIS_LABELS[entry.progressBasis].toLowerCase()}`}
+              >
+                {formatHours(entry.estimatedRemainingSeconds) ?? "0h"}
+              </span>
+            </div>
+          )}
+          <label className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
+            <input type="checkbox" checked={!entry.ttbEnabled} onChange={onToggleEndless} />
+            Endless game (exclude from backlog time)
+          </label>
+        </>
+      )}
+    </div>
+  );
+}
+
+function HoursField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="mt-2 flex items-center justify-between gap-3">
+      <span className="text-zinc-400">{label}</span>
+      <span className="flex items-center gap-1">
+        <input
+          value={value}
+          onChange={(ev) => onChange(ev.target.value)}
+          inputMode="decimal"
+          placeholder="—"
+          className="w-20 rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1 text-right text-sm outline-none focus:border-indigo-500"
+        />
+        <span className="text-xs text-zinc-500">h</span>
+      </span>
+    </label>
   );
 }
