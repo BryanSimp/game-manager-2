@@ -335,6 +335,23 @@ file to be provided for reference).
   glyph centres predictably in its box and takes a colour; emoji did neither,
   and no line height reliably contained them. The dependency ships with the
   Expo SDK — it's pinned to 15.1.1 to stay in step with SDK 54.
+- **Don't wrap a styled `Pressable` in `<Link asChild>`.** The link clones its
+  child and wins the `style` prop, so sizing silently doesn't apply — that's
+  how the header's account button ended up a 24pt box jammed against the screen
+  edge instead of a centred 40pt square. `_layout.tsx` pushes the route with
+  `useRouter()` instead.
+- **The library filters by sheet, not by chips.** Seven categories plus one
+  entry per console is more than a phone row holds, and two scrolling chip bars
+  read as cramped. `Sheet`/`SheetButton`/`OptionRow` (`components/ui.tsx`) give
+  one "All games" button and one sort button; the sheet lists everything with
+  counts and 44pt rows. Empty categories *are* listed there — the sheet has the
+  room the chip bar didn't, and it shows the category exists. Two active
+  filters collapse the button label to "2 filters" because naming both
+  overflows it.
+- The library screen is the **only** one with a header button: it's the account
+  hub, top left, and that hub already links to consoles, friends, collections,
+  tags, scanning and import. A second cluster of header icons on the right was
+  duplicating it.
 - Running the mobile app under `expo start --web` renders and is useful for
   measuring type metrics, but **React Query's persisted cache doesn't rehydrate
   there**, so data-backed screens sit empty. Auth works (better-auth's expo
