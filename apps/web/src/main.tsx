@@ -25,6 +25,8 @@ import { PreferencesPage } from "./pages/Preferences.js";
 import { DashboardPage } from "./pages/Dashboard.js";
 import { LoginPage } from "./pages/Login.js";
 import { RegisterPage } from "./pages/Register.js";
+import { ForgotPasswordPage } from "./pages/ForgotPassword.js";
+import { ResetPasswordPage } from "./pages/ResetPassword.js";
 import { PrivacyPolicyPage } from "./pages/PrivacyPolicy.js";
 import { TermsOfServicePage } from "./pages/TermsOfService.js";
 import "./styles.css";
@@ -60,6 +62,15 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/dashboard", component: DashboardPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/login", component: LoginPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/register", component: RegisterPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/forgot-password", component: ForgotPasswordPage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/reset-password",
+    component: ResetPasswordPage,
+    validateSearch: (search: Record<string, unknown>) => ({
+      token: typeof search.token === "string" ? search.token : "",
+    }),
+  }),
   // public — readable before signing up, so no Shell/auth around them
   createRoute({ getParentRoute: () => rootRoute, path: "/privacy", component: PrivacyPolicyPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/terms", component: TermsOfServicePage }),

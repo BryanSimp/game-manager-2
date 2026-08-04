@@ -24,6 +24,13 @@ const envSchema = z.object({
         .filter(Boolean),
     ),
   IMAGE_DIR: z.string().default("./data/images"),
+  // Password-reset email delivery (DB settings take precedence — see services/email.ts)
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+  // Public origin of the web app, used to build reset links. Defaults to the
+  // first CORS origin (the web app in dev), then BETTER_AUTH_URL (prod is
+  // same-origin behind Traefik, so that's already the site).
+  APP_URL: z.string().url().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -122,6 +122,22 @@ export class ApiClient {
     return this.request<User>("/api/me");
   }
 
+  // ---- password recovery (anonymous) ----
+
+  requestPasswordReset(email: string): Promise<{ ok: true; message: string }> {
+    return this.request("/api/auth/request-reset", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  resetPassword(token: string, password: string): Promise<{ ok: true }> {
+    return this.request("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    });
+  }
+
   // ---- catalog / search ----
 
   searchGames(q: string, options: SearchOptions = {}): Promise<SearchResponse> {
@@ -535,6 +551,17 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify({ apiKey }),
     });
+  }
+
+  saveEmailSettings(apiKey: string, from?: string): Promise<{ ok: true }> {
+    return this.request("/api/admin/settings/email", {
+      method: "PUT",
+      body: JSON.stringify({ apiKey, from }),
+    });
+  }
+
+  testEmail(): Promise<{ ok: true }> {
+    return this.request("/api/admin/settings/email/test", { method: "POST" });
   }
 
   // ---- categories ----

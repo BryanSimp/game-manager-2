@@ -49,6 +49,11 @@ export function LoginPage() {
           Create one
         </Link>
       </p>
+      <p className="mt-2 text-center text-sm text-zinc-400">
+        <Link to="/forgot-password" className="font-medium text-indigo-400 hover:text-indigo-300">
+          Forgot your password?
+        </Link>
+      </p>
     </AuthCard>
   );
 }

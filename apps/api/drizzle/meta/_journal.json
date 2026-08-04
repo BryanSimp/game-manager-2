@@ -134,6 +134,13 @@
       "when": 1785807285378,
       "tag": "0018_superb_omega_red",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785808981652,
+      "tag": "0019_sticky_xorn",
+      "breakpoints": true
     }
   ]
 }
