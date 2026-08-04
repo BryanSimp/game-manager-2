@@ -13,6 +13,9 @@ export type AnalyticsEventType =
   | "game_added"
   | "collection_created"
   | "activity"
+  // a write rejected by services/content-filter.ts — worth watching, both to
+  // catch abuse and to notice the filter rejecting things it shouldn't
+  | "content_blocked"
   | "scrape";
 
 /**

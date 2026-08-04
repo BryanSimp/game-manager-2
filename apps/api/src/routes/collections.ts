@@ -8,6 +8,7 @@ import { upsertGameFromIgdb } from "../services/catalog.js";
 import { logEvent } from "../services/analytics.js";
 import { isValidCategory } from "../services/categories.js";
 import { rememberConsoles } from "../services/consoles.js";
+import { inspectAll } from "../services/content-filter.js";
 
 const collectionSchema = z.object({
   name: z.string().min(1).max(100),
@@ -43,6 +44,14 @@ const layoutSchema = z.object({
     )
     .max(400),
 });
+
+/** Postgres unique-violation, however deeply drizzle has wrapped it. */
+function isUniqueViolation(err: unknown): boolean {
+  for (let e = err; e instanceof Error; e = (e as { cause?: unknown }).cause) {
+    if ((e as { code?: string }).code === "23505") return true;
+  }
+  return false;
+}
 
 async function ownedCollection(userId: string, id: string) {
   const [row] = await db
@@ -283,6 +292,11 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     if (!parsed.success) {
       return reply.status(400).send({ message: parsed.error.issues[0]?.message });
     }
+    const issue = inspectAll([parsed.data.name, parsed.data.description]);
+    if (issue) {
+      logEvent("content_blocked", user.id, { surface: "collection", kind: issue.kind });
+      return reply.status(400).send({ message: issue.message });
+    }
     const [created] = await db
       .insert(schema.collections)
       .values({
@@ -308,11 +322,39 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     if (!parsed.success) {
       return reply.status(400).send({ message: parsed.error.issues[0]?.message });
     }
-    const updated = await db
-      .update(schema.collections)
-      .set(parsed.data)
-      .where(and(eq(schema.collections.id, request.params.id), eq(schema.collections.userId, user.id)))
-      .returning();
+    const existing = await ownedCollection(user.id, request.params.id);
+    if (!existing) return reply.status(404).send({ message: "Collection not found" });
+
+    // Publishing re-checks the whole collection, not just the fields in this
+    // request: a collection written before the filter existed would otherwise
+    // walk straight into the public list on an isPublic-only PATCH.
+    const toCheck =
+      parsed.data.isPublic === true
+        ? [parsed.data.name ?? existing.name, parsed.data.description ?? existing.description]
+        : [parsed.data.name, parsed.data.description];
+    const issue = inspectAll(toCheck);
+    if (issue) {
+      logEvent("content_blocked", user.id, { surface: "collection", kind: issue.kind });
+      return reply.status(400).send({ message: issue.message });
+    }
+
+    let updated;
+    try {
+      updated = await db
+        .update(schema.collections)
+        .set(parsed.data)
+        .where(
+          and(eq(schema.collections.id, request.params.id), eq(schema.collections.userId, user.id)),
+        )
+        .returning();
+    } catch (err) {
+      // (user_id, name) is unique, so renaming onto a name you already use is
+      // a 409 like it is on create — not the raw 500 it used to be
+      if (isUniqueViolation(err)) {
+        return reply.status(409).send({ message: "You already have a collection with that name" });
+      }
+      throw err;
+    }
     if (updated.length === 0) return reply.status(404).send({ message: "Collection not found" });
     return updated[0];
   });

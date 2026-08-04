@@ -1,9 +1,11 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { CHECKLIST_KINDS } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser, type SessionUser } from "../plugins/auth.js";
+import { logEvent } from "../services/analytics.js";
+import { inspectAll } from "../services/content-filter.js";
 
 const titleSchema = z.object({
   title: z.string().min(1).max(200),
@@ -45,6 +47,24 @@ async function getTemplate(id: string) {
 /** Author sees their own; everyone sees public. */
 function canView(tpl: { authorUserId: string; isPublic: boolean }, user: SessionUser) {
   return tpl.authorUserId === user.id || tpl.isPublic;
+}
+
+/**
+ * Reject text that shouldn't be shared, and say which rule it hit.
+ *
+ * Returns true when the reply has been sent, so callers read as
+ * `if (await rejectBadContent(...)) return;`.
+ */
+async function rejectBadContent(
+  reply: FastifyReply,
+  userId: string,
+  texts: Array<string | null | undefined>,
+): Promise<boolean> {
+  const issue = inspectAll(texts);
+  if (!issue) return false;
+  logEvent("content_blocked", userId, { surface: "checklist", kind: issue.kind });
+  await reply.status(400).send({ message: issue.message });
+  return true;
 }
 
 async function summarize(
@@ -131,6 +151,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       if (!user) return;
       const parsed = titleSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ message: "Title is required" });
+      if (await rejectBadContent(reply, user.id, [parsed.data.title])) return;
       const [game] = await db
         .select({ id: schema.games.id })
         .from(schema.games)
@@ -174,6 +195,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       if (missions.length === 0) {
         return reply.status(400).send({ message: "At least one mission is required" });
       }
+      if (await rejectBadContent(reply, user.id, [parsed.data.title, ...missions])) return;
 
       const [tpl] = await db
         .insert(schema.checklistTemplates)
@@ -249,6 +271,22 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     }
     const parsed = patchSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ message: "Invalid input" });
+
+    // Publishing re-checks every entry, not just the fields in this request.
+    // A list written before the filter existed, or built one item at a time
+    // by an older client, would otherwise reach the public list on an
+    // isPublic-only PATCH.
+    if (parsed.data.isPublic === true) {
+      const items = await db
+        .select({ text: schema.checklistItems.text, category: schema.checklistItems.category })
+        .from(schema.checklistItems)
+        .where(eq(schema.checklistItems.templateId, tpl.id));
+      const texts = [parsed.data.title ?? tpl.title, ...items.flatMap((i) => [i.text, i.category])];
+      if (await rejectBadContent(reply, user.id, texts)) return;
+    } else if (await rejectBadContent(reply, user.id, [parsed.data.title])) {
+      return;
+    }
+
     await db
       .update(schema.checklistTemplates)
       .set({
@@ -326,6 +364,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     }
     const parsed = itemSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ message: "Item text is required" });
+    if (await rejectBadContent(reply, user.id, [parsed.data.text, parsed.data.category])) return;
     const [maxRow] = await db
       .select({ max: sql<number>`coalesce(max(${schema.checklistItems.position}), -1)::int` })
       .from(schema.checklistItems)
@@ -362,6 +401,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       }
       const parsed = itemPatchSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ message: "Invalid input" });
+      if (await rejectBadContent(reply, user.id, [parsed.data.text, parsed.data.category])) return;
       await db
         .update(schema.checklistItems)
         .set({
