@@ -3,6 +3,7 @@ import { Footer } from "../Footer.js";
 import { MarketingNav } from "./MarketingNav.js";
 import { AdRail } from "./AdRail.js";
 import { AdSlot } from "./AdSlot.js";
+import { AD_SLOTS } from "../../lib/adsense.js";
 
 /**
  * The 'classic web' chrome shared by every public page: sticky nav, a centred
@@ -27,16 +28,21 @@ export function MarketingLayout({
       <MarketingNav variant={variant} />
 
       <div className="mx-auto flex w-full max-w-[1600px] flex-1 gap-6 px-4 py-6">
-        <AdRail side="left" />
+        <AdRail side="left" slotId={AD_SLOTS.railLeft} />
 
         {/* min-w-0 so long words and wide children can't stretch the column
             and squeeze the rails */}
         <main className="min-w-0 flex-1">
           {children}
-          <AdSlot format="horizontal" minHeight={100} className="mt-10 xl:hidden" />
+          <AdSlot
+            slotId={AD_SLOTS.contentMobile}
+            format="horizontal"
+            minHeight={100}
+            className="mt-10 xl:hidden"
+          />
         </main>
 
-        <AdRail side="right" />
+        <AdRail side="right" slotId={AD_SLOTS.railRight} />
       </div>
 
       <Footer />

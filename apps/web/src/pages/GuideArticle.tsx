@@ -2,6 +2,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { MarketingLayout } from "../components/marketing/MarketingLayout.js";
 import { AdSlot } from "../components/marketing/AdSlot.js";
 import { GuideCard } from "../components/marketing/GuidesHub.js";
+import { AD_SLOTS } from "../lib/adsense.js";
 import { GUIDES, guideBySlug } from "../lib/guides.js";
 import { SITE_NAME, SITE_URL, useSeo } from "../lib/seo.js";
 
@@ -158,7 +159,14 @@ function GuideArticle() {
 
             {/* One in-article unit, roughly mid-page. AdSense wants ads inside
                 the content flow, not only in rails — but one, not three. */}
-            {index === 1 && <AdSlot format="rectangle" minHeight={280} className="mt-10" />}
+            {index === 1 && (
+              <AdSlot
+                slotId={AD_SLOTS.guideInArticle}
+                format="rectangle"
+                minHeight={280}
+                className="mt-10"
+              />
+            )}
           </section>
         ))}
 

@@ -6,9 +6,10 @@ export type AdSlotFormat = "vertical" | "horizontal" | "rectangle" | "auto";
 
 export interface AdSlotProps {
   /**
-   * AdSense `data-ad-slot` id for this placement. Left undefined until the
-   * units are created in the AdSense dashboard — the slot still reserves its
-   * space and renders the placeholder.
+   * AdSense `data-ad-slot` id for this placement, from the ad unit you create
+   * in the AdSense dashboard. Until one is set the slot renders its
+   * placeholder: a manual `<ins>` with no slot id never fills, and AdSense
+   * logs an error for it, so a half-configured unit is worse than none.
    */
   slotId?: string;
   format?: AdSlotFormat;
@@ -21,9 +22,9 @@ export interface AdSlotProps {
 /**
  * One ad placement on a public page.
  *
- * Renders a real AdSense `<ins>` when `VITE_ADSENSE_CLIENT` is configured, and
- * a labelled, correctly-sized placeholder when it isn't — so the layout you
- * review before approval is the layout that serves ads after it.
+ * Renders a real AdSense `<ins>` once the publisher id and this slot's id are
+ * both known, and a labelled, correctly-sized placeholder until then — so the
+ * layout you review before approval is the layout that serves ads after it.
  *
  * The premium rule here is the *inverse* of the in-app `AdBanner`, and
  * deliberately so. AdBanner hides whenever premium is unknown, because an
@@ -37,19 +38,20 @@ export function AdSlot({ slotId, format = "auto", minHeight = 250, className = "
   const insRef = useRef<HTMLModElement>(null);
   const pushed = useRef(false);
   const hidden = isPremium === true;
+  const canServe = adsenseEnabled() && !!slotId;
 
   useEffect(() => {
-    if (hidden || !adsenseEnabled() || pushed.current) return;
+    if (hidden || !canServe || pushed.current) return;
     // Guard against StrictMode's double-invoke: AdSense throws if the same
     // <ins> is pushed twice, and the second push would leave the slot blank.
     pushed.current = true;
     loadAdSenseScript();
     pushAdSlot();
-  }, [hidden]);
+  }, [hidden, canServe]);
 
   if (hidden) return null;
 
-  if (adsenseEnabled()) {
+  if (canServe) {
     return (
       <div className={className} aria-label="Advertisement" role="complementary">
         <ins
@@ -76,8 +78,7 @@ export function AdSlot({ slotId, format = "auto", minHeight = 250, className = "
         Advertisement
       </span>
       <p className="mt-2 text-xs text-zinc-600">
-        Reserved ad space
-        {slotId ? ` · slot ${slotId}` : ""}
+        {adsenseEnabled() ? "Reserved — awaiting an AdSense unit id" : "Reserved ad space"}
       </p>
     </div>
   );
