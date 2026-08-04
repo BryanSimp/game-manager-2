@@ -5,6 +5,7 @@ import {
   pgTable,
   primaryKey,
   real,
+  smallint,
   text,
   timestamp,
   unique,
@@ -68,7 +69,13 @@ export const collectionGames = pgTable(
     /** 1-based place in the flat list; ties fall back to title */
     sortOrder: integer("sort_order").notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.collectionId, t.gameId] })],
+  (t) => [
+    primaryKey({ columns: [t.collectionId, t.gameId] }),
+    // the PK indexes (collection, game) — "which collections contain this
+    // game" needs the other direction, and that's the whole browse-by-game
+    // feature
+    index("collection_games_game_idx").on(t.gameId),
+  ],
 );
 
 /** Directed edges of the play-order graph ("play this, then that"). */
@@ -88,4 +95,23 @@ export const collectionLinks = pgTable(
     label: text("label"),
   },
   (t) => [index("collection_links_collection_idx").on(t.collectionId)],
+);
+
+/** Thumbs up/down on a published collection. Mirrors `checklist_votes`. */
+export const collectionVotes = pgTable(
+  "collection_votes",
+  {
+    collectionId: uuid("collection_id")
+      .notNull()
+      .references(() => collections.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    value: smallint("value").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.collectionId, t.userId] }),
+    index("collection_votes_collection_idx").on(t.collectionId),
+  ],
 );

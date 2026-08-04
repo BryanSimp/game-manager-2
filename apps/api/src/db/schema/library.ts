@@ -48,6 +48,40 @@ export const userGames = pgTable(
   (t) => [
     unique().on(t.userId, t.gameId),
     index("user_games_user_status_idx").on(t.userId, t.status),
+    // the community average rating groups by game across every user, which
+    // the (user, game) unique index can't serve
+    index("user_games_game_idx").on(t.gameId),
+  ],
+);
+
+/**
+ * How long a game took *this* user, in seconds.
+ *
+ * Play times used to be written straight onto the shared `games` row, which
+ * meant one person's typo became everyone's number and there was nothing to
+ * average. They live per-user now: your figure drives your own estimate, and
+ * the average of everyone's fills in games IGDB has no data for. Legacy
+ * `games.ttb_source = 'manual'` values predate this and still win — see
+ * `resolveTtb` in @gm/shared for the precedence.
+ */
+export const userTimeToBeat = pgTable(
+  "user_time_to_beat",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    mainSeconds: integer("main_seconds"),
+    mainExtraSeconds: integer("main_extra_seconds"),
+    completionistSeconds: integer("completionist_seconds"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.gameId] }),
+    index("user_time_to_beat_game_idx").on(t.gameId),
   ],
 );
 
