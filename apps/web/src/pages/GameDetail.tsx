@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   GAME_STATUSES,
@@ -18,6 +18,7 @@ import { ProgressPanel } from "../components/ProgressPanel.js";
 import { AddConsoleControl, FAMILY_LABELS } from "../components/ConsolePicker.js";
 import { SteamMatchFixer } from "../components/SteamMatchFixer.js";
 import { CoverBrowser } from "../components/CoverBrowser.js";
+import { AddCollectionToLibrary } from "../components/AddCollectionToLibrary.js";
 import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 
@@ -416,6 +417,8 @@ export function GameDetailPage() {
             )}
           </div>
 
+          <InPublicCollections gameId={e.game.id} />
+
           </div>
 
           <div className="mt-10 border-t border-zinc-800 pt-4">
@@ -477,6 +480,52 @@ export function GameDetailPage() {
         </div>
       )}
     </Shell>
+  );
+}
+
+/**
+ * Public collections that feature this game.
+ *
+ * The reverse of browsing: you're already looking at a game, and someone has
+ * worked out what order to play it in relative to the rest of its series.
+ * Hidden entirely when nobody has, rather than showing an empty shelf.
+ */
+function InPublicCollections({ gameId }: { gameId: string }) {
+  const found = useQuery({
+    queryKey: ["public-collections", "game", gameId],
+    queryFn: () => api.getPublicCollections({ gameId, limit: 5 }),
+  });
+  const items = found.data?.items ?? [];
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mt-8">
+      <p className="mb-2 text-sm font-semibold text-zinc-300">In public collections</p>
+      <div className="space-y-1.5">
+        {items.map((c) => (
+          <div
+            key={c.id}
+            className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
+          >
+            <Link
+              to="/collection/$id"
+              params={{ id: c.id }}
+              className="min-w-0 flex-1 hover:text-indigo-300"
+            >
+              <span className="block truncate text-sm text-zinc-200">
+                <span className="mr-1.5 text-amber-400">★</span>
+                {c.name}
+              </span>
+              <span className="text-xs text-zinc-500">
+                by {c.mine ? "you" : c.authorName} · {c.total} games
+                {c.votes.score !== 0 ? ` · ${c.votes.score > 0 ? "+" : ""}${c.votes.score}` : ""}
+              </span>
+            </Link>
+            <AddCollectionToLibrary collectionId={c.id} total={c.total} />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

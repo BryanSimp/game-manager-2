@@ -53,10 +53,13 @@ export function CollectionList({
   collectionId,
   games,
   accent,
+  readOnly = false,
 }: {
   collectionId: string;
   games: CollectionNode[];
   accent: string;
+  /** someone else's published collection: browse and sort, but don't reorder */
+  readOnly?: boolean;
 }) {
   const queryClient = useQueryClient();
   const prefs = usePreferences();
@@ -115,7 +118,8 @@ export function CollectionList({
         ))}
 
         <div className="ml-auto flex gap-2">
-          {sort === "custom" &&
+          {!readOnly &&
+            sort === "custom" &&
             (editing ? (
               <>
                 <button

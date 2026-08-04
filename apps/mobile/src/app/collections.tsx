@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
@@ -49,11 +49,19 @@ export default function CollectionsScreen() {
   const [tab, setTab] = useState<Tab>("mine");
   const [name, setName] = useState("");
   const [addingAll, setAddingAll] = useState<PublicCollection | null>(null);
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+
+  // settle the text before it becomes a query key, so typing isn't a request each
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const collections = useQuery({ queryKey: ["collections"], queryFn: () => api.getCollections() });
   const publicOnes = useQuery({
-    queryKey: ["public-collections"],
-    queryFn: () => api.getPublicCollections(),
+    queryKey: ["public-collections", query],
+    queryFn: () => api.getPublicCollections({ q: query || undefined }),
     enabled: tab === "public",
   });
 
@@ -142,7 +150,7 @@ export default function CollectionsScreen() {
         </>
       ) : (
         <FlatList
-          data={publicOnes.data ?? []}
+          data={publicOnes.data?.items ?? []}
           keyExtractor={(c) => c.id}
           contentContainerStyle={{ padding: space.md, paddingBottom: space.xxl + insets.bottom }}
           refreshControl={
@@ -151,9 +159,24 @@ export default function CollectionsScreen() {
               onRefresh={() => publicOnes.refetch()}
             />
           }
+          ListHeaderComponent={
+            <Field
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search by collection or game"
+              autoCorrect={false}
+              style={{ marginBottom: space.md }}
+            />
+          }
           ListEmptyComponent={
             publicOnes.isLoading ? (
               <ActivityIndicator style={{ marginTop: 48 }} color={colors.accentBorder} />
+            ) : query ? (
+              <EmptyState
+                icon="search-outline"
+                title="Nothing matches that"
+                text="Try a game name — the search looks inside collections too."
+              />
             ) : (
               <EmptyState
                 icon="star-outline"

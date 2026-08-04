@@ -27,7 +27,17 @@ export function CollectionDetailPage() {
 
   const collection = useQuery({ queryKey: ["collection", id], queryFn: () => api.getCollection(id) });
 
-  const [view, setView] = useState<View>("graph");
+  // the list answers "what's 1, 2, 3", which is what people open a collection
+  // for; the graph answers "what branches into what" and is the specialist view
+  const [view, setView] = useState<View>("list");
+  /**
+   * The graph opens read-only.
+   *
+   * It used to be permanently editable, which meant the only thing clicking a
+   * game could do was drag it — and a stray drag silently PUT a new layout.
+   * Reading a play order is the common case; rearranging one is not.
+   */
+  const [editing, setEditing] = useState(false);
   const [nodes, setNodes] = useState<LocalNode[]>([]);
   const [links, setLinks] = useState<CollectionLink[]>([]);
   const [connectFrom, setConnectFrom] = useState<string | null>(null);
@@ -86,6 +96,23 @@ export function CollectionDetailPage() {
     },
   });
 
+  const adopt = useMutation({
+    mutationFn: () => api.adoptCollection(id),
+    onSuccess: (copy) => {
+      queryClient.invalidateQueries({ queryKey: ["collections"] });
+      navigate({ to: "/collection/$id", params: { id: copy.id } });
+    },
+  });
+
+  /**
+   * Open a game from the graph: your copy when you own it, otherwise the
+   * add-game search seeded with its title. Same rule the list rows follow.
+   */
+  function openGame(node: LocalNode) {
+    if (node.userGameId) navigate({ to: "/game/$id", params: { id: node.userGameId } });
+    else navigate({ to: "/add", search: { q: node.title } });
+  }
+
   function svgPoint(e: React.PointerEvent): { x: number; y: number } {
     const svg = svgRef.current!;
     const rect = svg.getBoundingClientRect();
@@ -93,6 +120,8 @@ export function CollectionDetailPage() {
   }
 
   function onNodePointerDown(e: React.PointerEvent, node: LocalNode) {
+    // in view mode a click opens the game; onClick handles it
+    if (!editing) return;
     if (connectMode) {
       if (!connectFrom) {
         setConnectFrom(node.gameId);
@@ -168,8 +197,12 @@ export function CollectionDetailPage() {
     );
   }
 
+  const isOwner = collection.data.isOwner;
   const inCollection = new Set(nodes.map((n) => n.gameId));
   const nodeById = new Map(nodes.map((n) => [n.gameId, n]));
+  // someone else's published collection is always read-only, whatever the
+  // graph's edit toggle says
+  const canEdit = isOwner && editing;
   const canvasW = Math.max(1000, ...nodes.map((n) => n.x + NODE_W + 60));
   const canvasH = Math.max(560, ...nodes.map((n) => n.y + NODE_H + 60));
 
@@ -191,61 +224,97 @@ export function CollectionDetailPage() {
               copied
             </span>
           )}
+          {!isOwner && collection.data.authorName && (
+            <span className="text-sm font-normal text-zinc-500">by {collection.data.authorName}</span>
+          )}
         </h1>
-        <AddCollectionGame collectionId={id} excludeGameIds={inCollection} />
-        <button
-          onClick={() => setPublic.mutate(!collection.data!.isPublic)}
-          disabled={setPublic.isPending}
-          title={
-            collection.data.isPublic
-              ? "Unpublish — existing copies people made stay theirs"
-              : "Publish so anyone can browse and copy it"
-          }
-          className={`rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
-            collection.data.isPublic
-              ? "border-amber-500/60 bg-amber-500/10 text-amber-300"
-              : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-          }`}
-        >
-          {collection.data.isPublic ? "★ Published" : "☆ Publish"}
-        </button>
-        {view === "graph" && (
+
+        {isOwner ? (
+          <>
+            <AddCollectionGame collectionId={id} excludeGameIds={inCollection} />
+            <button
+              onClick={() => setPublic.mutate(!collection.data!.isPublic)}
+              disabled={setPublic.isPending}
+              title={
+                collection.data.isPublic
+                  ? "Unpublish — existing copies people made stay theirs"
+                  : "Publish so anyone can browse and copy it"
+              }
+              className={`rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                collection.data.isPublic
+                  ? "border-amber-500/60 bg-amber-500/10 text-amber-300"
+                  : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              }`}
+            >
+              {collection.data.isPublic ? "★ Published" : "☆ Publish"}
+            </button>
+            {view === "graph" && (
+              <button
+                onClick={() => {
+                  setEditing(!editing);
+                  setConnectMode(false);
+                  setConnectFrom(null);
+                }}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
+                  editing
+                    ? "border-indigo-500 bg-indigo-600/20 text-indigo-200"
+                    : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                }`}
+              >
+                {editing ? "✓ Done arranging" : "✎ Arrange"}
+              </button>
+            )}
+            {view === "graph" && editing && (
+              <button
+                onClick={() => {
+                  setConnectMode(!connectMode);
+                  setConnectFrom(null);
+                }}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
+                  connectMode
+                    ? "border-indigo-500 bg-indigo-600/20 text-indigo-200"
+                    : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                }`}
+              >
+                {connectMode
+                  ? connectFrom
+                    ? "Now click the game that comes AFTER"
+                    : "Click the game that comes FIRST"
+                  : "🔗 Connect play order"}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                if (
+                  confirm(`Delete collection "${collection.data!.name}"? Games stay in your library.`)
+                )
+                  deleteCollection.mutate();
+              }}
+              className="rounded-lg border border-red-900 px-3 py-1.5 text-sm text-red-400 hover:bg-red-950"
+            >
+              Delete
+            </button>
+          </>
+        ) : (
           <button
-            onClick={() => {
-              setConnectMode(!connectMode);
-              setConnectFrom(null);
-            }}
-            className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
-              connectMode
-                ? "border-indigo-500 bg-indigo-600/20 text-indigo-200"
-                : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            }`}
+            onClick={() => adopt.mutate()}
+            disabled={adopt.isPending}
+            title="Takes a private copy you can edit — the original is untouched"
+            className="rounded-lg border border-indigo-500/50 px-3 py-1.5 text-sm font-semibold text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
           >
-            {connectMode
-              ? connectFrom
-                ? "Now click the game that comes AFTER"
-                : "Click the game that comes FIRST"
-              : "🔗 Connect play order"}
+            Save a copy
           </button>
         )}
-        <button
-          onClick={() => {
-            if (confirm(`Delete collection "${collection.data!.name}"? Games stay in your library.`))
-              deleteCollection.mutate();
-          }}
-          className="rounded-lg border border-red-900 px-3 py-1.5 text-sm text-red-400 hover:bg-red-950"
-        >
-          Delete
-        </button>
       </div>
 
-      {/* two ways to look at the same games: the graph is for branching play
-          order, the list is for a numbered run you can sort */}
+      {/* two ways to look at the same games. The list comes first because a
+          numbered run is what most people open a collection for; the graph is
+          the specialist view, for orders that branch */}
       <div className="mb-4 flex gap-1 border-b border-zinc-800">
         {(
           [
-            { key: "graph", label: "Play order" },
             { key: "list", label: "List" },
+            { key: "graph", label: "Play order" },
           ] as Array<{ key: View; label: string }>
         ).map((v) => (
           <button
@@ -266,8 +335,10 @@ export function CollectionDetailPage() {
         <div className="rounded-2xl border border-dashed border-zinc-700 p-12 text-center">
           <p className="mb-2 text-lg font-semibold">No games yet</p>
           <p className="text-sm text-zinc-400">
-            Use "Add game" above — your library, or anything on IGDB you don't own yet — then drag
-            them into an order and use "Connect play order" to draw the path.
+            {isOwner
+              ? `Use "Add game" above — your library, or anything on IGDB you don't own yet — then
+                 switch to Play order and hit Arrange to draw the path between them.`
+              : "The author hasn't added any games to this one yet."}
           </p>
         </div>
       ) : view === "list" ? (
@@ -275,6 +346,7 @@ export function CollectionDetailPage() {
           collectionId={id}
           games={nodes}
           accent={collection.data.accentColor ?? "#818cf8"}
+          readOnly={!isOwner}
         />
       ) : (
         <div className="overflow-auto rounded-2xl border border-zinc-800 bg-zinc-950">
@@ -311,8 +383,16 @@ export function CollectionDetailPage() {
               const x2 = to.x + NODE_W / 2;
               const y2 = to.y + NODE_H / 2;
               return (
-                <g key={link.id} onClick={() => deleteLink(link.id)} className="cursor-pointer">
-                  <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={14} />
+                <g
+                  key={link.id}
+                  // only a hit target while arranging — otherwise brushing an
+                  // arrow on the way to a game would offer to delete it
+                  onClick={canEdit ? () => deleteLink(link.id) : undefined}
+                  className={canEdit ? "cursor-pointer" : undefined}
+                >
+                  {canEdit && (
+                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={14} />
+                  )}
                   <line
                     x1={x1}
                     y1={y1}
@@ -333,7 +413,13 @@ export function CollectionDetailPage() {
                 key={node.gameId}
                 transform={`translate(${node.x}, ${node.y})`}
                 onPointerDown={(e) => onNodePointerDown(e, node)}
-                className={connectMode ? "cursor-crosshair" : "cursor-grab"}
+                // reading the graph, a click opens the game — your copy if you
+                // own it, the add search if you don't
+                onClick={canEdit ? undefined : () => openGame(node)}
+                role={canEdit ? undefined : "link"}
+                className={
+                  canEdit ? (connectMode ? "cursor-crosshair" : "cursor-grab") : "cursor-pointer"
+                }
               >
                 <rect
                   width={NODE_W}
@@ -367,20 +453,28 @@ export function CollectionDetailPage() {
                 >
                   {node.title.length > 16 ? `${node.title.slice(0, 15)}…` : node.title}
                 </text>
-                <g
-                  transform={`translate(${NODE_W - 16}, 4)`}
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    if (confirm(`Remove "${node.title}" from this collection?`))
-                      removeGame.mutate(node.gameId);
-                  }}
-                  className="cursor-pointer"
-                >
-                  <rect width={12} height={12} rx={3} fill="#3f3f46" />
-                  <text x={6} y={9.5} textAnchor="middle" fill="#d4d4d8" fontSize={9}>
-                    ×
-                  </text>
-                </g>
+                {/* a game you don't own — clicking takes you to add it */}
+                {!node.userGameId && (
+                  <circle cx={10} cy={10} r={5} fill="#3f3f46" style={{ pointerEvents: "none" }}>
+                    <title>Not in your library</title>
+                  </circle>
+                )}
+                {canEdit && (
+                  <g
+                    transform={`translate(${NODE_W - 16}, 4)`}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Remove "${node.title}" from this collection?`))
+                        removeGame.mutate(node.gameId);
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <rect width={12} height={12} rx={3} fill="#3f3f46" />
+                    <text x={6} y={9.5} textAnchor="middle" fill="#d4d4d8" fontSize={9}>
+                      ×
+                    </text>
+                  </g>
+                )}
               </g>
             ))}
           </svg>
@@ -389,8 +483,11 @@ export function CollectionDetailPage() {
 
       {view === "graph" && nodes.length > 0 && (
         <p className="mt-3 text-xs text-zinc-500">
-          Drag boxes to arrange · "Connect play order" then click two games to draw an arrow · click
-          an arrow to remove it · ring color = your status
+          {canEdit
+            ? `Drag boxes to arrange · "Connect play order" then click two games to draw an arrow ·
+               click an arrow to remove it · ring color = your status`
+            : "Click a game to open it · ring color = your status" +
+              (isOwner ? ' · "Arrange" to move things around' : "")}
         </p>
       )}
     </Shell>

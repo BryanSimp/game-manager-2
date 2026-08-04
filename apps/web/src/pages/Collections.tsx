@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CollectionSummary, PublicCollection } from "@gm/shared";
@@ -9,17 +9,32 @@ import { VoteButtons } from "../components/VoteButtons.js";
 
 type Tab = "mine" | "public";
 
+/** Settle a value before it becomes a query key, so typing isn't a request each. */
+function useDebounced(value: string, ms: number): string {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value.trim()), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}
+
 export function CollectionsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("mine");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<"top" | "new">("top");
+
+  // typing shouldn't fire a query per keystroke
+  const debouncedSearch = useDebounced(search, 300);
 
   const collections = useQuery({ queryKey: ["collections"], queryFn: () => api.getCollections() });
   const publicOnes = useQuery({
-    queryKey: ["public-collections"],
-    queryFn: () => api.getPublicCollections(),
+    queryKey: ["public-collections", debouncedSearch, sort],
+    queryFn: () => api.getPublicCollections({ q: debouncedSearch || undefined, sort }),
     enabled: tab === "public",
   });
 
@@ -46,6 +61,8 @@ export function CollectionsPage() {
     mutationFn: ({ id, value }: { id: string; value: 1 | 0 | -1 }) => api.voteCollection(id, value),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["public-collections"] }),
   });
+
+  const hasMore = publicOnes.data?.hasMore ?? false;
 
   return (
     <Shell>
@@ -113,17 +130,48 @@ export function CollectionsPage() {
         </>
       ) : (
         <>
+          <div className="mb-5 flex flex-wrap items-center gap-3">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by collection or game — e.g. Zelda"
+              className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm outline-none focus:border-indigo-500 sm:max-w-md"
+            />
+            <div className="flex gap-1 rounded-lg border border-zinc-700 p-0.5">
+              {(
+                [
+                  { key: "top", label: "Top rated" },
+                  { key: "new", label: "Newest" },
+                ] as Array<{ key: "top" | "new"; label: string }>
+              ).map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => setSort(s.key)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                    sort === s.key ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {publicOnes.isLoading && <p className="text-zinc-500">Loading…</p>}
-          {publicOnes.data?.length === 0 && (
+          {publicOnes.data?.items.length === 0 && (
             <div className="rounded-2xl border border-dashed border-zinc-700 p-10 text-center">
-              <p className="mb-2 font-semibold">Nothing published yet</p>
+              <p className="mb-2 font-semibold">
+                {debouncedSearch ? "Nothing matches that" : "Nothing published yet"}
+              </p>
               <p className="text-sm text-zinc-400">
-                Open one of your collections and hit Publish to share it.
+                {debouncedSearch
+                  ? "Try a game name — the search looks inside collections too."
+                  : "Open one of your collections and hit Publish to share it."}
               </p>
             </div>
           )}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {publicOnes.data?.map((c) => (
+            {publicOnes.data?.items.map((c) => (
               <PublicCard
                 key={c.id}
                 collection={c}
@@ -133,6 +181,11 @@ export function CollectionsPage() {
               />
             ))}
           </div>
+          {hasMore && (
+            <p className="mt-4 text-center text-xs text-zinc-600">
+              More than {publicOnes.data?.items.length} match — narrow the search to see the rest.
+            </p>
+          )}
           {adopt.isError && (
             <p className="mt-4 text-sm text-red-400">
               {adopt.error instanceof Error ? adopt.error.message : "Couldn't copy that collection"}

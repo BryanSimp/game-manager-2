@@ -74,9 +74,11 @@ function orderNodes(detail: {
 type ViewMode = "graph" | "list";
 type ListSort = "custom" | "title" | "release" | "ttb";
 
+// List first, and the default: a numbered run is what most people open a
+// collection for. Play order is the specialist view, for orders that branch.
 const VIEWS: Array<{ key: ViewMode; label: string; icon: IconName }> = [
-  { key: "graph", label: "Play order", icon: "git-branch-outline" },
   { key: "list", label: "List", icon: "list-outline" },
+  { key: "graph", label: "Play order", icon: "git-branch-outline" },
 ];
 
 const LIST_SORTS: Array<{ key: ListSort; label: string }> = [
@@ -116,7 +118,7 @@ export default function CollectionDetailScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [picking, setPicking] = useState(false);
-  const [view, setView] = useState<ViewMode>("graph");
+  const [view, setView] = useState<ViewMode>("list");
   const [sort, setSort] = useState<ListSort>("custom");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CollectionNode[] | null>(null);

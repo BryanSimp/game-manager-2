@@ -39,6 +39,8 @@ import type {
   Platform,
   Preferences,
   PublicCollection,
+  PublicCollectionPage,
+  PublicCollectionQuery,
   ScraperHealth,
   SearchOptions,
   SearchResponse,
@@ -343,9 +345,22 @@ export class ApiClient {
     return this.request(`/api/collections/${id}`, { method: "PATCH", body: JSON.stringify(input) });
   }
 
-  /** Every published collection, anyone's — yours are flagged, not hidden. */
-  getPublicCollections(): Promise<PublicCollection[]> {
-    return this.request<PublicCollection[]>("/api/collections/public");
+  /**
+   * Browse published collections — yours are flagged, not hidden.
+   *
+   * `q` searches game titles as well as collection names, which is how you
+   * find "the Zelda games in order" without knowing it's called "Hyrule run";
+   * `gameId` is the exact-match form a game's own page uses.
+   */
+  getPublicCollections(query: PublicCollectionQuery = {}): Promise<PublicCollectionPage> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
+    const qs = params.toString();
+    return this.request<PublicCollectionPage>(
+      `/api/collections/public${qs ? `?${qs}` : ""}`,
+    );
   }
 
   /** Take a private, independently editable copy of a public collection. */

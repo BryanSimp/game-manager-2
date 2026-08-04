@@ -364,8 +364,27 @@ export interface CollectionDetail {
   accentColor: string | null;
   isPublic: boolean;
   adoptedFromId: string | null;
+  /** false when you're looking at someone else's published collection */
+  isOwner: boolean;
+  /** set only when it isn't yours */
+  authorName: string | null;
+  votes: VoteCounts;
   games: CollectionNode[];
   links: CollectionLink[];
+}
+/** How the public browse list is filtered and ordered. */
+export interface PublicCollectionQuery {
+  /** matches collection names, descriptions, *and* the titles of games inside */
+  q?: string;
+  /** collections containing this exact game */
+  gameId?: string;
+  sort?: "top" | "new";
+  limit?: number;
+  offset?: number;
+}
+export interface PublicCollectionPage {
+  items: PublicCollection[];
+  hasMore: boolean;
 }
 /**
  * Adding a game to a collection. `gameId` for something already in the
