@@ -4,7 +4,7 @@ const li = "list-disc space-y-1 pl-5";
 
 export function PrivacyPolicyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="August 3, 2026">
+    <LegalLayout title="Privacy Policy" updated="August 4, 2026">
       <LegalSection heading="1. Overview">
         <p>
           Game Manager is a self-hosted game library service. This policy explains what
@@ -80,21 +80,69 @@ export function PrivacyPolicyPage() {
         </ul>
       </LegalSection>
 
-      <LegalSection heading="4. Advertising (free tier)">
+      <LegalSection heading="4. Advertising">
         <p>
-          Free accounts are ad-supported; Premium accounts see no ads and are excluded from all
-          ad-related processing. In the current version, ads are locally-served placeholders:
-          no data of any kind is shared with advertising networks. If a third-party ad network
-          is enabled in a future version, it may process your IP address, a device identifier,
-          and coarse usage data to deliver ads and cap their frequency — this policy will be
-          updated before any such change, and ads will remain off for Premium accounts.
+          Free accounts are ad-supported. Ads are served by <strong>Google AdSense</strong>, a
+          third-party advertising network. Premium accounts see no ads: no ad unit is rendered
+          for a Premium session.
+        </p>
+        <p>
+          Google and its partners use cookies and similar identifiers to select, deliver,
+          measure and cap the frequency of ads — including ads based on your prior visits to
+          this and other websites. To do that they may process your IP address, your device and
+          browser information, and the pages you view here. Google describes this in{" "}
+          <a
+            href="https://policies.google.com/technologies/partner-sites"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-zinc-100"
+          >
+            How Google uses information from sites that use its services
+          </a>
+          .
+        </p>
+        <p>
+          To be clear about the scope: the AdSense script is loaded on every page of this site,
+          including pages you see while signed in. The ad <em>placements</em> in this
+          application are only on the public pages — the landing page, the guides, and the
+          contact page.
+        </p>
+        <p>
+          You can turn off personalised advertising in{" "}
+          <a
+            href="https://www.google.com/settings/ads"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-zinc-100"
+          >
+            Google Ads Settings
+          </a>
+          , or opt out of participating vendors' use of cookies at{" "}
+          <a
+            href="https://www.aboutads.info/choices/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-zinc-100"
+          >
+            aboutads.info
+          </a>
+          . Where the law requires it — including the EEA, the UK and Switzerland —
+          personalised advertising is used only with your consent, which is requested the first
+          time you visit and can be changed at any time from the same prompt.
         </p>
       </LegalSection>
 
       <LegalSection heading="5. Cookies">
         <p>
-          Game Manager uses a single HTTP-only session cookie to keep you signed in. There are
-          no analytics or cross-site tracking cookies.
+          Game Manager itself sets a single HTTP-only session cookie to keep you signed in. It
+          sets no first-party analytics or tracking cookies — usage statistics are recorded
+          server-side against your account, not against a cookie.
+        </p>
+        <p>
+          Google AdSense sets its own cookies for the ad serving, measurement and fraud
+          prevention described in section 4. Those are third-party cookies: you can control
+          them through your browser's cookie settings or the opt-out links above, and in
+          regions where consent is required they are only set once you have given it.
         </p>
       </LegalSection>
 
