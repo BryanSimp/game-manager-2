@@ -50,7 +50,10 @@ export const checklistTemplates = pgTable(
     // where this list sits among your lists for this game, 1-based. The main
     // story list is normally 1; extras follow in the order you arranged them.
     position: integer("position").notNull().default(0),
-    // wiki page a scraped mission list came from (CC-BY-SA attribution)
+    // Wiki page a mission list was scraped from (CC-BY-SA attribution), from
+    // when the app scraped Fandom. The scraper is gone as of phase 16 -- it
+    // was wrong more often than right -- so nothing writes this any more, but
+    // lists that predate the removal keep their attribution link.
     sourceUrl: text("source_url"),
     // story missions are played in order, so ticking #15 implies #1-14 are
     // done too. Off by default — collectibles and side quests have no order.

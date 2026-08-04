@@ -23,7 +23,6 @@ import type {
   GameChecklists,
   GameProgress,
   ImportMissionsInput,
-  MissionSuggestion,
   SteamImportRule,
   SteamImportRuleInput,
   SteamStatus,
@@ -456,15 +455,7 @@ export class ApiClient {
 
   // ---- mission lists + time remaining ----
 
-  /** Parse a mission list off a wiki for review. Saves nothing. */
-  suggestMissions(gameId: string, url?: string): Promise<MissionSuggestion> {
-    return this.request<MissionSuggestion>(`/api/games/${gameId}/missions/suggest`, {
-      method: "POST",
-      body: JSON.stringify(url ? { url } : {}),
-    });
-  }
-
-  /** Save a reviewed mission list as a 'missions' checklist. */
+  /** Create a list from pasted or generated entries. */
   importMissions(
     gameId: string,
     input: ImportMissionsInput,

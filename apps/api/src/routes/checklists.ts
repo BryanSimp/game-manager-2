@@ -4,9 +4,6 @@ import { z } from "zod";
 import { CHECKLIST_KINDS } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser, type SessionUser } from "../plugins/auth.js";
-import { suggestMissions, suggestMissionsFromUrl } from "../services/missions.js";
-import { logScrape } from "../services/analytics.js";
-import { scraperRateLimit } from "../plugins/rate-limits.js";
 
 const titleSchema = z.object({
   title: z.string().min(1).max(200),
@@ -21,15 +18,10 @@ const itemSchema = z.object({
   text: z.string().min(1).max(500),
   category: z.string().max(100).nullable().optional(),
 });
-const suggestSchema = z.object({
-  /** a specific wiki page to parse; omitted = search Fandom for one */
-  url: z.string().url().max(500).optional(),
-});
 const importMissionsSchema = z.object({
   title: z.string().min(1).max(200),
   missions: z.array(z.string().min(1).max(500)).min(1).max(500),
-  sourceUrl: z.string().url().max(500).nullable().optional(),
-  // only the main-story list feeds the time estimate; side quests are untimed
+  // only the main-story list feeds the time estimate; everything else is untimed
   kind: z.enum(["missions", "side_quests"]).default("missions"),
 });
 const bulkCheckSchema = z.object({
@@ -158,50 +150,12 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     },
   );
 
-  // ---- mission lists scraped from Fandom (Phase 9) ----
-
   /**
-   * Parse a mission list off a wiki and hand it back for review. Deliberately
-   * saves nothing: extraction is heuristic, so the user confirms the list
-   * (same safety net as the OCR importer) before it becomes a checklist.
+   * Create a list from entries the user already has — pasted in, or generated
+   * as "Mission 1..N". This is the only bulk create path; the wiki scraper
+   * that used to feed it was removed in phase 16 for being wrong more often
+   * than it was right.
    */
-  app.post<{ Params: { gameId: string } }>(
-    "/api/games/:gameId/missions/suggest",
-    { config: scraperRateLimit },
-    async (request, reply) => {
-      const user = await requireUser(request, reply);
-      if (!user) return;
-      const parsed = suggestSchema.safeParse(request.body ?? {});
-      if (!parsed.success) return reply.status(400).send({ message: "Invalid input" });
-
-      const [game] = await db
-        .select({ id: schema.games.id, title: schema.games.title })
-        .from(schema.games)
-        .where(eq(schema.games.id, request.params.gameId));
-      if (!game) return reply.status(404).send({ message: "Game not found" });
-
-      let suggestion;
-      try {
-        suggestion = parsed.data.url
-          ? await suggestMissionsFromUrl(parsed.data.url)
-          : await suggestMissions(game.title);
-      } catch (err) {
-        logScrape("missions", false, err instanceof Error ? err.message : game.title);
-        throw err;
-      }
-      logScrape("missions", suggestion !== null, game.title);
-      if (!suggestion) {
-        return reply.status(404).send({
-          message: parsed.data.url
-            ? "Couldn't find a mission list on that page — check the URL, or add missions manually."
-            : "No mission list found on Fandom for this game — you can add missions manually.",
-        });
-      }
-      return suggestion;
-    },
-  );
-
-  /** Save a reviewed mission list as a 'missions' checklist. */
   app.post<{ Params: { gameId: string } }>(
     "/api/games/:gameId/missions",
     async (request, reply) => {
@@ -228,7 +182,6 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
           authorUserId: user.id,
           title: parsed.data.title.trim(),
           kind: parsed.data.kind,
-          sourceUrl: parsed.data.sourceUrl?.trim() || null,
         })
         .returning();
       await db.insert(schema.checklistItems).values(

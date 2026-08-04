@@ -362,7 +362,11 @@ export interface ChecklistSummary {
   title: string;
   kind: ChecklistKind;
   isPublic: boolean;
-  /** wiki page a scraped mission list came from — attribution, CC-BY-SA */
+  /**
+   * Wiki page a mission list was scraped from, back when the app scraped —
+   * kept for CC-BY-SA attribution on lists that predate phase 16, and still
+   * rendered as a link. Nothing writes it any more.
+   */
   sourceUrl: string | null;
   /** played in order: ticking an entry implies everything before it */
   sequential: boolean;
@@ -396,32 +400,9 @@ export interface GameChecklists {
   public: ChecklistSummary[];
 }
 // ---- mission progress + time remaining ----
-/** One wiki page that looks like it holds a mission/chapter list. */
-export interface MissionSourceCandidate {
-  wikiName: string;
-  /** e.g. "metalgear.fandom.com" */
-  domain: string;
-  pageTitle: string;
-  url: string;
-}
-/**
- * A parsed mission list, returned for review. Nothing is saved until the
- * user confirms — wiki parsing is heuristic and picks up stray rows.
- */
-export interface MissionSuggestion {
-  sourceUrl: string;
-  wikiName: string;
-  pageTitle: string;
-  /** heading the list was pulled from, e.g. "Main missions" */
-  sectionTitle: string | null;
-  missions: string[];
-  /** other pages worth trying if this one parsed badly */
-  alternatives: MissionSourceCandidate[];
-}
 export interface ImportMissionsInput {
   title: string;
   missions: string[];
-  sourceUrl?: string | null;
   /** defaults to 'missions' (the timed main-story list) */
   kind?: Extract<ChecklistKind, "missions" | "side_quests">;
 }

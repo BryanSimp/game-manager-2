@@ -11,7 +11,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
-    "check:titles": "tsx scripts/check-product-titles.ts"
+    "check:titles": "tsx scripts/check-product-titles.ts",
+    "check:content": "tsx scripts/check-content-filter.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

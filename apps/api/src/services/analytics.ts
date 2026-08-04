@@ -15,9 +15,12 @@ export type AnalyticsEventType =
   | "activity"
   | "scrape";
 
-/** External sources the app fetches from — the system-health view groups by this. */
+/**
+ * External sources the app fetches from — the system-health view groups by
+ * this. 'missions' is gone (the Fandom scraper was removed in phase 16); the
+ * admin chart groups by the stored value, so historical rows still render.
+ */
 export type ScrapeSource =
-  | "missions"
   | "boxart"
   | "upc"
   | "console_art"
@@ -56,7 +59,7 @@ export function logEvent(
   }
 }
 
-/** Outcome of one external fetch (wiki, box art repo, UPC db, Steam API…). */
+/** Outcome of one external fetch (box art repo, UPC db, Steam API…). */
 export function logScrape(source: ScrapeSource, ok: boolean, detail?: string): void {
   logEvent("scrape", null, { source, ok, ...(detail ? { detail: detail.slice(0, 300) } : {}) });
 }

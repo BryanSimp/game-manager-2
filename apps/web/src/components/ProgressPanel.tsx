@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  MISSION_LIST_KINDS,
+  EXTRA_LIST_KIND,
+  MAIN_LIST_KIND,
   PROGRESS_BASES,
   PROGRESS_BASIS_LABELS,
   type ChecklistDetail,
   type ChecklistItemView,
   type LibraryEntry,
-  type MissionSuggestion,
   type ProgressBasis,
 } from "@gm/shared";
 import { api } from "../lib/api.js";
@@ -98,7 +98,7 @@ export function ProgressPanel({ entry }: { entry: LibraryEntry }) {
         )}
       </div>
 
-      {MISSION_LIST_KINDS.map((l) => (
+      {LIST_SECTIONS.map((l) => (
         <MissionSection
           key={l.kind}
           gameId={gameId}
@@ -106,10 +106,7 @@ export function ProgressPanel({ entry }: { entry: LibraryEntry }) {
           kind={l.kind}
           label={l.label}
           // chapters group the story; side quests are a flat pile by nature
-          supportsChapters={l.kind === "missions"}
-          // the scraper hunts for main-mission sections and denylists "side",
-          // so pointing it at a side-quest list would just re-import the story
-          allowWikiSearch={l.kind === "missions"}
+          supportsChapters={l.kind === MAIN_LIST_KIND}
         />
       ))}
 
@@ -132,7 +129,12 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
 
 // ---- mission list ----
 
-type MissionListKind = (typeof MISSION_LIST_KINDS)[number]["kind"];
+const LIST_SECTIONS = [
+  { kind: MAIN_LIST_KIND, label: "Main story" },
+  { kind: EXTRA_LIST_KIND, label: "Side quests" },
+] as const;
+
+type MissionListKind = (typeof LIST_SECTIONS)[number]["kind"];
 
 type NumberedItem = ChecklistItemView & { displayIndex: number };
 
@@ -165,18 +167,14 @@ function MissionSection({
   kind,
   label,
   supportsChapters,
-  allowWikiSearch,
 }: {
   gameId: string;
   entryId: string;
   kind: MissionListKind;
   label: string;
   supportsChapters: boolean;
-  allowWikiSearch: boolean;
 }) {
   const queryClient = useQueryClient();
-  const [review, setReview] = useState<MissionSuggestion | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -207,15 +205,6 @@ function MissionSection({
     queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
     queryClient.invalidateQueries({ queryKey: ["library"] });
   };
-
-  const suggest = useMutation({
-    mutationFn: (url?: string) => api.suggestMissions(gameId, url),
-    onSuccess: (s) => {
-      setError(null);
-      setReview(s);
-    },
-    onError: (err: Error) => setError(err.message),
-  });
 
   const detail = useQuery({
     queryKey: ["checklist", checklistId],
@@ -275,23 +264,12 @@ function MissionSection({
           )}
         </p>
         {!checklistId ? (
-          <div className="flex gap-2">
-            {allowWikiSearch && (
-              <button
-                onClick={() => suggest.mutate(undefined)}
-                disabled={suggest.isPending}
-                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60"
-              >
-                {suggest.isPending ? "Searching Fandom…" : "Find missions on a wiki"}
-              </button>
-            )}
-            <button
-              onClick={() => setManualOpen((v) => !v)}
-              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
-            >
-              {allowWikiSearch ? "Add manually" : `Add ${label.toLowerCase()}`}
-            </button>
-          </div>
+          <button
+            onClick={() => setManualOpen((v) => !v)}
+            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500"
+          >
+            Add {label.toLowerCase()}
+          </button>
         ) : (
           <div className="flex items-center gap-3">
             {supportsChapters && (
@@ -321,35 +299,13 @@ function MissionSection({
         )}
       </div>
 
-      {error && (
-        <p className="mb-2 rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
-          {error}
-        </p>
-      )}
-
       {manualOpen && !checklistId && (
         <ManualMissions
           gameId={gameId}
           kind={kind}
           label={label}
-          allowWikiUrl={allowWikiSearch}
-          pending={suggest.isPending}
-          onUseUrl={(url) => suggest.mutate(url)}
           onSaved={() => {
             setManualOpen(false);
-            invalidate();
-          }}
-        />
-      )}
-
-      {review && (
-        <MissionReview
-          gameId={gameId}
-          suggestion={review}
-          onCancel={() => setReview(null)}
-          onRetry={(url) => suggest.mutate(url)}
-          onSaved={() => {
-            setReview(null);
             invalidate();
           }}
         />
@@ -447,9 +403,8 @@ function MissionSection({
 }
 
 /**
- * Edit an existing mission list: rename it, fix or reorder entries, add ones
- * the wiki missed, drop the ones it invented, or delete the list outright.
- * Scraped lists are rarely perfect first time, so this is the repair bench.
+ * Edit an existing list: rename it, fix or reorder entries, add ones you
+ * missed, or delete the list outright.
  */
 function MissionEditor({
   detail,
@@ -748,149 +703,30 @@ function MissionRow({
 }
 
 /**
- * Review step for a scraped list. Wiki parsing picks up stray rows, so
- * nothing is saved until the user has pruned it.
- */
-function MissionReview({
-  gameId,
-  suggestion,
-  onCancel,
-  onRetry,
-  onSaved,
-}: {
-  gameId: string;
-  suggestion: MissionSuggestion;
-  onCancel: () => void;
-  onRetry: (url: string) => void;
-  onSaved: () => void;
-}) {
-  const [missions, setMissions] = useState<string[]>(suggestion.missions);
-  const [title, setTitle] = useState(suggestion.sectionTitle || "Missions");
-
-  const save = useMutation({
-    mutationFn: () =>
-      api.importMissions(gameId, { title, missions, sourceUrl: suggestion.sourceUrl }),
-    onSuccess: onSaved,
-  });
-
-  return (
-    <div className="mb-3 rounded-xl border border-indigo-900/60 bg-indigo-950/20 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-indigo-200">
-          Found {missions.length} entries — check before saving
-        </p>
-        <a
-          href={suggestion.sourceUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="text-xs text-indigo-400 underline hover:text-indigo-300"
-        >
-          {suggestion.pageTitle} on {suggestion.wikiName}
-        </a>
-      </div>
-      <p className="mt-1 text-xs text-zinc-500">
-        Scraped from a wiki, so it may include rows that aren't missions. Remove anything that
-        doesn't belong — the count drives the time estimate.
-      </p>
-
-      <input
-        value={title}
-        onChange={(ev) => setTitle(ev.target.value)}
-        className="mt-3 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
-        placeholder="List name"
-      />
-
-      <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1">
-        {missions.map((m, i) => (
-          <div key={`${m}-${i}`} className="group flex items-center gap-2 py-0.5">
-            <span className="w-6 shrink-0 text-right text-xs text-zinc-600">{i + 1}.</span>
-            <input
-              value={m}
-              onChange={(ev) =>
-                setMissions(missions.map((x, xi) => (xi === i ? ev.target.value : x)))
-              }
-              className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-zinc-300 outline-none hover:border-zinc-700 focus:border-indigo-500"
-            />
-            <button
-              onClick={() => setMissions(missions.filter((_, xi) => xi !== i))}
-              className="shrink-0 px-1 text-xs text-zinc-600 hover:text-red-400"
-              title="Remove"
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-        {missions.length === 0 && (
-          <p className="px-2 py-3 text-center text-xs text-zinc-600">
-            Nothing left — try another page or cancel.
-          </p>
-        )}
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => save.mutate()}
-          disabled={save.isPending || missions.length === 0}
-          className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-semibold hover:bg-indigo-500 disabled:opacity-50"
-        >
-          {save.isPending ? "Saving…" : `Save ${missions.length} missions`}
-        </button>
-        <button
-          onClick={onCancel}
-          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800"
-        >
-          Cancel
-        </button>
-        {suggestion.alternatives.length > 0 && (
-          <span className="text-xs text-zinc-500">
-            Wrong page? Try{" "}
-            {suggestion.alternatives.slice(0, 3).map((alt, i) => (
-              <span key={alt.url}>
-                {i > 0 && ", "}
-                <button
-                  onClick={() => onRetry(alt.url)}
-                  className="text-indigo-400 underline hover:text-indigo-300"
-                >
-                  {alt.pageTitle}
-                </button>
-              </span>
-            ))}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Fallbacks for when the automatic search picks the wrong page or nothing at
- * all — which it does often enough that these are not edge cases: point it at
- * a specific wiki page, paste a list, or just say how many missions there are.
+ * How a list gets created: paste one in, or say how many entries there are
+ * and rename them afterwards.
+ *
+ * This used to be the fallback behind a wiki scraper. The scraper is gone —
+ * it was right on two of six test games — so pasting is the main event now,
+ * which is also what makes a list worth publishing for everyone else.
  */
 function ManualMissions({
   gameId,
   kind,
   label,
-  allowWikiUrl,
-  pending,
-  onUseUrl,
   onSaved,
 }: {
   gameId: string;
   kind: MissionListKind;
   label: string;
-  allowWikiUrl: boolean;
-  pending: boolean;
-  onUseUrl: (url: string) => void;
   onSaved: () => void;
 }) {
   const [text, setText] = useState("");
   const [count, setCount] = useState("");
-  const [url, setUrl] = useState("");
 
   const save = useMutation({
     mutationFn: (missions: string[]) =>
-      api.importMissions(gameId, { title: label, missions, sourceUrl: null, kind }),
+      api.importMissions(gameId, { title: label, missions, kind }),
     onSuccess: onSaved,
   });
 
@@ -908,38 +744,7 @@ function ManualMissions({
 
   return (
     <div className="mb-3 rounded-xl border border-zinc-800 bg-zinc-900 p-3">
-      {allowWikiUrl && (
-        <>
-          <p className="mb-1 text-xs text-zinc-500">
-            Point it at a specific Fandom page — more reliable than the automatic search.
-          </p>
-          <form
-            onSubmit={(ev) => {
-              ev.preventDefault();
-              if (url.trim()) onUseUrl(url.trim());
-            }}
-            className="flex gap-2"
-          >
-            <input
-              value={url}
-              onChange={(ev) => setUrl(ev.target.value)}
-              placeholder="https://gta.fandom.com/wiki/Missions_in_GTA_V"
-              className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
-            />
-            <button
-              type="submit"
-              disabled={!url.trim() || pending}
-              className="shrink-0 rounded-lg border border-indigo-500/50 px-3 py-1.5 text-sm font-semibold text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
-            >
-              {pending ? "Reading…" : "Read page"}
-            </button>
-          </form>
-        </>
-      )}
-
-      <p
-        className={`text-xs text-zinc-500 ${allowWikiUrl ? "mt-3 border-t border-zinc-800 pt-3" : ""}`}
-      >
+      <p className="text-xs text-zinc-500">
         Paste a list (one per line), or just enter how many there are.
       </p>
       <textarea
