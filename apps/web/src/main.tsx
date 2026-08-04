@@ -8,7 +8,11 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { LibraryPage } from "./pages/Library.js";
+import { HomePage } from "./pages/Home.js";
+import { LandingPage } from "./pages/Landing.js";
+import { GuidesPage } from "./pages/Guides.js";
+import { GuideArticlePage } from "./pages/GuideArticle.js";
+import { ContactPage } from "./pages/Contact.js";
 import { ConsolesPage } from "./pages/Consoles.js";
 import { ConsoleDetailPage } from "./pages/ConsoleDetail.js";
 import { CollectionsPage } from "./pages/Collections.js";
@@ -36,7 +40,10 @@ const rootRoute = createRootRoute({
 });
 
 const routes = [
-  createRoute({ getParentRoute: () => rootRoute, path: "/", component: LibraryPage }),
+  // `/` is the public landing page when signed out and the library when
+  // signed in — see pages/Home.tsx. The root of the domain has to be
+  // crawlable for the site to be indexed at all.
+  createRoute({ getParentRoute: () => rootRoute, path: "/", component: HomePage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/consoles", component: ConsolesPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/console/$platformId", component: ConsoleDetailPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/collections", component: CollectionsPage }),
@@ -74,6 +81,16 @@ const routes = [
   // public — readable before signing up, so no Shell/auth around them
   createRoute({ getParentRoute: () => rootRoute, path: "/privacy", component: PrivacyPolicyPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/terms", component: TermsOfServicePage }),
+  // The landing page's own URL, so it stays reachable while signed in and can
+  // be linked to directly.
+  createRoute({ getParentRoute: () => rootRoute, path: "/welcome", component: LandingPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/guides", component: GuidesPage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/guides/$slug",
+    component: GuideArticlePage,
+  }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/contact", component: ContactPage }),
 ];
 
 const router = createRouter({ routeTree: rootRoute.addChildren(routes) });

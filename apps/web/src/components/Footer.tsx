@@ -6,14 +6,22 @@ const ext = "text-zinc-400 underline decoration-zinc-700 underline-offset-2 hove
  * Site footer: the legal pages plus the attribution our data providers'
  * terms ask for — IGDB (Twitch Developer Services Agreement), SteamGridDB
  * (API terms), and the Steam Web API ("Powered by Steam", no implied
- * endorsement by Valve). Rendered by the Shell and by the public legal pages,
- * so the credits are visible wherever provider data is shown.
+ * endorsement by Valve). Rendered by the Shell, by the public legal pages and
+ * by the marketing layout, so the credits are visible wherever provider data
+ * is shown — and so every public page carries the Privacy/Terms/Contact links
+ * an ad network expects to find.
  */
 export function Footer() {
   return (
     <footer className="mt-10 border-t border-zinc-800">
       <div className="mx-auto max-w-6xl px-4 py-6 text-xs text-zinc-500">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Link to="/guides" className="font-medium text-zinc-400 hover:text-zinc-200">
+            Guides
+          </Link>
+          <Link to="/contact" className="font-medium text-zinc-400 hover:text-zinc-200">
+            Contact
+          </Link>
           <Link to="/privacy" className="font-medium text-zinc-400 hover:text-zinc-200">
             Privacy Policy
           </Link>

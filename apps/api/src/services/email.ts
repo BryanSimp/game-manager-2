@@ -36,6 +36,13 @@ export async function sendEmail(input: {
   subject: string;
   html: string;
   text: string;
+  /**
+   * Reply-To, so a relayed message (the contact form) can be answered by
+   * hitting reply. The From stays our own verified sender — putting a
+   * stranger's address there would fail SPF and get the domain classed as a
+   * spoofer.
+   */
+  replyTo?: string;
 }): Promise<{ id: string }> {
   const config = await getEmailConfig();
   if (!config) throw new Error("Email delivery is not configured");
@@ -51,6 +58,7 @@ export async function sendEmail(input: {
       subject: input.subject,
       html: input.html,
       text: input.text,
+      ...(input.replyTo ? { reply_to: input.replyTo } : {}),
     }),
   });
   if (!res.ok) {

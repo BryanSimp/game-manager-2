@@ -3,7 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Game Manager</title>
+    <meta name="theme-color" content="#09090b" />
+
+    <!--
+      Static defaults. Routes override these at runtime via lib/seo.ts, which
+      Googlebot picks up because it renders JavaScript — but scrapers that
+      don't (most social previews, some ad crawlers) only ever see what's
+      here, so these describe the landing page rather than being placeholders.
+    -->
+    <title>Game Manager — track your game library, backlog and progress</title>
+    <meta
+      name="description"
+      content="Free game library manager: sync your Steam library, catalogue physical and digital games across every console you own, track story progress mission by mission, and see how long your backlog will really take."
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://gamesmanager.app/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Game Manager" />
+    <meta property="og:title" content="Game Manager — track your game library, backlog and progress" />
+    <meta
+      property="og:description"
+      content="One library for Steam, every console you own and the shelf of cartridges. Mission-level progress tracking and honest time-to-beat estimates for your backlog."
+    />
+    <meta property="og:url" content="https://gamesmanager.app/" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="preconnect" href="https://pagead2.googlesyndication.com" crossorigin />
   </head>
   <body>
     <div id="root"></div>

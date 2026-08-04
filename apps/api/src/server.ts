@@ -25,6 +25,7 @@ import { registerFriendRoutes } from "./routes/friends.js";
 import { registerCategoryRoutes } from "./routes/categories.js";
 import { registerAuthRecoveryRoutes } from "./routes/auth-recovery.js";
 import { registerAnalyticsRoutes } from "./routes/analytics.js";
+import { registerContactRoutes } from "./routes/contact.js";
 import { logEvent } from "./services/analytics.js";
 
 export async function buildServer() {
@@ -148,6 +149,7 @@ export async function buildServer() {
   registerCategoryRoutes(app);
   registerAuthRecoveryRoutes(app);
   registerAnalyticsRoutes(app);
+  registerContactRoutes(app);
 
   return app;
 }

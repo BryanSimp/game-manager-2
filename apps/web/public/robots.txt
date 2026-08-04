@@ -1,0 +1,40 @@
+# Game Manager — https://gamesmanager.app
+#
+# The public pages (landing, guides, legal, contact) are open to crawlers.
+# Everything behind sign-in is disallowed: those routes render a redirect to
+# /login for an anonymous fetch, so indexing them would put a pile of
+# identical empty pages in the index.
+
+User-agent: *
+Allow: /$
+Allow: /welcome
+Allow: /guides
+Allow: /contact
+Allow: /privacy
+Allow: /terms
+
+Disallow: /login
+Disallow: /register
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /dashboard
+Disallow: /library
+Disallow: /consoles
+Disallow: /console/
+Disallow: /collections
+Disallow: /collection/
+Disallow: /game/
+Disallow: /add
+Disallow: /import
+Disallow: /friends
+Disallow: /tags
+Disallow: /preferences
+Disallow: /settings
+Disallow: /admin/
+Disallow: /api/
+
+# AdSense needs to fetch pages to decide what to serve on them.
+User-agent: Mediapartners-Google
+Allow: /
+
+Sitemap: https://gamesmanager.app/sitemap.xml

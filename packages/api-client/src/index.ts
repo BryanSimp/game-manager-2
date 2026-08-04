@@ -15,6 +15,7 @@ import type {
   ChecklistDetail,
   ConsoleArtCandidate,
   ConsoleSummary,
+  ContactMessageInput,
   FriendLibrary,
   FriendsOverview,
   ChecklistKind,
@@ -135,6 +136,16 @@ export class ApiClient {
     return this.request("/api/auth/reset-password", {
       method: "POST",
       body: JSON.stringify({ token, password }),
+    });
+  }
+
+  // ---- contact (anonymous) ----
+
+  /** Public contact form. The recipient is resolved server-side. */
+  sendContactMessage(input: ContactMessageInput): Promise<{ ok: true; message: string }> {
+    return this.request("/api/contact", {
+      method: "POST",
+      body: JSON.stringify(input),
     });
   }
 
