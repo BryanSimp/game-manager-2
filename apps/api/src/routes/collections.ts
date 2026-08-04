@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { upsertGameFromIgdb } from "../services/catalog.js";
+import { logEvent } from "../services/analytics.js";
 
 const collectionSchema = z.object({
   name: z.string().min(1).max(100),
@@ -267,6 +268,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       );
     }
 
+    logEvent("collection_created", user.id, { collectionId: copy.id, adopted: true });
     reply.status(201);
     return { id: copy.id, name: copy.name };
   });
@@ -291,6 +293,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     if (!created) {
       return reply.status(409).send({ message: "You already have a collection with that name" });
     }
+    logEvent("collection_created", user.id, { collectionId: created.id });
     reply.status(201);
     return created;
   });

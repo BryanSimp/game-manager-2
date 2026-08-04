@@ -20,9 +20,28 @@ import { registerChecklistRoutes } from "./routes/checklists.js";
 import { registerSteamRoutes } from "./routes/steam.js";
 import { registerFriendRoutes } from "./routes/friends.js";
 import { registerCategoryRoutes } from "./routes/categories.js";
+import { registerAnalyticsRoutes } from "./routes/analytics.js";
+import { logEvent } from "./services/analytics.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
+
+  // Activity telemetry: onResponse fires after the reply has gone out, and
+  // logEvent is an in-memory push (batched insert on a timer), so this adds
+  // nothing to request latency. Only authenticated traffic is recorded —
+  // routes resolve the user anyway and stash it on request.sessionUser.
+  app.addHook("onResponse", (request, reply, done) => {
+    const user = request.sessionUser;
+    const route = request.routeOptions?.url;
+    if (user && route && route !== "/api/health" && reply.statusCode < 500) {
+      logEvent("activity", user.id, {
+        route,
+        method: request.method,
+        status: reply.statusCode,
+      });
+    }
+    done();
+  });
 
   await app.register(cors, {
     origin: env.CORS_ORIGINS,
@@ -70,6 +89,12 @@ export async function buildServer() {
       return reply.status(401).send({ message: "Not authenticated" });
     }
     const { user } = session;
+    request.sessionUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: (user as { role?: string }).role ?? "user",
+    };
     return {
       id: user.id,
       email: user.email,
@@ -99,6 +124,7 @@ export async function buildServer() {
   registerSteamRoutes(app);
   registerFriendRoutes(app);
   registerCategoryRoutes(app);
+  registerAnalyticsRoutes(app);
 
   return app;
 }

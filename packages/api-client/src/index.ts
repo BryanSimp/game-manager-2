@@ -1,6 +1,7 @@
 import type {
   AddCollectionGameInput,
   AddGameInput,
+  AdminAnalyticsOverview,
   AdminSettings,
   BarcodeLookupResult,
   BulkAddItem,
@@ -35,6 +36,7 @@ import type {
   Platform,
   Preferences,
   PublicCollection,
+  ScraperHealth,
   SearchOptions,
   SearchResponse,
   Tag,
@@ -641,6 +643,16 @@ export class ApiClient {
 
   testIgdb(): Promise<{ ok: true }> {
     return this.request("/api/admin/settings/igdb/test", { method: "POST" });
+  }
+
+  /** Funnel, DAU and engagement aggregates for the admin analytics page. */
+  getAdminAnalytics(): Promise<AdminAnalyticsOverview> {
+    return this.request<AdminAnalyticsOverview>("/api/admin/analytics/overview");
+  }
+
+  /** Success rates for every external fetch source, last 7 days. */
+  getScraperHealth(): Promise<ScraperHealth> {
+    return this.request<ScraperHealth>("/api/admin/analytics/scrapers");
   }
 }
 

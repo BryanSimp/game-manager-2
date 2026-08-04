@@ -174,6 +174,8 @@ was dev-only). Never use `db push`.
 
 | 13 sharing + corrections | see git log | **Collections publish/adopt** (migration 0015): `is_public` + `adopted_from_id`, `GET /api/collections/public`, `POST /:id/adopt` deep-copying games and links, star badge on both apps, Yours/Public tabs. Adding a game is now a **search** (library first, IGDB underneath) and accepts `igdbId`, so a collection can list games you don't own. **Manual play times** (`PUT /api/library/:id/time-to-beat`) with an "Add play time" affordance when IGDB has none. Mobile caught up on three things web had: a **half-star rating** widget, **cover browsing/upload**, and **console art browsing/upload**. Header button became a hamburger |
 
+| 14 admin analytics | see git log | **`analytics_events`** (migration 0016, jsonb meta, no FK on user_id so a batched flush can't fail on a deleted user; backfills funnel history from `user`/`steam_accounts`/`user_games`/`collections`). **Non-blocking logger** (`services/analytics.ts`): in-memory buffer, batched insert every 5s (or 200 events), capped at 5k, timer `unref`'d, failed flush dropped — telemetry never breaks the app. Fastify `onResponse` hook logs authenticated activity via `request.sessionUser` (stashed by `getSessionUser`), after the reply is sent. Funnel events: `sign_up` (better-auth after-create hook), `steam_link`, `game_added` (single/bulk/Steam auto-add), `collection_created` (create + adopt). `logScrape()` records outcomes for missions/boxart/upc/steam jobs/OCR. **Admin endpoints** (`routes/analytics.ts`): funnel, DAU (30d, gap-filled), WAU/MAU, avg games/user, avg session (30-min-gap sessionization in SQL), scraper success rates (7d) + recent failures; both flush the buffer first so numbers are current. **Web `/admin/analytics`** (Observable Plot, dark-only): KPI tiles, funnel bars on a validated blue ordinal ramp, DAU line with crosshair tip + table twin, scraper meter bars polling every 15s. Verified end-to-end (backfill counts, live activity, real UPC scrape event) |
+
 **Next: Phase 6 (skipped for now, still open)** — email verification/password reset
 (better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
 filters, admin panel (users, password resets, registration toggle, settings).
@@ -190,6 +192,9 @@ file to be provided for reference).
   UI's re-search covers it.
 - Orphaned image cleanup job not yet written (images accumulate on the volume).
 - `import_jobs.status='done'` cleanup/pruning not implemented.
+- `analytics_events` has no retention job: `activity` rows accrue one per
+  authenticated request. Fine at self-hosted scale for a long while; a periodic
+  prune of old `activity` events (funnel events should stay) is the upgrade path.
 - Barcode scan flow verified end-to-end at the API level (real BOTW/GoW barcodes) but
   the camera screen itself needs an on-device Expo Go run — simulators have no camera.
 - Play-order graph *editing* is web-only; mobile flattens the graph to an ordered list.

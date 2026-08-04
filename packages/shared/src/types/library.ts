@@ -183,6 +183,35 @@ export interface AdminSettings {
   steamConfigured: boolean;
   steamGridDbConfigured: boolean;
 }
+export interface AdminAnalyticsOverview {
+  /** distinct users who reached each step, in funnel order */
+  funnel: Array<{ step: string; users: number }>;
+  /** daily active users, last 30 days, gap days filled with 0 */
+  dau: Array<{ day: string; users: number }>;
+  engagement: {
+    dauToday: number;
+    wau: number;
+    mau: number;
+    totalUsers: number;
+    totalLibraryEntries: number;
+    avgGamesPerUser: number;
+    avgSessionMinutes: number;
+    sessions30d: number;
+  };
+}
+export interface ScraperHealth {
+  /** window the rates cover (ISO timestamp of its start) */
+  since: string;
+  sources: Array<{
+    source: string;
+    total: number;
+    ok: number;
+    /** 0..1 */
+    rate: number;
+    lastAt: string | null;
+  }>;
+  failures: Array<{ source: string; detail: string | null; at: string }>;
+}
 export interface TagInput {
   name: string;
   color?: string | null;

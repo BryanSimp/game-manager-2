@@ -17,6 +17,7 @@ import { AddGamePage } from "./pages/AddGame.js";
 import { GameDetailPage } from "./pages/GameDetail.js";
 import { ImportPage } from "./pages/Import.js";
 import { SettingsPage } from "./pages/Settings.js";
+import { AdminAnalyticsPage } from "./pages/AdminAnalytics.js";
 import { FriendsPage } from "./pages/Friends.js";
 import { FriendLibraryPage } from "./pages/FriendLibrary.js";
 import { TagsPage } from "./pages/Tags.js";
@@ -40,6 +41,7 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/game/$id", component: GameDetailPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/import", component: ImportPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/analytics", component: AdminAnalyticsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tags", component: TagsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/friends", component: FriendsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/friends/$userId", component: FriendLibraryPage }),
