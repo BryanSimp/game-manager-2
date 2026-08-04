@@ -87,9 +87,14 @@ export function PrivacyPolicyPage() {
           for a Premium session.
         </p>
         <p>
-          Google and its partners use cookies and similar identifiers to select, deliver,
-          measure and cap the frequency of ads — including ads based on your prior visits to
-          this and other websites. To do that they may process your IP address, your device and
+          <strong>
+            Third-party vendors, including Google, use cookies to serve ads based on your prior
+            visits to this website or other websites.
+          </strong>{" "}
+          Google's use of advertising cookies enables it and its partners to serve ads to you
+          based on your visits to this site and/or other sites on the internet. Those cookies
+          and similar identifiers are also used to measure ads and cap how often you see them.
+          To do this, Google and its partners may process your IP address, your device and
           browser information, and the pages you view here. Google describes this in{" "}
           <a
             href="https://policies.google.com/technologies/partner-sites"
