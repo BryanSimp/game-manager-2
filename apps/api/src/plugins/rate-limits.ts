@@ -30,3 +30,12 @@ export const importRateLimit = {
 export const barcodeRateLimit = {
   rateLimit: { max: 10, timeWindow: "1 minute" },
 };
+
+/**
+ * The public contact form — unauthenticated and it sends mail, so it's the
+ * most abusable route in the app. Low ceiling over a long window: nobody
+ * legitimately files four support requests in ten minutes.
+ */
+export const contactRateLimit = {
+  rateLimit: { max: 3, timeWindow: "10 minutes" },
+};

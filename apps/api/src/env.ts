@@ -27,6 +27,9 @@ const envSchema = z.object({
   // Password-reset email delivery (DB settings take precedence — see services/email.ts)
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
+  // Where the public contact form delivers. Falls back to the `contact_email`
+  // setting, then to the first admin's own address, so it works unconfigured.
+  CONTACT_EMAIL: z.string().email().optional(),
   // Public origin of the web app, used to build reset links. Defaults to the
   // first CORS origin (the web app in dev), then BETTER_AUTH_URL (prod is
   // same-origin behind Traefik, so that's already the site).
