@@ -182,6 +182,8 @@ export interface AdminSettings {
   igdbClientId: string | null;
   steamConfigured: boolean;
   steamGridDbConfigured: boolean;
+  emailConfigured: boolean;
+  emailFrom: string | null;
 }
 export interface TagInput {
   name: string;

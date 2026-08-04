@@ -20,6 +20,7 @@ import { registerChecklistRoutes } from "./routes/checklists.js";
 import { registerSteamRoutes } from "./routes/steam.js";
 import { registerFriendRoutes } from "./routes/friends.js";
 import { registerCategoryRoutes } from "./routes/categories.js";
+import { registerAuthRecoveryRoutes } from "./routes/auth-recovery.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -99,6 +100,7 @@ export async function buildServer() {
   registerSteamRoutes(app);
   registerFriendRoutes(app);
   registerCategoryRoutes(app);
+  registerAuthRecoveryRoutes(app);
 
   return app;
 }

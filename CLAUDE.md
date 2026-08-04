@@ -174,16 +174,23 @@ was dev-only). Never use `db push`.
 
 | 13 sharing + corrections | see git log | **Collections publish/adopt** (migration 0015): `is_public` + `adopted_from_id`, `GET /api/collections/public`, `POST /:id/adopt` deep-copying games and links, star badge on both apps, Yours/Public tabs. Adding a game is now a **search** (library first, IGDB underneath) and accepts `igdbId`, so a collection can list games you don't own. **Manual play times** (`PUT /api/library/:id/time-to-beat`) with an "Add play time" affordance when IGDB has none. Mobile caught up on three things web had: a **half-star rating** widget, **cover browsing/upload**, and **console art browsing/upload**. Header button became a hamburger |
 
-**Next: Phase 6 (skipped for now, still open)** — email verification/password reset
-(better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
-filters, admin panel (users, password resets, registration toggle, settings).
+| 14 password reset | see git log | **Not the better-auth built-in** — better-auth 1.6 stores reset tokens *raw* in `verification`, so `routes/auth-recovery.ts` owns the flow: `password_reset_token` (migration 0016) keeps only a SHA-256 hash of a 32-byte token, 15-min expiry, single-use (consumed via `DELETE … RETURNING`), one live token per user. The routes are static `POST /api/auth/request-reset` / `reset-password`, which Fastify matches ahead of the better-auth wildcard — deliberately shadowing its unhashed equivalents. The password *update* still goes through `auth.$context` (scrypt hash + `internalAdapter`, mirroring better-auth's own resetPassword) and revokes every session. Request-reset answers identically for known/unknown emails, checks config *before* touching accounts (503 when unconfigured), fire-and-forgets the send so response timing can't leak account existence, and rate-limits 3/15-min per IP and per email in memory. **Email is Resend** (`services/email.ts`, plain fetch): `resend_api_key`/`email_from` DB-first with `RESEND_API_KEY`/`EMAIL_FROM` fallback, admin Settings card with send-test button; reset links target `APP_URL` → first CORS origin → `BETTER_AUTH_URL`. Web: `/forgot-password` + `/reset-password?token=` pages; mobile: "Forgot password?" on the sign-in screen reuses the typed email (no new screen — the emailed link opens web) |
+
+**Next: Phase 6 remainder (still open)** — email verification (better-auth config
+flip, can ride on `services/email.ts` now), data export (JSON/CSV), backlog
+randomizer with filters, admin panel (users, password resets, registration
+toggle, settings).
 **Deployment to Bryan's Ubuntu/Portainer server is the current focus** (v1's compose
 file to be provided for reference).
 
 ## Deferred / known gaps
 
 - Light theme (preference stored, no light stylesheet) — Phase 6.
-- Email verification / password reset — Phase 6 (better-auth config flip + SMTP).
+- Email verification — Phase 6 (better-auth config flip; `services/email.ts` can send it).
+  Password reset is **done** (phase 14) — never log a reset URL, and keep new reset
+  logic in `routes/auth-recovery.ts`, not better-auth's built-in (raw-token) flow.
+- Resend's default `onboarding@resend.dev` sender only delivers to the Resend account
+  owner's inbox — a verified domain in `email_from` is required for other users' resets.
 - Shelf photos of physical games are untested against real photos; tesseract can't read
   spines — needs `ANTHROPIC_API_KEY` (vision) for good results.
 - Severely mangled OCR ("sonELAB" for BONELAB) won't auto-match — by design, the review

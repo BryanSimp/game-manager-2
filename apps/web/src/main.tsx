@@ -24,6 +24,8 @@ import { PreferencesPage } from "./pages/Preferences.js";
 import { DashboardPage } from "./pages/Dashboard.js";
 import { LoginPage } from "./pages/Login.js";
 import { RegisterPage } from "./pages/Register.js";
+import { ForgotPasswordPage } from "./pages/ForgotPassword.js";
+import { ResetPasswordPage } from "./pages/ResetPassword.js";
 import "./styles.css";
 
 const rootRoute = createRootRoute({
@@ -47,6 +49,15 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/dashboard", component: DashboardPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/login", component: LoginPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/register", component: RegisterPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/forgot-password", component: ForgotPasswordPage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/reset-password",
+    component: ResetPasswordPage,
+    validateSearch: (search: Record<string, unknown>) => ({
+      token: typeof search.token === "string" ? search.token : "",
+    }),
+  }),
 ];
 
 const router = createRouter({ routeTree: rootRoute.addChildren(routes) });

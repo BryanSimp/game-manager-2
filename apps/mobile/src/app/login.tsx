@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Text, TouchableOpacity, StyleSheet } from "react-native";
+import { Alert, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
-import { loginSchema } from "@gm/shared";
+import { loginSchema, requestPasswordResetSchema } from "@gm/shared";
+import { api } from "@/lib/api";
 import { authClient } from "@/lib/auth";
 import { AuthButton, AuthError, AuthInput, AuthScreen } from "@/components/auth-form";
 import { colors, space, type } from "@/lib/theme";
@@ -30,6 +31,25 @@ export default function LoginScreen() {
     router.replace("/");
   }
 
+  // No separate screen: uses the email already typed above, and the emailed
+  // link opens the web app's reset form.
+  async function onForgotPassword() {
+    const parsed = requestPasswordResetSchema.safeParse({ email });
+    if (!parsed.success) {
+      Alert.alert("Forgot password", "Enter your email above first, then tap this again.");
+      return;
+    }
+    try {
+      const res = await api.requestPasswordReset(parsed.data.email);
+      Alert.alert("Check your email", res.message);
+    } catch (err) {
+      Alert.alert(
+        "Forgot password",
+        err instanceof Error ? err.message : "Couldn't request a reset — try again later.",
+      );
+    }
+  }
+
   return (
     <AuthScreen subtitle="Sign in to your library">
       <AuthError message={error} />
@@ -50,6 +70,9 @@ export default function LoginScreen() {
       <AuthButton label="Sign in" onPress={onSubmit} busy={busy} />
       <TouchableOpacity onPress={() => router.push("/register")} style={styles.linkRow}>
         <Text style={[type.label, styles.link]}>No account? Create one</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={onForgotPassword} style={styles.linkRow}>
+        <Text style={[type.label, styles.link]}>Forgot your password?</Text>
       </TouchableOpacity>
     </AuthScreen>
   );

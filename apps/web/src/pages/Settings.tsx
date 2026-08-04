@@ -17,6 +17,34 @@ export function SettingsPage() {
   const [sgdbKey, setSgdbKey] = useState("");
   const [sgdbMessage, setSgdbMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
+  const [emailKey, setEmailKey] = useState("");
+  const [emailFrom, setEmailFrom] = useState("");
+  const [emailMessage, setEmailMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(
+    null,
+  );
+
+  const saveEmail = useMutation({
+    mutationFn: () => api.saveEmailSettings(emailKey.trim(), emailFrom.trim() || undefined),
+    onSuccess: () => {
+      setEmailKey("");
+      setEmailMessage({ kind: "ok", text: "Resend key saved — password reset emails are on." });
+      queryClient.invalidateQueries({ queryKey: ["admin-settings"] });
+    },
+    onError: (err) =>
+      setEmailMessage({ kind: "err", text: err instanceof Error ? err.message : "Save failed" }),
+  });
+
+  const testEmail = useMutation({
+    mutationFn: () => api.testEmail(),
+    onSuccess: () =>
+      setEmailMessage({ kind: "ok", text: "Test email sent — check your inbox." }),
+    onError: (err) =>
+      setEmailMessage({
+        kind: "err",
+        text: `Test failed: ${err instanceof Error ? err.message : "unknown error"}`,
+      }),
+  });
+
   const saveSgdb = useMutation({
     mutationFn: () => api.saveSteamGridDbApiKey(sgdbKey.trim()),
     onSuccess: () => {
@@ -259,6 +287,82 @@ export function SettingsPage() {
               }`}
             >
               {sgdbMessage.text}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="mt-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <h2 className="text-lg font-semibold">Email (Resend)</h2>
+        <p className="mt-1 text-sm text-zinc-400">
+          Powers "Forgot password?" reset emails. Status:{" "}
+          {settings.data?.emailConfigured ? (
+            <span className="font-medium text-emerald-400">
+              configured{settings.data.emailFrom ? ` (sending as ${settings.data.emailFrom})` : ""}
+            </span>
+          ) : (
+            <span className="font-medium text-amber-400">not configured</span>
+          )}
+        </p>
+        <ol className="mt-4 list-inside list-decimal space-y-1 rounded-lg bg-zinc-950 p-4 text-sm text-zinc-400">
+          <li>
+            Create an API key at{" "}
+            <a
+              href="https://resend.com/api-keys"
+              target="_blank"
+              rel="noreferrer"
+              className="text-indigo-400 hover:underline"
+            >
+              resend.com/api-keys
+            </a>{" "}
+            (free tier is plenty for resets)
+          </li>
+          <li>
+            To send from your own domain, verify it under Domains first — without one, emails go
+            out via Resend's test sender and only reach the Resend account owner
+          </li>
+        </ol>
+        <div className="mt-4 space-y-3">
+          <input
+            value={emailKey}
+            onChange={(e) => setEmailKey(e.target.value)}
+            placeholder="Resend API key"
+            type="password"
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+          />
+          <input
+            value={emailFrom}
+            onChange={(e) => setEmailFrom(e.target.value)}
+            placeholder='From address (optional) — e.g. Game Manager <noreply@yourdomain.com>'
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+          />
+          <div className="flex gap-3">
+            <button
+              onClick={() => saveEmail.mutate()}
+              disabled={!emailKey.trim() || saveEmail.isPending}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {saveEmail.isPending ? "Saving…" : "Save"}
+            </button>
+            {settings.data?.emailConfigured && (
+              <button
+                onClick={() => testEmail.mutate()}
+                disabled={testEmail.isPending}
+                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+              >
+                {testEmail.isPending ? "Sending…" : "Send test email"}
+              </button>
+            )}
+          </div>
+          {emailMessage && (
+            <p
+              className={`rounded-lg border px-3 py-2 text-sm ${
+                emailMessage.kind === "ok"
+                  ? "border-emerald-900 bg-emerald-950 text-emerald-300"
+                  : "border-red-900 bg-red-950 text-red-300"
+              }`}
+            >
+              {emailMessage.text}
             </p>
           )}
         </div>
