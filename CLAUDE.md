@@ -107,6 +107,31 @@ Phase 0–8 roadmap — read it before making design decisions.
   game — set from the game's page ("Wrong game?"), reviewed in the Steam card.
 - **jsonb only for display config** (dashboard layout, status colors) — everything else
   that v1 stored as JSON strings is normalized tables here.
+- **Security hardening** (pre-deployment pass): every stored image — uploaded
+  *or* fetched from an allowlisted host — goes through
+  `services/image-pipeline.ts`: magic-byte sniff (PNG/JPEG/WebP/AVIF; the
+  client's mimetype header is never consulted), full re-encode through
+  `sharp` (strips EXIF/GPS, destroys polyglot files, `rotate()` first so
+  phone photos keep their orientation), 8192² pixel cap against
+  decompression bombs; AVIF re-encodes to JPEG (AVIF encode is seconds of
+  CPU). Upload limit is 5MB (multipart), remote fetches capped at 20MB —
+  filenames were already the DB row's uuid. `plugins/sanitize.ts` is a global
+  preValidation hook stripping *active* HTML only (script/iframe blocks,
+  `on*=` handlers, `javascript:` URIs) from body/query strings — plain text
+  like "boss < 50% hp" must survive, and `/api/auth/*` is skipped because
+  altering a password silently breaks the account (React escaping remains
+  the primary XSS defense; this keeps payloads out of the DB for future
+  non-escaping consumers). `@fastify/rate-limit`: global 1000/min per IP
+  (`trustProxy: true` — the API only ever sits behind Traefik or the Vite
+  proxy, so X-Forwarded-For is honest), with tight per-route configs in
+  `plugins/rate-limits.ts` for the expensive routes: wiki scrape 5/min
+  (Fandom is Cloudflare-fronted and bans IPs), uploads 20/min, art/cover
+  browses 30/min, OCR imports 10/min, barcode 10/min (UPCitemdb ~100/day).
+  better-auth's own `rateLimit` guards credentials: sign-in 5/min,
+  sign-up 5/hour. SQL was already clean (Drizzle parameterizes everything,
+  including tagged `sql` templates); the one real find was
+  `suggestMissionsFromUrl` accepting any host *ending* in "fandom.com"
+  ("evil-fandom.com") — now exact-host or dot-suffix plus http(s) only.
 - **One funnel for category badges**: `statusChip()` (`apps/web/src/lib/format.ts`)
   resolves colour *and* applies `preferences.badge_opacity`, so the opacity setting
   lands on every badge on every page for free. Mobile mirrors it through
@@ -174,7 +199,11 @@ was dev-only). Never use `db push`.
 
 | 13 sharing + corrections | see git log | **Collections publish/adopt** (migration 0015): `is_public` + `adopted_from_id`, `GET /api/collections/public`, `POST /:id/adopt` deep-copying games and links, star badge on both apps, Yours/Public tabs. Adding a game is now a **search** (library first, IGDB underneath) and accepts `igdbId`, so a collection can list games you don't own. **Manual play times** (`PUT /api/library/:id/time-to-beat`) with an "Add play time" affordance when IGDB has none. Mobile caught up on three things web had: a **half-star rating** widget, **cover browsing/upload**, and **console art browsing/upload**. Header button became a hamburger |
 
-| 14 password reset | see git log | **Not the better-auth built-in** — better-auth 1.6 stores reset tokens *raw* in `verification`, so `routes/auth-recovery.ts` owns the flow: `password_reset_token` (migration 0016) keeps only a SHA-256 hash of a 32-byte token, 15-min expiry, single-use (consumed via `DELETE … RETURNING`), one live token per user. The routes are static `POST /api/auth/request-reset` / `reset-password`, which Fastify matches ahead of the better-auth wildcard — deliberately shadowing its unhashed equivalents. The password *update* still goes through `auth.$context` (scrypt hash + `internalAdapter`, mirroring better-auth's own resetPassword) and revokes every session. Request-reset answers identically for known/unknown emails, checks config *before* touching accounts (503 when unconfigured), fire-and-forgets the send so response timing can't leak account existence, and rate-limits 3/15-min per IP and per email in memory. **Email is Resend** (`services/email.ts`, plain fetch): `resend_api_key`/`email_from` DB-first with `RESEND_API_KEY`/`EMAIL_FROM` fallback, admin Settings card with send-test button; reset links target `APP_URL` → first CORS origin → `BETTER_AUTH_URL`. Web: `/forgot-password` + `/reset-password?token=` pages; mobile: "Forgot password?" on the sign-in screen reuses the typed email (no new screen — the emailed link opens web) |
+| 13b collection views + bulk add | see git log | **Two views per collection**: the play-order graph, and a **list** sortable by custom order / title / release date / time to beat. `collection_games.sort_order` (migration 0016, backfilled from the graph layout) holds the custom order, written only by `PUT /:id/order` so the graph and the list can't scramble each other. Rows link to your copy of a game, or to the add-game search when you don't own it (`/add?q=`). **`POST /:id/add-to-library`** adds every game in a collection at once with a chosen category and platform — the reason to browse a public one |
+
+| 14 admin analytics | see git log | **`analytics_events`** (migration 0018, jsonb meta, no FK on user_id so a batched flush can't fail on a deleted user; backfills funnel history from `user`/`steam_accounts`/`user_games`/`collections`). **Non-blocking logger** (`services/analytics.ts`): in-memory buffer, batched insert every 5s (or 200 events), capped at 5k, timer `unref`'d, failed flush dropped — telemetry never breaks the app. Fastify `onResponse` hook logs authenticated activity via `request.sessionUser` (stashed by `getSessionUser`), after the reply is sent. Funnel events: `sign_up` (better-auth after-create hook), `steam_link`, `game_added` (single/bulk/Steam auto-add), `collection_created` (create + adopt). `logScrape()` records outcomes for missions/boxart/upc/steam jobs/OCR. **Admin endpoints** (`routes/analytics.ts`): funnel, DAU (30d, gap-filled), WAU/MAU, avg games/user, avg session (30-min-gap sessionization in SQL), scraper success rates (7d) + recent failures; both flush the buffer first so numbers are current. **Web `/admin/analytics`** (Observable Plot, dark-only): KPI tiles, funnel bars on a validated blue ordinal ramp, DAU line with crosshair tip + table twin, scraper meter bars polling every 15s. Verified end-to-end (backfill counts, live activity, real UPC scrape event) |
+
+| 15 password reset | see git log | **Not the better-auth built-in** — better-auth 1.6 stores reset tokens *raw* in `verification`, so `routes/auth-recovery.ts` owns the flow: `password_reset_token` (migration 0019) keeps only a SHA-256 hash of a 32-byte token, 15-min expiry, single-use (consumed via `DELETE … RETURNING`), one live token per user. The routes are static `POST /api/auth/request-reset` / `reset-password`, which Fastify matches ahead of the better-auth wildcard — deliberately shadowing its unhashed equivalents. The password *update* still goes through `auth.$context` (scrypt hash + `internalAdapter`, mirroring better-auth's own resetPassword) and revokes every session. Request-reset answers identically for known/unknown emails, checks config *before* touching accounts (503 when unconfigured), fire-and-forgets the send so response timing can't leak account existence, and rate-limits 3/15-min per IP and per email in memory. **Email is Resend** (`services/email.ts`, plain fetch): `resend_api_key`/`email_from` DB-first with `RESEND_API_KEY`/`EMAIL_FROM` fallback, admin Settings card with send-test button; reset links target `APP_URL` → first CORS origin → `BETTER_AUTH_URL`. Web: `/forgot-password` + `/reset-password?token=` pages; mobile: "Forgot password?" on the sign-in screen reuses the typed email (no new screen — the emailed link opens web) |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), backlog
@@ -187,7 +216,7 @@ file to be provided for reference).
 
 - Light theme (preference stored, no light stylesheet) — Phase 6.
 - Email verification — Phase 6 (better-auth config flip; `services/email.ts` can send it).
-  Password reset is **done** (phase 14) — never log a reset URL, and keep new reset
+  Password reset is **done** (phase 15) — never log a reset URL, and keep new reset
   logic in `routes/auth-recovery.ts`, not better-auth's built-in (raw-token) flow.
 - Resend's default `onboarding@resend.dev` sender only delivers to the Resend account
   owner's inbox — a verified domain in `email_from` is required for other users' resets.
@@ -197,9 +226,35 @@ file to be provided for reference).
   UI's re-search covers it.
 - Orphaned image cleanup job not yet written (images accumulate on the volume).
 - `import_jobs.status='done'` cleanup/pruning not implemented.
+- `analytics_events` has no retention job: `activity` rows accrue one per
+  authenticated request. Fine at self-hosted scale for a long while; a periodic
+  prune of old `activity` events (funnel events should stay) is the upgrade path.
 - Barcode scan flow verified end-to-end at the API level (real BOTW/GoW barcodes) but
   the camera screen itself needs an on-device Expo Go run — simulators have no camera.
 - Play-order graph *editing* is web-only; mobile flattens the graph to an ordered list.
+- **A collection has two views, and two orderings to match.** The graph answers
+  "what branches into what" (`position_x/y` + `collection_links`); the list
+  answers "what's 1, 2, 3" (`collection_games.sort_order`, migration 0016).
+  They're deliberately independent — `PUT /:id/layout` only writes positions
+  and links, `PUT /:id/order` only writes `sort_order` — so rearranging the
+  graph can't scramble a numbered run you set by hand. Migration 0016
+  backfills `sort_order` from the existing layout (top-to-bottom,
+  left-to-right) so "Custom order" doesn't open as a jumble on collections
+  that already had a deliberate arrangement.
+- The list's other sorts (title, release date, time to beat) are derived, and
+  games missing the field sink to the bottom rather than sorting as zero —
+  an unknown release date isn't "the year 0". Reordering is only offered on
+  "Custom order", because a drag while sorted by title has nowhere to save to.
+- Tapping a row in the list view opens the game: **your** copy when you own it,
+  the add-game search when you don't (web passes `?q=<title>`, which is why
+  `/add` has a `validateSearch`). Rows stop being tappable while you're editing
+  the order — a mis-tap that navigates away would lose the whole draft.
+- **`POST /api/collections/:id/add-to-library`** pulls a whole collection in at
+  once, which is the point of browsing someone else's. Works on any collection
+  you can see (yours or public). Games you already own count as `skipped` and
+  keep their category — but the chosen platform *is* applied to them, the same
+  rule `POST /api/library/bulk` follows, because "I own this marathon on
+  Switch" is true of the ones you already had.
 - **Collections publish and adopt like checklists do** (migration 0015:
   `collections.is_public`, `adopted_from_id`). Adopting takes a **deep copy** —
   games, node positions and play-order links — not a live reference: your edits

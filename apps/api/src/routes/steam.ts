@@ -7,6 +7,7 @@ import { getPersonaName, resolveVanityUrl, steamConfigured } from "../services/s
 import { upsertGameFromIgdb } from "../services/catalog.js";
 import { enqueueSteamImport, enqueueSteamSync } from "../services/queue.js";
 import { steamJobRunning } from "../jobs/steam.js";
+import { logEvent } from "../services/analytics.js";
 
 const linkSchema = z.object({ steamId: z.string().min(2).max(100) });
 
@@ -81,6 +82,7 @@ export function registerSteamRoutes(app: FastifyInstance): void {
         target: schema.steamAccounts.userId,
         set: { steamId, personaName },
       });
+    logEvent("steam_link", user.id);
     return { ok: true, steamId, personaName };
   });
 

@@ -17,6 +17,10 @@ export const user = pgTable("user", {
   // shareable code others use to send a friend request; generated on first
   // use rather than at signup, so existing accounts don't need a backfill
   friendCode: text("friend_code").unique(),
+  // freemium: premium accounts see no ads. Flipped server-side only (admin /
+  // future billing webhook) — better-auth's additionalFields marks it
+  // input:false so a signup payload can never set it
+  isPremium: boolean("is_premium").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

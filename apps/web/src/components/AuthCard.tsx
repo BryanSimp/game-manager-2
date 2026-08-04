@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 
 export function AuthCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <main className="flex min-h-screen items-center justify-center p-4">
+    <main className="flex min-h-screen flex-col items-center justify-center p-4">
       <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900 p-8 shadow-xl">
         <h1 className="mb-1 text-center text-2xl font-bold tracking-tight">
           🎮 Game Manager
@@ -10,6 +11,17 @@ export function AuthCard({ title, children }: { title: string; children: ReactNo
         <p className="mb-6 text-center text-sm text-zinc-400">{title}</p>
         {children}
       </div>
+      <p className="mt-4 max-w-sm text-center text-xs text-zinc-600">
+        By continuing you confirm you are 13 or older and agree to the{" "}
+        <Link to="/terms" className="underline hover:text-zinc-400">
+          Terms of Service
+        </Link>{" "}
+        and{" "}
+        <Link to="/privacy" className="underline hover:text-zinc-400">
+          Privacy Policy
+        </Link>
+        .
+      </p>
     </main>
   );
 }

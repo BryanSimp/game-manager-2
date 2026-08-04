@@ -15,6 +15,7 @@ import { createManualGame, upsertGameFromIgdb } from "../services/catalog.js";
 import { isValidCategory } from "../services/categories.js";
 import { rememberConsoles } from "../services/consoles.js";
 import { defaultPlatformFor, defaultStatusFor } from "../services/preferences.js";
+import { logEvent } from "../services/analytics.js";
 
 const boxArtImage = alias(schema.images, "box_art_image");
 
@@ -345,6 +346,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       await rememberConsoles(user.id, ownership.map((p) => p.platformId));
     }
 
+    logEvent("game_added", user.id, { gameId });
     reply.status(201);
     return { id: created.id, gameId };
   });
@@ -406,6 +408,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (batchPlatforms.length > 0) {
       await rememberConsoles(user.id, batchPlatforms.map((p) => p.platformId));
     }
+    if (added > 0) logEvent("game_added", user.id, { count: added, bulk: true });
     return { added, skipped, errors };
   });
 

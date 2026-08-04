@@ -1,6 +1,9 @@
 import type {
   AddCollectionGameInput,
+  AddCollectionToLibraryInput,
+  AddCollectionToLibraryResult,
   AddGameInput,
+  AdminAnalyticsOverview,
   AdminSettings,
   BarcodeLookupResult,
   BulkAddItem,
@@ -35,6 +38,7 @@ import type {
   Platform,
   Preferences,
   PublicCollection,
+  ScraperHealth,
   SearchOptions,
   SearchResponse,
   Tag,
@@ -364,6 +368,29 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Set the flat list order. Separate from the graph layout — the list is a
+   * numbered run, the graph is branches. Games left out keep their place at
+   * the end.
+   */
+  saveCollectionOrder(id: string, gameIds: string[]): Promise<{ ok: true; ordered: number }> {
+    return this.request(`/api/collections/${id}/order`, {
+      method: "PUT",
+      body: JSON.stringify({ gameIds }),
+    });
+  }
+
+  /** Add every game in a collection to your library, in one category. */
+  addCollectionToLibrary(
+    id: string,
+    input: AddCollectionToLibraryInput,
+  ): Promise<AddCollectionToLibraryResult> {
+    return this.request(`/api/collections/${id}/add-to-library`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
   // ---- imports (OCR pipeline) ----
 
   createImageImport(
@@ -668,6 +695,16 @@ export class ApiClient {
 
   testIgdb(): Promise<{ ok: true }> {
     return this.request("/api/admin/settings/igdb/test", { method: "POST" });
+  }
+
+  /** Funnel, DAU and engagement aggregates for the admin analytics page. */
+  getAdminAnalytics(): Promise<AdminAnalyticsOverview> {
+    return this.request<AdminAnalyticsOverview>("/api/admin/analytics/overview");
+  }
+
+  /** Success rates for every external fetch source, last 7 days. */
+  getScraperHealth(): Promise<ScraperHealth> {
+    return this.request<ScraperHealth>("/api/admin/analytics/scrapers");
   }
 }
 
