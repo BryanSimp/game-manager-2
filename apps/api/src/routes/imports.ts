@@ -6,8 +6,7 @@ import { requireUser } from "../plugins/auth.js";
 import { saveUploadedImage } from "../services/images.js";
 import { enqueueOcrImport } from "../services/queue.js";
 import { extractTitles } from "../services/noise-filter.js";
-
-const ALLOWED_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+import { importRateLimit } from "../plugins/rate-limits.js";
 
 const textImportSchema = z.object({
   source: z.literal("text_paste"),
@@ -26,23 +25,26 @@ function jobToJson(job: typeof schema.importJobs.$inferSelect) {
 
 export function registerImportRoutes(app: FastifyInstance): void {
   // Image import: multipart file + source field (screenshot | shelf_photo)
-  app.post("/api/imports", async (request, reply) => {
+  app.post("/api/imports", { config: importRateLimit }, async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
 
     if (request.isMultipart()) {
       const file = await request.file();
       if (!file) return reply.status(400).send({ message: "No image uploaded" });
-      if (!ALLOWED_MIMES.has(file.mimetype)) {
-        return reply.status(400).send({ message: "Image must be JPEG, PNG, or WebP" });
-      }
       const sourceField = file.fields.source;
       const sourceValue =
         sourceField && "value" in sourceField ? String(sourceField.value) : "screenshot";
       const source = sourceValue === "shelf_photo" ? "shelf_photo" : "screenshot";
 
+      // the mimetype header is not consulted — saveUploadedImage sniffs the bytes
       const buffer = await file.toBuffer();
-      const imageId = await saveUploadedImage(buffer, file.mimetype, "shelf_photo", user.id);
+      const imageId = await saveUploadedImage(buffer, "shelf_photo", user.id);
+      if (!imageId) {
+        return reply
+          .status(400)
+          .send({ message: "That file isn't a valid image — PNG, JPEG, WebP, or AVIF only" });
+      }
       const [job] = await db
         .insert(schema.importJobs)
         .values({ userId: user.id, source, imageId })

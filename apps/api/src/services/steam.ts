@@ -3,6 +3,13 @@ import { getSetting } from "./settings.js";
 /**
  * Official Steam Web API (requires the user's game details to be public).
  * Key resolves DB settings first, env fallback — same pattern as IGDB.
+ *
+ * COMPLIANCE: used under the Steam Web API Terms of Use
+ * (https://steamcommunity.com/dev/apiterms) — throttled well below the
+ * 100k calls/day cap, and only ever fetching data for the account the user
+ * linked themselves. The required "Powered by Steam" attribution (and the
+ * no-endorsement-by-Valve disclaimer) is rendered in the site footer:
+ * apps/web/src/components/Footer.tsx.
  */
 
 const API = "https://api.steampowered.com";

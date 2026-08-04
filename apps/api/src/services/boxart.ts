@@ -183,7 +183,8 @@ async function downloadScan(repo: string, file: string, depth = 0): Promise<stri
     if (mime.startsWith("image/")) {
       const buffer = Buffer.from(await res.arrayBuffer());
       if (buffer.length < 128) return null; // not a real image
-      const imageId = await saveUploadedImage(buffer, mime, "cover", null);
+      const imageId = await saveUploadedImage(buffer, "cover", null);
+      if (!imageId) return null; // didn't sniff as a real image
       // PNG IHDR carries dimensions — stored so boxes can match the scan's aspect
       if (buffer.length > 24 && buffer.readUInt32BE(12) === 0x49484452) {
         await db

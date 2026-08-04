@@ -563,7 +563,10 @@ export async function suggestMissionsFromUrl(url: string): Promise<MissionSugges
   } catch {
     return null;
   }
-  if (!parsed.host.endsWith("fandom.com")) return null;
+  // exact-host or dot-suffix match — a bare endsWith("fandom.com") would let
+  // "evil-fandom.com" turn this into a fetch-any-host proxy
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  if (parsed.host !== "fandom.com" && !parsed.host.endsWith(".fandom.com")) return null;
 
   const match = /\/wiki\/(.+)$/.exec(parsed.pathname);
   if (!match) return null;

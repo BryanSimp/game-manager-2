@@ -1,5 +1,17 @@
 import { getIgdbCredentials } from "./settings.js";
 
+/**
+ * IGDB client.
+ *
+ * COMPLIANCE: IGDB data is used under the Twitch Developer Services Agreement
+ * and the IGDB API Terms of Use (https://api-docs.igdb.com). Requests are
+ * server-side only and throttled below IGDB's published 4 req/s limit; data
+ * is cached into the local catalog for display in this app and must not be
+ * resold or redistributed as a dataset. The attribution the terms call for
+ * ("game metadata and covers provided by IGDB") is rendered in the site
+ * footer: apps/web/src/components/Footer.tsx.
+ */
+
 export interface IgdbGame {
   id: number;
   name: string;

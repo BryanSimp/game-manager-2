@@ -1,10 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import { OWNERSHIP_FORMATS } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { upsertGameFromIgdb } from "../services/catalog.js";
 import { logEvent } from "../services/analytics.js";
+import { isValidCategory } from "../services/categories.js";
+import { rememberConsoles } from "../services/consoles.js";
 
 const collectionSchema = z.object({
   name: z.string().min(1).max(100),
@@ -74,13 +77,12 @@ async function previewsFor(
       title: schema.games.title,
       coverImageId: schema.games.coverImageId,
       coverUrl: schema.games.coverUrl,
-      x: schema.collectionGames.positionX,
-      y: schema.collectionGames.positionY,
+      sortOrder: schema.collectionGames.sortOrder,
     })
     .from(schema.collectionGames)
     .innerJoin(schema.games, eq(schema.games.id, schema.collectionGames.gameId))
     .where(inArray(schema.collectionGames.collectionId, collectionIds))
-    .orderBy(asc(schema.collectionGames.positionY), asc(schema.collectionGames.positionX));
+    .orderBy(asc(schema.collectionGames.sortOrder));
 
   for (const row of rows) {
     const list = byCollection.get(row.collectionId) ?? [];
@@ -249,6 +251,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
           gameId: g.gameId,
           positionX: g.positionX,
           positionY: g.positionY,
+          sortOrder: g.sortOrder,
         })),
       );
     }
@@ -336,7 +339,10 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         gameId: schema.collectionGames.gameId,
         x: schema.collectionGames.positionX,
         y: schema.collectionGames.positionY,
+        sortOrder: schema.collectionGames.sortOrder,
         title: schema.games.title,
+        releaseDate: schema.games.releaseDate,
+        ttbMain: schema.games.ttbMain,
         coverImageId: schema.games.coverImageId,
         coverUrl: schema.games.coverUrl,
         userGameId: schema.userGames.id,
@@ -371,6 +377,9 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         coverSrc: gameCover(n),
         x: n.x,
         y: n.y,
+        sortOrder: n.sortOrder,
+        releaseDate: n.releaseDate,
+        ttbMain: n.ttbMain,
         userGameId: n.userGameId,
         status: n.status,
       })),
@@ -428,6 +437,8 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         gameId,
         positionX: 80 + (n % 5) * 150,
         positionY: 80 + Math.floor(n / 5) * 190,
+        // new games land at the end of the flat list
+        sortOrder: n + 1,
       })
       .onConflictDoNothing();
     return { ok: true, gameId };
@@ -457,6 +468,158 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
           ),
         );
       return { ok: true };
+    },
+  );
+
+  /**
+   * Set the flat list order. Independent of the graph: the list view is for
+   * "1, 2, 3…" and the graph is for branches, and people want both.
+   *
+   * Ids not in the collection are ignored, and anything the caller left out
+   * keeps its place at the end, so a stale client can't silently drop a game
+   * that was added from another device.
+   */
+  app.put<{ Params: { id: string } }>("/api/collections/:id/order", async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return;
+    const collection = await ownedCollection(user.id, request.params.id);
+    if (!collection) return reply.status(404).send({ message: "Collection not found" });
+
+    const parsed = z
+      .object({ gameIds: z.array(z.string().uuid()).max(500) })
+      .safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ message: "gameIds required" });
+
+    const existing = await db
+      .select({ gameId: schema.collectionGames.gameId })
+      .from(schema.collectionGames)
+      .where(eq(schema.collectionGames.collectionId, collection.id));
+    const known = new Set(existing.map((e) => e.gameId));
+
+    const ordered = parsed.data.gameIds.filter((gameId) => known.has(gameId));
+    const seen = new Set(ordered);
+    const rest = existing.map((e) => e.gameId).filter((gameId) => !seen.has(gameId));
+
+    let position = 0;
+    for (const gameId of [...ordered, ...rest]) {
+      position += 1;
+      await db
+        .update(schema.collectionGames)
+        .set({ sortOrder: position })
+        .where(
+          and(
+            eq(schema.collectionGames.collectionId, collection.id),
+            eq(schema.collectionGames.gameId, gameId),
+          ),
+        );
+    }
+    return { ok: true, ordered: position };
+  });
+
+  /**
+   * Add every game in a collection to your library at once — the reason to
+   * browse someone else's in the first place.
+   *
+   * Works on any collection you can see (yours, or a public one). Games you
+   * already own are counted as skipped rather than re-filed, but the chosen
+   * platform is applied to them too: "I own this marathon on Switch" is true
+   * of the ones you already had.
+   */
+  app.post<{ Params: { id: string } }>(
+    "/api/collections/:id/add-to-library",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+
+      const [collection] = await db
+        .select()
+        .from(schema.collections)
+        .where(eq(schema.collections.id, request.params.id));
+      if (!collection || (collection.userId !== user.id && !collection.isPublic)) {
+        return reply.status(404).send({ message: "Collection not found" });
+      }
+
+      const parsed = z
+        .object({
+          status: z.string().min(1),
+          platforms: z
+            .array(
+              z.object({
+                platformId: z.string().uuid(),
+                format: z.enum(OWNERSHIP_FORMATS),
+              }),
+            )
+            .max(10)
+            .optional(),
+        })
+        .safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+      }
+      if (!(await isValidCategory(user.id, parsed.data.status))) {
+        return reply.status(400).send({ message: "Unknown category" });
+      }
+
+      const rows = await db
+        .select({ gameId: schema.collectionGames.gameId, title: schema.games.title })
+        .from(schema.collectionGames)
+        .innerJoin(schema.games, eq(schema.games.id, schema.collectionGames.gameId))
+        .where(eq(schema.collectionGames.collectionId, collection.id))
+        .orderBy(asc(schema.collectionGames.sortOrder));
+
+      const platforms = parsed.data.platforms ?? [];
+      let added = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+
+      for (const row of rows) {
+        try {
+          const [created] = await db
+            .insert(schema.userGames)
+            .values({ userId: user.id, gameId: row.gameId, status: parsed.data.status })
+            .onConflictDoNothing()
+            .returning({ id: schema.userGames.id });
+          if (created) added += 1;
+          else skipped += 1;
+
+          if (platforms.length > 0) {
+            let userGameId = created?.id;
+            if (!userGameId) {
+              const [existing] = await db
+                .select({ id: schema.userGames.id })
+                .from(schema.userGames)
+                .where(
+                  and(
+                    eq(schema.userGames.userId, user.id),
+                    eq(schema.userGames.gameId, row.gameId),
+                  ),
+                );
+              userGameId = existing?.id;
+            }
+            if (userGameId) {
+              await db
+                .insert(schema.userGamePlatforms)
+                .values(
+                  platforms.map((p) => ({
+                    userGameId: userGameId!,
+                    platformId: p.platformId,
+                    format: p.format,
+                  })),
+                )
+                .onConflictDoNothing();
+            }
+          }
+        } catch (err) {
+          errors.push(`${row.title}: ${err instanceof Error ? err.message : "failed"}`);
+        }
+      }
+
+      if (platforms.length > 0) {
+        // filing games under a console adds it to your consoles list
+        await rememberConsoles(user.id, platforms.map((p) => p.platformId));
+      }
+      if (added > 0) logEvent("game_added", user.id, { count: added, bulk: true });
+      return { added, skipped, errors };
     },
   );
 
