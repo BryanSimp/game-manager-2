@@ -54,7 +54,8 @@ stack editor:
 
 | Var | Value |
 |---|---|
-| `GM_HOST` | `games.brysimp.com` (already the default) |
+| `GM_HOST` | `gamesmanager.app` (already the default) |
+| `GM_OLD_HOST` | `games.brysimp.com` — 301s to `GM_HOST`; drop it once nothing points there |
 | `POSTGRES_USER` | e.g. `gm` |
 | `POSTGRES_PASSWORD` | generate one |
 | `BETTER_AUTH_SECRET` | `openssl rand -base64 32` — never reuse v1's |
@@ -62,12 +63,58 @@ stack editor:
 | `IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET` | optional — can be pasted into web Settings instead |
 | `STEAM_API_KEY` | optional — same, Settings UI works |
 | `ANTHROPIC_API_KEY` | optional — enables Claude-vision OCR for shelf photos |
+| `RESEND_API_KEY` / `EMAIL_FROM` | optional — password-reset email; DB Settings win over both. No key = the reset flow can't send |
 | `SERVER_LAN_IP` | the server's LAN IP (e.g. `192.168.68.60`) — advertised by the Expo bundler so phones can reach it |
 | `TZ` | `America/Chicago` |
 
 The API container applies DB migrations automatically on boot.
 
-## Cutover from v1 (same URL)
+## Moving to gamesmanager.app
+
+Both zones sit on the same Cloudflare account, and `games.brysimp.com` is
+**DNS-only** (grey cloud) straight to the house — Traefik terminates TLS itself
+and gets certs over the `cloudflare` DNS-01 resolver, never port 80. So the move
+is three things: a DNS record, a token that can see the new zone, and `GM_HOST`.
+
+1. **Cloudflare → gamesmanager.app → DNS**: add an `A` record, name `@`, value =
+   whatever `brysimp.com`'s apex A record holds (`96.35.10.148` today),
+   **proxy status DNS only**. If that IP is kept current by a dynamic-DNS client
+   pointed at `brysimp.com`, use a `CNAME` `@` → `brysimp.com` instead —
+   Cloudflare flattens an apex CNAME, so the new domain follows the old one's
+   IP without a second DDNS entry. Add `www` → `gamesmanager.app` (CNAME, DNS
+   only) if you want the redirect router below to catch it.
+2. **The DNS-01 token must cover the new zone.** Wherever Traefik reads
+   `CF_DNS_API_TOKEN`, that token was almost certainly scoped to *brysimp.com
+   only*; ACME then fails for gamesmanager.app with a zone-lookup error and no
+   cert is ever issued. Cloudflare → My Profile → API Tokens → edit the token →
+   Zone Resources → add `gamesmanager.app` (or *All zones from an account*).
+   Editing in place takes effect immediately; a brand-new token means updating
+   Traefik's env and restarting it.
+3. Redeploy this stack with `GM_HOST=gamesmanager.app`. Traefik requests the new
+   cert on first request — allow a minute, and watch `docker logs traefik` if it
+   doesn't come.
+
+Notes:
+
+- **Everyone signs in again.** `BETTER_AUTH_URL` moving means the existing
+  session cookies were issued for a host that no longer serves the app.
+  Accounts, libraries and images are in Postgres and the `gm2-images` volume,
+  untouched.
+- **The phone needs a nudge**: restart the `mobile` container so Metro re-inlines
+  `EXPO_PUBLIC_API_URL`, then fully reload the app in Expo Go and sign in again
+  (the old session cookie lives in SecureStore).
+- **`.app` is HSTS-preloaded** — browsers refuse plain http to it, always. That
+  is fine here (DNS-01 needs no port 80), but any link you type must be `https://`.
+- The `gm2-legacy` router in the compose file 301s `games.brysimp.com` and
+  `www.gamesmanager.app` to the apex. Leave `games.brysimp.com`'s DNS record in
+  place while that router exists — it still has to resolve to the server for the
+  redirect to happen, and Traefik still gets a cert for it.
+- Only if you later turn the orange cloud **on**: set SSL/TLS mode to
+  **Full (strict)** (Flexible would loop against Traefik's https redirect), and
+  know that Cloudflare proxies standard ports only — the Expo bundler on 8081
+  stays LAN-only regardless, which it already is.
+
+## Cutover from v1 (historical — same URL)
 
 Both stacks claim ``Host(`games.brysimp.com`)``, so don't run them side by side:
 
@@ -80,7 +127,7 @@ Both stacks claim ``Host(`games.brysimp.com`)``, so don't run them side by side:
    you're happy with v2).
 3. Deploy the `game-manager-2` stack. Traefik picks up the new labels within
    seconds; the URL now serves v2.
-4. Open https://games.brysimp.com, register — **the first account becomes
+4. Open the site, register — **the first account becomes
    admin** — then paste IGDB credentials in Settings and set
    `ALLOW_REGISTRATION=false` once the household is on board.
 
@@ -115,7 +162,7 @@ app.
   gm2-api, gm2-web, and gm2-mobile — it won't touch other containers on the
   server), pulls new `:latest` images, restarts the containers, and prunes old
   images.
-- Net effect: a push lands on games.brysimp.com in under ~10 minutes with no
+- Net effect: a push lands on gamesmanager.app in under ~10 minutes with no
   manual step. To skip auto-updates for a while, stop the watchtower container;
   manual update = Portainer → stack → "Pull and redeploy".
 - The web app shows the deployed build's short commit sha bottom-right once
