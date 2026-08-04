@@ -7,6 +7,7 @@ import { requireUser } from "../plugins/auth.js";
 import { backfillPlatformMeta, rememberConsoles } from "../services/consoles.js";
 import { searchConsoleArt } from "../services/console-art.js";
 import { cacheRemoteImage, saveUploadedImage } from "../services/images.js";
+import { externalLookupRateLimit, uploadRateLimit } from "../plugins/rate-limits.js";
 
 const addSchema = z.object({ platformId: z.string().uuid() });
 
@@ -16,8 +17,6 @@ const artUrlSchema = z.object({ url: z.string().url().max(1000) });
 const ALLOWED_ART_HOSTS = ["images.igdb.com", "upload.wikimedia.org"];
 
 const parentPlatform = alias(schema.platforms, "parent_platform");
-
-const ALLOWED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 /** How many covers each console card previews. */
 const PREVIEW_LIMIT = 8;
@@ -178,6 +177,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
    */
   app.post<{ Params: { platformId: string } }>(
     "/api/consoles/:platformId/image",
+    { config: uploadRateLimit },
     async (request, reply) => {
       const user = await requireUser(request, reply);
       if (!user) return;
@@ -194,11 +194,14 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
 
       const file = await request.file();
       if (!file) return reply.status(400).send({ message: "No file uploaded" });
-      if (!ALLOWED_IMAGE_MIMES.has(file.mimetype)) {
-        return reply.status(400).send({ message: "Console art must be a JPEG, PNG, or WebP image" });
-      }
+      // the mimetype header is not consulted — saveUploadedImage sniffs the bytes
       const buffer = await file.toBuffer();
-      const imageId = await saveUploadedImage(buffer, file.mimetype, "console_logo", user.id);
+      const imageId = await saveUploadedImage(buffer, "console_logo", user.id);
+      if (!imageId) {
+        return reply
+          .status(400)
+          .send({ message: "That file isn't a valid image — PNG, JPEG, WebP, or AVIF only" });
+      }
       await db
         .update(schema.userConsoles)
         .set({ customImageId: imageId })
@@ -215,6 +218,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
   /** Art you could use for this console, to browse instead of hunting for a file. */
   app.get<{ Params: { platformId: string } }>(
     "/api/consoles/:platformId/images",
+    { config: externalLookupRateLimit },
     async (request, reply) => {
       const user = await requireUser(request, reply);
       if (!user) return;
@@ -236,6 +240,7 @@ export function registerConsoleRoutes(app: FastifyInstance): void {
    */
   app.post<{ Params: { platformId: string } }>(
     "/api/consoles/:platformId/image/from-url",
+    { config: uploadRateLimit },
     async (request, reply) => {
       const user = await requireUser(request, reply);
       if (!user) return;

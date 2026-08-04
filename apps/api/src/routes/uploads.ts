@@ -5,8 +5,9 @@ import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { cacheRemoteImage, saveUploadedImage } from "../services/images.js";
 import { searchCovers, getSteamGridDbKey } from "../services/steamgriddb.js";
+import { externalLookupRateLimit, uploadRateLimit } from "../plugins/rate-limits.js";
 
-const ALLOWED_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const BAD_IMAGE = "That file isn't a valid image — PNG, JPEG, WebP, or AVIF only";
 
 /** Hosts the cover-from-url endpoint will fetch, so it can't be used as a proxy. */
 const ALLOWED_COVER_HOSTS = ["steamgriddb.com", "cdn2.steamgriddb.com", "cdn.steamgriddb.com"];
@@ -14,7 +15,10 @@ const ALLOWED_COVER_HOSTS = ["steamgriddb.com", "cdn2.steamgriddb.com", "cdn.ste
 const coverUrlSchema = z.object({ url: z.string().url().max(1000) });
 
 export function registerUploadRoutes(app: FastifyInstance): void {
-  app.post<{ Params: { id: string } }>("/api/library/:id/cover", async (request, reply) => {
+  app.post<{ Params: { id: string } }>(
+    "/api/library/:id/cover",
+    { config: uploadRateLimit },
+    async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
     const [entry] = await db
@@ -25,23 +29,26 @@ export function registerUploadRoutes(app: FastifyInstance): void {
 
     const file = await request.file();
     if (!file) return reply.status(400).send({ message: "No file uploaded" });
-    if (!ALLOWED_MIMES.has(file.mimetype)) {
-      return reply.status(400).send({ message: "Cover must be a JPEG, PNG, or WebP image" });
-    }
+    // the mimetype header is not consulted — saveUploadedImage sniffs the bytes
     const buffer = await file.toBuffer();
-    const imageId = await saveUploadedImage(buffer, file.mimetype, "custom_cover", user.id);
+    const imageId = await saveUploadedImage(buffer, "custom_cover", user.id);
+    if (!imageId) return reply.status(400).send({ message: BAD_IMAGE });
     await db
       .update(schema.userGames)
       .set({ customCoverImageId: imageId, updatedAt: new Date() })
       .where(eq(schema.userGames.id, entry.id));
     return { imageId, coverSrc: `/api/images/${imageId}` };
-  });
+    },
+  );
 
   /**
    * Alternate covers for a game, from SteamGridDB. Empty list rather than an
    * error when no key is configured — the UI hides the browser in that case.
    */
-  app.get<{ Params: { id: string } }>("/api/library/:id/covers", async (request, reply) => {
+  app.get<{ Params: { id: string } }>(
+    "/api/library/:id/covers",
+    { config: externalLookupRateLimit },
+    async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
     const [row] = await db
@@ -54,10 +61,14 @@ export function registerUploadRoutes(app: FastifyInstance): void {
     const configured = !!(await getSteamGridDbKey());
     if (!configured) return { configured: false, covers: [] };
     return { configured: true, covers: await searchCovers(row.title, row.steamAppId) };
-  });
+    },
+  );
 
   /** Use one of those covers: downloaded server-side, then set as the custom cover. */
-  app.post<{ Params: { id: string } }>("/api/library/:id/cover/from-url", async (request, reply) => {
+  app.post<{ Params: { id: string } }>(
+    "/api/library/:id/cover/from-url",
+    { config: uploadRateLimit },
+    async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
     const parsed = coverUrlSchema.safeParse(request.body);
@@ -89,7 +100,8 @@ export function registerUploadRoutes(app: FastifyInstance): void {
       .set({ customCoverImageId: imageId, updatedAt: new Date() })
       .where(eq(schema.userGames.id, entry.id));
     return { imageId, coverSrc: `/api/images/${imageId}` };
-  });
+    },
+  );
 
   app.delete<{ Params: { id: string } }>("/api/library/:id/cover", async (request, reply) => {
     const user = await requireUser(request, reply);

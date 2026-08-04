@@ -107,6 +107,31 @@ Phase 0–8 roadmap — read it before making design decisions.
   game — set from the game's page ("Wrong game?"), reviewed in the Steam card.
 - **jsonb only for display config** (dashboard layout, status colors) — everything else
   that v1 stored as JSON strings is normalized tables here.
+- **Security hardening** (pre-deployment pass): every stored image — uploaded
+  *or* fetched from an allowlisted host — goes through
+  `services/image-pipeline.ts`: magic-byte sniff (PNG/JPEG/WebP/AVIF; the
+  client's mimetype header is never consulted), full re-encode through
+  `sharp` (strips EXIF/GPS, destroys polyglot files, `rotate()` first so
+  phone photos keep their orientation), 8192² pixel cap against
+  decompression bombs; AVIF re-encodes to JPEG (AVIF encode is seconds of
+  CPU). Upload limit is 5MB (multipart), remote fetches capped at 20MB —
+  filenames were already the DB row's uuid. `plugins/sanitize.ts` is a global
+  preValidation hook stripping *active* HTML only (script/iframe blocks,
+  `on*=` handlers, `javascript:` URIs) from body/query strings — plain text
+  like "boss < 50% hp" must survive, and `/api/auth/*` is skipped because
+  altering a password silently breaks the account (React escaping remains
+  the primary XSS defense; this keeps payloads out of the DB for future
+  non-escaping consumers). `@fastify/rate-limit`: global 1000/min per IP
+  (`trustProxy: true` — the API only ever sits behind Traefik or the Vite
+  proxy, so X-Forwarded-For is honest), with tight per-route configs in
+  `plugins/rate-limits.ts` for the expensive routes: wiki scrape 5/min
+  (Fandom is Cloudflare-fronted and bans IPs), uploads 20/min, art/cover
+  browses 30/min, OCR imports 10/min, barcode 10/min (UPCitemdb ~100/day).
+  better-auth's own `rateLimit` guards credentials: sign-in 5/min,
+  sign-up 5/hour. SQL was already clean (Drizzle parameterizes everything,
+  including tagged `sql` templates); the one real find was
+  `suggestMissionsFromUrl` accepting any host *ending* in "fandom.com"
+  ("evil-fandom.com") — now exact-host or dot-suffix plus http(s) only.
 - **One funnel for category badges**: `statusChip()` (`apps/web/src/lib/format.ts`)
   resolves colour *and* applies `preferences.badge_opacity`, so the opacity setting
   lands on every badge on every page for free. Mobile mirrors it through
