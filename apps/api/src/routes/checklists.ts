@@ -5,6 +5,7 @@ import { CHECKLIST_KINDS } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser, type SessionUser } from "../plugins/auth.js";
 import { suggestMissions, suggestMissionsFromUrl } from "../services/missions.js";
+import { scraperRateLimit } from "../plugins/rate-limits.js";
 
 const titleSchema = z.object({
   title: z.string().min(1).max(200),
@@ -165,6 +166,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
    */
   app.post<{ Params: { gameId: string } }>(
     "/api/games/:gameId/missions/suggest",
+    { config: scraperRateLimit },
     async (request, reply) => {
       const user = await requireUser(request, reply);
       if (!user) return;

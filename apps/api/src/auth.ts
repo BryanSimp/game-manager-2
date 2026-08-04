@@ -28,6 +28,18 @@ export const auth = betterAuth({
   // (the server-hosted Metro bundler serves the app to Expo Go, which then
   // signs in against this API), so it stays trusted in every environment
   trustedOrigins: [...env.CORS_ORIGINS, "gamemanager://", "exp://"],
+  // Brute-force protection on the credential endpoints. get-session traffic
+  // is chatty (every page load), so the general ceiling stays high and only
+  // the guessable routes are tight. In-memory storage is fine: one process.
+  rateLimit: {
+    enabled: true,
+    window: 60,
+    max: 300,
+    customRules: {
+      "/sign-in/email": { window: 60, max: 5 },
+      "/sign-up/email": { window: 3600, max: 5 },
+    },
+  },
   plugins: [admin(), bearer(), expo()],
   databaseHooks: {
     user: {

@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { requireUser } from "../plugins/auth.js";
 import { lookupUpc } from "../services/upc.js";
+import { barcodeRateLimit } from "../plugins/rate-limits.js";
 
 export function registerLookupRoutes(app: FastifyInstance): void {
   app.get<{ Params: { code: string } }>(
     "/api/lookup/barcode/:code",
+    { config: barcodeRateLimit },
     async (request, reply) => {
       const user = await requireUser(request, reply);
       if (!user) return;
