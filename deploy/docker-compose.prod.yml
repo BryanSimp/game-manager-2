@@ -8,6 +8,9 @@
 # (ghcr.io/bryansimp/gm2-api|gm2-web). GHCR packages are private, so the
 # server needs a one-time `docker login ghcr.io` with a read:packages PAT —
 # see the README. Watchtower then auto-updates on new pushes.
+#
+# The app lives at ${GM_HOST} (gamesmanager.app). ${GM_OLD_HOST} is kept only
+# to 301 old bookmarks over; delete that router once nothing points at it.
 services:
   postgres:
     image: postgres:16-alpine
@@ -36,17 +39,27 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gamemanager}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set in stack env}
-      BETTER_AUTH_URL: https://${GM_HOST:-games.brysimp.com}
+      # Changing this invalidates existing session cookies (they were issued for
+      # the old host) — everyone signs in once more. Accounts and data are in
+      # Postgres and are untouched.
+      BETTER_AUTH_URL: https://${GM_HOST:-gamesmanager.app}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
       API_PORT: "3001"
       API_HOST: 0.0.0.0
-      CORS_ORIGINS: https://${GM_HOST:-games.brysimp.com}
+      CORS_ORIGINS: https://${GM_HOST:-gamesmanager.app}
       # optional — all of these can instead be set later in the app's Settings UI
       IGDB_CLIENT_ID: ${IGDB_CLIENT_ID:-}
       IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET:-}
       STEAM_API_KEY: ${STEAM_API_KEY:-}
       # Claude vision OCR for shelf photos (tesseract-only without it)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Password-reset email (Resend). Without a key the reset flow is dead —
+      # DB Settings take precedence over both, so these can stay empty and be
+      # pasted into web Settings instead. Reset links are built from
+      # CORS_ORIGINS[0], i.e. https://${GM_HOST:-gamesmanager.app}, so APP_URL
+      # needs no value here.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
       IMAGE_DIR: /data/images
       TZ: ${TZ:-America/Chicago}
     volumes:
@@ -57,7 +70,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=proxy
-      - traefik.http.routers.gm2-api.rule=Host(`${GM_HOST:-games.brysimp.com}`) && PathPrefix(`/api`)
+      - traefik.http.routers.gm2-api.rule=Host(`${GM_HOST:-gamesmanager.app}`) && PathPrefix(`/api`)
       - traefik.http.routers.gm2-api.priority=20
       - traefik.http.routers.gm2-api.entrypoints=websecure
       - traefik.http.routers.gm2-api.tls.certresolver=cloudflare
@@ -74,12 +87,29 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=proxy
-      - traefik.http.routers.gm2-web.rule=Host(`${GM_HOST:-games.brysimp.com}`)
+      - traefik.http.routers.gm2-web.rule=Host(`${GM_HOST:-gamesmanager.app}`)
       - traefik.http.routers.gm2-web.priority=10
       - traefik.http.routers.gm2-web.entrypoints=websecure
       - traefik.http.routers.gm2-web.tls.certresolver=cloudflare
       - traefik.http.services.gm2-web.loadbalancer.server.port=80
       - com.centurylinklabs.watchtower.enable=true
+
+      # --- old domain + www → 301 to ${GM_HOST} -------------------------------
+      # Traefik still gets a cert for each of these hosts (DNS-01 via the same
+      # cloudflare resolver), so both zones must be covered by the token.
+      # `$${1}` is compose escaping: it reaches Traefik as `${1}`, the regex
+      # capture group. Written as `${1}` it would be swallowed as a compose var.
+      # Delete these four labels (and the DNS record) once nothing uses the old
+      # host — a 301 is cached hard by browsers, so it is not a casual toggle.
+      - traefik.http.routers.gm2-legacy.rule=Host(`${GM_OLD_HOST:-games.brysimp.com}`) || Host(`www.${GM_HOST:-gamesmanager.app}`)
+      - traefik.http.routers.gm2-legacy.priority=30
+      - traefik.http.routers.gm2-legacy.entrypoints=websecure
+      - traefik.http.routers.gm2-legacy.tls.certresolver=cloudflare
+      - traefik.http.routers.gm2-legacy.middlewares=gm2-legacy-redirect
+      - traefik.http.routers.gm2-legacy.service=gm2-web
+      - traefik.http.middlewares.gm2-legacy-redirect.redirectregex.regex=^https?://[^/]+/(.*)
+      - traefik.http.middlewares.gm2-legacy-redirect.redirectregex.replacement=https://${GM_HOST:-gamesmanager.app}/$${1}
+      - traefik.http.middlewares.gm2-legacy-redirect.redirectregex.permanent=true
 
   # Expo Go host: Metro bundler serving the mobile app over the LAN.
   # On the phone (same wifi): Expo Go → enter URL → exp://<SERVER_LAN_IP>:8081
@@ -89,7 +119,9 @@ services:
     image: ghcr.io/bryansimp/gm2-mobile:latest
     restart: unless-stopped
     environment:
-      EXPO_PUBLIC_API_URL: https://${GM_HOST:-games.brysimp.com}
+      # Inlined into the JS bundle when Metro serves it, so this container must
+      # be restarted (and the app reloaded in Expo Go) after the host changes.
+      EXPO_PUBLIC_API_URL: https://${GM_HOST:-gamesmanager.app}
       REACT_NATIVE_PACKAGER_HOSTNAME: ${SERVER_LAN_IP:?LAN IP of this server, e.g. 192.168.68.60}
       TZ: ${TZ:-America/Chicago}
     ports:

@@ -3,7 +3,7 @@
 #   docker build -f apps/mobile/Dockerfile .
 #
 # Runtime env (set in the compose stack):
-#   EXPO_PUBLIC_API_URL            e.g. https://games.brysimp.com — inlined into
+#   EXPO_PUBLIC_API_URL            e.g. https://gamesmanager.app — inlined into
 #                                  the JS bundle when Metro serves it
 #   REACT_NATIVE_PACKAGER_HOSTNAME LAN IP of the *host* server — Metro advertises
 #                                  this in the manifest so Expo Go fetches the
