@@ -45,6 +45,7 @@ import type {
   Tag,
   TagInput,
   TimeToBeatInput,
+  CommunityStats,
   UpdateEntryInput,
   User,
 } from "@gm/shared";
@@ -249,15 +250,19 @@ export class ApiClient {
   }
 
   /**
-   * Correct a game's how-long-to-beat figures by hand, in seconds. Writes the
-   * shared catalog row (a game's length is a fact about the game), stamped
-   * `ttb_source = 'manual'`.
+   * Record how long a game took you, in seconds. Yours alone — the average
+   * of everyone's is what fills in games IGDB has no figure for.
    */
   saveTimeToBeat(entryId: string, input: TimeToBeatInput): Promise<{ ok: true }> {
     return this.request(`/api/library/${entryId}/time-to-beat`, {
       method: "PUT",
       body: JSON.stringify(input),
     });
+  }
+
+  /** Average score and play time across everyone who owns a game. */
+  getCommunityStats(gameId: string): Promise<CommunityStats> {
+    return this.request<CommunityStats>(`/api/games/${gameId}/community`);
   }
 
   updateEntry(id: string, input: UpdateEntryInput): Promise<{ ok: true }> {

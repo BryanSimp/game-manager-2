@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { and, count, desc, eq, isNotNull, sum } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
+import { resolveTtbFor } from "../services/community.js";
 
 export function registerDashboardRoutes(app: FastifyInstance): void {
   app.get("/api/dashboard", async (request, reply) => {
@@ -28,8 +29,15 @@ export function registerDashboardRoutes(app: FastifyInstance): void {
       .groupBy(schema.platforms.name, schema.platforms.abbreviation, schema.platforms.family)
       .orderBy(desc(count()));
 
-    const [backlog] = await db
-      .select({ seconds: sum(schema.games.ttbMain) })
+    /*
+     * Backlog hours resolve play times through the same helper a game's own
+     * page uses, rather than reading games.ttb_main directly. Since play times
+     * went per-user, a game IGDB knows nothing about takes its length from
+     * your submission and then from the community average — and a total that
+     * disagreed with the games it was adding up would be worse than no total.
+     */
+    const backlogGames = await db
+      .select({ game: schema.games })
       .from(schema.userGames)
       .innerJoin(schema.games, eq(schema.userGames.gameId, schema.games.id))
       .where(
@@ -37,9 +45,18 @@ export function registerDashboardRoutes(app: FastifyInstance): void {
           eq(schema.userGames.userId, user.id),
           eq(schema.userGames.status, "backlog"),
           eq(schema.userGames.ttbEnabled, true),
-          isNotNull(schema.games.ttbMain),
         ),
       );
+    const backlogTtb = await resolveTtbFor(
+      user.id,
+      backlogGames.map((r) => r.game),
+    );
+    const backlog = {
+      seconds: backlogGames.reduce(
+        (total, r) => total + (backlogTtb.get(r.game.id)?.ttbMain ?? 0),
+        0,
+      ),
+    };
 
     const recentlyFinished = await db
       .select({

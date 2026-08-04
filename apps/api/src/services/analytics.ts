@@ -16,6 +16,9 @@ export type AnalyticsEventType =
   // a write rejected by services/content-filter.ts — worth watching, both to
   // catch abuse and to notice the filter rejecting things it shouldn't
   | "content_blocked"
+  // someone recorded how long a game took them, which is what the community
+  // average is built out of
+  | "time_submitted"
   | "scrape";
 
 /**

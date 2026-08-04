@@ -7,12 +7,22 @@ import {
   PROGRESS_BASES,
   estimateProgress,
   normalizeTtb,
+  resolveTtb,
   ttbForBasis,
+  type ResolvedTtb,
+  type TtbTriple,
 } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { createManualGame, upsertGameFromIgdb } from "../services/catalog.js";
 import { isValidCategory } from "../services/categories.js";
+import {
+  MIN_RATINGS,
+  communityRatings,
+  communityTimes,
+  ownTimes,
+  resolveTtbFor,
+} from "../services/community.js";
 import { rememberConsoles } from "../services/consoles.js";
 import { defaultPlatformFor, defaultStatusFor } from "../services/preferences.js";
 import { logEvent } from "../services/analytics.js";
@@ -101,7 +111,18 @@ const bulkSchema = z.object({
     .optional(),
 });
 
-function gameToJson(game: typeof schema.games.$inferSelect) {
+/**
+ * The catalog fields a client sees.
+ *
+ * Play times come from `resolveTtb` rather than straight off the row: the
+ * catalog columns only hold IGDB's figures (and manual values written before
+ * play times went per-user), so a game IGDB has never heard of falls back to
+ * your own submission and then to the average of everyone's. Callers that
+ * have a resolved triple pass it; the rest get the raw row, which
+ * `resolveTtb` reports as-is.
+ */
+function gameToJson(game: typeof schema.games.$inferSelect, ttb?: ResolvedTtb) {
+  const times = ttb ?? resolveTtb(game, null, null);
   return {
     id: game.id,
     igdbId: game.igdbId,
@@ -111,10 +132,12 @@ function gameToJson(game: typeof schema.games.$inferSelect) {
     summary: game.summary,
     releaseDate: game.releaseDate,
     coverSrc: game.coverImageId ? `/api/images/${game.coverImageId}` : game.coverUrl,
-    ttbMain: game.ttbMain,
-    ttbMainExtra: game.ttbMainExtra,
-    ttbCompletionist: game.ttbCompletionist,
-    ttbSource: game.ttbSource,
+    ttbMain: times.ttbMain,
+    ttbMainExtra: times.ttbMainExtra,
+    ttbCompletionist: times.ttbCompletionist,
+    ttbSource: times.ttbSource,
+    /** how many players the community figure averages, when that's the source */
+    ttbCount: times.ttbCount ?? null,
   };
 }
 
@@ -249,8 +272,9 @@ function entryToJson(
   platforms: unknown[],
   tags: unknown[] = [],
   missions?: MissionCounts,
+  ttb?: ResolvedTtb,
 ) {
-  const gameJson = gameToJson(game);
+  const gameJson = gameToJson(game, ttb);
   // a user-uploaded cover overrides the catalog cover
   if (entry.customCoverImageId) {
     gameJson.coverSrc = `/api/images/${entry.customCoverImageId}`;
@@ -258,7 +282,9 @@ function entryToJson(
   const estimate = estimateProgress({
     total: missions?.total ?? 0,
     done: missions?.done ?? 0,
-    totalSeconds: ttbForBasis(game, entry.progressBasis),
+    // the estimate divides whatever figure we're actually showing, so a
+    // community-supplied length drives it exactly like an IGDB one
+    totalSeconds: ttbForBasis(ttb ?? game, entry.progressBasis),
   });
   return {
     id: entry.id,
@@ -295,6 +321,10 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     const platformMap = await entryPlatforms(ids);
     const tagMap = await entryTags(ids);
     const missionMap = await missionCountsByGame(user.id);
+    const ttbMap = await resolveTtbFor(
+      user.id,
+      rows.map((r) => r.games),
+    );
     return rows.map((r) =>
       entryToJson(
         r.user_games,
@@ -302,6 +332,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
         platformMap.get(r.user_games.id) ?? [],
         tagMap.get(r.user_games.id) ?? [],
         missionMap.get(r.games.id),
+        ttbMap.get(r.games.id),
       ),
     );
   });
@@ -424,12 +455,14 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     const platformMap = await entryPlatforms([row.user_games.id]);
     const tagMap = await entryTags([row.user_games.id]);
     const missionMap = await missionCountsByGame(user.id);
+    const ttbMap = await resolveTtbFor(user.id, [row.games]);
     return entryToJson(
       row.user_games,
       row.games,
       platformMap.get(row.user_games.id) ?? [],
       tagMap.get(row.user_games.id) ?? [],
       missionMap.get(row.games.id),
+      ttbMap.get(row.games.id),
     );
   });
 
@@ -448,7 +481,8 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!row) return reply.status(404).send({ message: "Not found" });
 
     const basis = row.user_games.progressBasis;
-    const totalSeconds = ttbForBasis(row.games, basis);
+    const ttbMap = await resolveTtbFor(user.id, [row.games]);
+    const totalSeconds = ttbForBasis(ttbMap.get(row.games.id) ?? row.games, basis);
 
     // the user's own mission list for this game — oldest first, so adding a
     // second one doesn't silently move the estimate
@@ -648,19 +682,19 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
   });
 
   /**
-   * Correct a game's how-long-to-beat figures by hand, for when IGDB is wrong
-   * or has nothing.
+   * Record how long this game took *you*, for when IGDB has nothing.
    *
-   * This writes the **shared catalog** row, not a per-user override: `games`
-   * is one row per real-world game, and how long a game takes is a fact about
-   * the game rather than about you. Nothing overwrites it today — the only
-   * other writer is `upsertGameFromIgdb`, which returns early for a game
-   * that's already in the catalog — and `ttb_source = 'manual'` records that
-   * a human set these so a future refresh has something to check.
+   * This used to write the shared catalog row, on the reasoning that a game's
+   * length is a fact about the game rather than about you. It is — but the
+   * app is public now, so "shared row, last writer wins" meant one person's
+   * typo silently became everyone's number, and there was nothing left to
+   * average. Submissions are per-user; `resolveTtb` picks what to show, and
+   * `communityTimes` averages the rest.
    *
-   * Values are seconds. Sending null clears one. The ordering invariant
-   * (main <= main+extras <= completionist) is enforced by `normalizeTtb`, the
-   * same as on ingest, so a typo can't invert the columns.
+   * Values are seconds. Sending null clears one, and clearing them all
+   * removes your submission entirely. `normalizeTtb` enforces
+   * main <= main+extras <= completionist, the same as on ingest, so a typo
+   * can't invert the columns.
    */
   app.put<{ Params: { id: string } }>("/api/library/:id/time-to-beat", async (request, reply) => {
     const user = await requireUser(request, reply);
@@ -685,37 +719,100 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       .safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ message: "Invalid times" });
 
-    const current = await db.query.games.findFirst({
-      where: (g, { eq: eqW }) => eqW(g.id, entry.gameId),
-      columns: { ttbMain: true, ttbMainExtra: true, ttbCompletionist: true },
-    });
-    if (!current) return reply.status(404).send({ message: "Game not found" });
+    const [mine] = await db
+      .select()
+      .from(schema.userTimeToBeat)
+      .where(
+        and(
+          eq(schema.userTimeToBeat.userId, user.id),
+          eq(schema.userTimeToBeat.gameId, entry.gameId),
+        ),
+      );
 
-    // an omitted key keeps what's there; an explicit null clears it
+    // an omitted key keeps what you had; an explicit null clears it
     const merged = normalizeTtb({
-      ttbMain: parsed.data.ttbMain === undefined ? current.ttbMain : parsed.data.ttbMain,
+      ttbMain: parsed.data.ttbMain === undefined ? (mine?.mainSeconds ?? null) : parsed.data.ttbMain,
       ttbMainExtra:
-        parsed.data.ttbMainExtra === undefined ? current.ttbMainExtra : parsed.data.ttbMainExtra,
+        parsed.data.ttbMainExtra === undefined
+          ? (mine?.mainExtraSeconds ?? null)
+          : parsed.data.ttbMainExtra,
       ttbCompletionist:
         parsed.data.ttbCompletionist === undefined
-          ? current.ttbCompletionist
+          ? (mine?.completionistSeconds ?? null)
           : parsed.data.ttbCompletionist,
     });
 
-    const anySet =
+    const hasAny =
       merged.ttbMain != null || merged.ttbMainExtra != null || merged.ttbCompletionist != null;
-    await db
-      .update(schema.games)
-      .set({
-        ttbMain: merged.ttbMain,
-        ttbMainExtra: merged.ttbMainExtra,
-        ttbCompletionist: merged.ttbCompletionist,
-        // clearing every figure hands the game back to IGDB rather than
-        // pinning it to an empty manual override
-        ttbSource: anySet ? "manual" : null,
-      })
-      .where(eq(schema.games.id, entry.gameId));
 
+    if (!hasAny) {
+      await db
+        .delete(schema.userTimeToBeat)
+        .where(
+          and(
+            eq(schema.userTimeToBeat.userId, user.id),
+            eq(schema.userTimeToBeat.gameId, entry.gameId),
+          ),
+        );
+      // The one way back for a catalog row a previous version let someone
+      // pin by hand: nothing else writes `games.ttb_*` any more, so clearing
+      // your submission also clears a stale manual override rather than
+      // leaving it uncorrectable forever. IGDB's own figures are left alone.
+      await db
+        .update(schema.games)
+        .set({ ttbMain: null, ttbMainExtra: null, ttbCompletionist: null, ttbSource: null })
+        .where(and(eq(schema.games.id, entry.gameId), eq(schema.games.ttbSource, "manual")));
+      return { ok: true, ...merged };
+    }
+
+    await db
+      .insert(schema.userTimeToBeat)
+      .values({
+        userId: user.id,
+        gameId: entry.gameId,
+        mainSeconds: merged.ttbMain,
+        mainExtraSeconds: merged.ttbMainExtra,
+        completionistSeconds: merged.ttbCompletionist,
+      })
+      .onConflictDoUpdate({
+        target: [schema.userTimeToBeat.userId, schema.userTimeToBeat.gameId],
+        set: {
+          mainSeconds: merged.ttbMain,
+          mainExtraSeconds: merged.ttbMainExtra,
+          completionistSeconds: merged.ttbCompletionist,
+          updatedAt: new Date(),
+        },
+      });
+    logEvent("time_submitted", user.id, { gameId: entry.gameId });
     return { ok: true, ...merged };
   });
+
+  /**
+   * What everyone else thinks of a game: average score, and the average play
+   * time when players have supplied one.
+   *
+   * Its own request rather than a field on the library list. This is one
+   * query pair per game detail page, where `GET /api/library` is the app's
+   * hottest route and doesn't need the weight.
+   */
+  app.get<{ Params: { gameId: string } }>(
+    "/api/games/:gameId/community",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const gameId = request.params.gameId;
+
+      const [ratings, times, own] = await Promise.all([
+        communityRatings([gameId]),
+        communityTimes([gameId]),
+        ownTimes(user.id, [gameId]),
+      ]);
+      return {
+        rating: ratings.get(gameId) ?? null,
+        timeToBeat: times.get(gameId) ?? null,
+        yours: own.get(gameId) ?? null,
+        minRatings: MIN_RATINGS,
+      };
+    },
+  );
 }

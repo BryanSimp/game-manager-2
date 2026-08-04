@@ -4,6 +4,7 @@ import type {
   PlatformFamily,
   ProgressBasis,
 } from "../constants.js";
+import type { TtbSource } from "../progress.js";
 export interface GameSummary {
   id: string;
   igdbId: number | null;
@@ -16,7 +17,14 @@ export interface GameSummary {
   ttbMain: number | null;
   ttbMainExtra: number | null;
   ttbCompletionist: number | null;
-  ttbSource: "igdb" | "manual" | null;
+  /**
+   * Where these times came from — resolved per request, so 'yours' and
+   * 'community' appear here even though the catalog column only stores
+   * 'igdb' and 'manual'. See `resolveTtb`.
+   */
+  ttbSource: TtbSource | null;
+  /** players averaged, when `ttbSource` is 'community' */
+  ttbCount: number | null;
 }
 export interface OwnedPlatform {
   platformId: string;
@@ -136,15 +144,35 @@ export interface AddGameInput {
   platforms?: Array<{ platformId: string; format: OwnershipFormat }>;
 }
 /**
- * Manual how-long-to-beat figures, in **seconds**, matching the columns they
- * land in. `games` is the shared catalog, so this corrects the figure for
- * everyone — that's the point of `ttbSource: 'manual'`, which stops a later
- * IGDB refresh putting the wrong number back. A null clears that figure.
+ * How long a game took **you**, in seconds, matching the columns they land in.
+ * Yours alone: your figure drives your own estimate, and the average of
+ * everyone's fills in games IGDB has no data for. A null clears that figure;
+ * clearing all three removes your submission. See `resolveTtb` for which one
+ * a game actually displays.
  */
 export interface TimeToBeatInput {
   ttbMain?: number | null;
   ttbMainExtra?: number | null;
   ttbCompletionist?: number | null;
+}
+/** Aggregates across everyone who owns a game. */
+export interface CommunityStats {
+  /** null until `minRatings` people have rated it */
+  rating: { average: number; count: number } | null;
+  /** average of submitted play times, in seconds; null when nobody has said */
+  timeToBeat: {
+    ttbMain: number | null;
+    ttbMainExtra: number | null;
+    ttbCompletionist: number | null;
+    count: number;
+  } | null;
+  /** your own submission, so the editor can show what you said */
+  yours: {
+    ttbMain: number | null;
+    ttbMainExtra: number | null;
+    ttbCompletionist: number | null;
+  } | null;
+  minRatings: number;
 }
 export interface UpdateEntryInput {
   status?: string;

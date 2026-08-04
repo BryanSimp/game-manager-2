@@ -174,6 +174,7 @@ export default function GameDetailScreen() {
             <Text style={[type.caption, { color: colors.star }]}>{e.rating.toFixed(1)}</Text>
           )}
         </View>
+        <CommunityRating gameId={e.game.id} />
 
         {(allTags.data?.length ?? 0) > 0 && (
           <>
@@ -267,9 +268,12 @@ export default function GameDetailScreen() {
 }
 
 /**
- * How long to beat, editable. IGDB doesn't have times for everything and isn't
- * always right; the figures belong to the game rather than to your copy of it,
- * so saving writes the shared catalog row (see the API route).
+ * How long to beat, editable.
+ *
+ * What you enter is *your* figure, not a correction to the shared catalog:
+ * IGDB has no times for most niche games, so the average of everyone's
+ * submissions is what fills the gap. See `resolveTtb` for which one a game
+ * ends up showing.
  */
 function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
   const queryClient = useQueryClient();
@@ -281,10 +285,20 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
   const g = entry.game;
   const hasAny = g.ttbMain != null || g.ttbMainExtra != null || g.ttbCompletionist != null;
 
+  const community = useQuery({
+    queryKey: ["community", g.id],
+    queryFn: () => api.getCommunityStats(g.id),
+  });
+
   function startEditing() {
-    setMain(toHours(g.ttbMain));
-    setExtra(toHours(g.ttbMainExtra));
-    setFull(toHours(g.ttbCompletionist));
+    // seed from your own submission, not the community average — editing is
+    // about correcting what you said
+    const yours = community.data?.yours;
+    setMain(toHours(yours?.ttbMain ?? (g.ttbSource === "yours" ? g.ttbMain : null)));
+    setExtra(toHours(yours?.ttbMainExtra ?? (g.ttbSource === "yours" ? g.ttbMainExtra : null)));
+    setFull(
+      toHours(yours?.ttbCompletionist ?? (g.ttbSource === "yours" ? g.ttbCompletionist : null)),
+    );
     setEditing(true);
   }
 
@@ -300,17 +314,30 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
       queryClient.invalidateQueries({ queryKey: ["entry", entry.id] });
       queryClient.invalidateQueries({ queryKey: ["library"] });
       queryClient.invalidateQueries({ queryKey: ["progress"] });
+      queryClient.invalidateQueries({ queryKey: ["community", g.id] });
     },
   });
+
+  const sourceNote =
+    g.ttbSource === "community"
+      ? `Averaged from ${g.ttbCount ?? 0} player${g.ttbCount === 1 ? "" : "s"}`
+      : g.ttbSource === "yours"
+        ? "Your own figure"
+        : g.ttbSource === "manual"
+          ? "Set by hand"
+          : "From IGDB";
 
   if (!hasAny && !editing) {
     return (
       <>
         <SectionTitle>Play time</SectionTitle>
         <View style={styles.ttbCard}>
-          <Text style={type.caption}>IGDB has no play time for this game.</Text>
+          <Text style={type.caption}>
+            Nobody has said how long this one takes — IGDB has no figure and no player has added
+            one.
+          </Text>
           <Button
-            label="Add play time"
+            label="Add your play time"
             icon="add"
             tone="ghost"
             fill
@@ -332,8 +359,8 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
             <HoursField label="Main + extras" value={extra} onChange={setExtra} />
             <HoursField label="Completionist" value={full} onChange={setFull} />
             <Text style={[type.micro, { marginTop: space.sm }]}>
-              Hours. Leave a field empty to clear it — these are shared, so the correction applies
-              wherever the game appears.
+              Hours, as it went for you. Clear every field to withdraw your figure. Yours drives
+              your own estimate; the average of everyone's fills in games IGDB has no data for.
             </Text>
             {save.isError && (
               <Text style={[type.caption, { color: colors.danger, marginTop: space.xs }]}>
@@ -356,12 +383,17 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
             <TtbRow label="Main story" value={formatHours(g.ttbMain)} />
             <TtbRow label="Main + extras" value={formatHours(g.ttbMainExtra)} />
             <TtbRow label="Completionist" value={formatHours(g.ttbCompletionist)} />
-            <View style={styles.ttbFooter}>
-              <Text style={type.micro}>
-                {g.ttbSource === "manual" ? "Set by hand" : "From IGDB"}
+            {/* the figure on show is IGDB's, but players have said otherwise */}
+            {g.ttbSource !== "community" && community.data?.timeToBeat?.ttbMain != null ? (
+              <Text style={[type.micro, { marginTop: space.xs }]}>
+                Players say {formatHours(community.data.timeToBeat.ttbMain)} (
+                {community.data.timeToBeat.count} submitted)
               </Text>
+            ) : null}
+            <View style={styles.ttbFooter}>
+              <Text style={type.micro}>{sourceNote}</Text>
               <Button
-                label="Edit"
+                label={community.data?.yours ? "Edit yours" : "Add yours"}
                 icon="create-outline"
                 tone="ghost"
                 onPress={startEditing}
@@ -372,6 +404,30 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
         )}
       </View>
     </>
+  );
+}
+
+/**
+ * What everyone else scored this game. Withheld below the API's threshold —
+ * a privacy floor, not a quality one: with one or two raters, an "average" is
+ * one identifiable person's opinion.
+ */
+function CommunityRating({ gameId }: { gameId: string }) {
+  const community = useQuery({
+    queryKey: ["community", gameId],
+    queryFn: () => api.getCommunityStats(gameId),
+  });
+  const data = community.data;
+  if (!data) return null;
+
+  return (
+    <Text style={[type.micro, { marginTop: space.xs }]}>
+      {data.rating
+        ? `Everyone: ${data.rating.average.toFixed(1)} from ${data.rating.count} rating${
+            data.rating.count === 1 ? "" : "s"
+          }`
+        : `Needs ${data.minRatings} ratings before an average is shown`}
+    </Text>
   );
 }
 

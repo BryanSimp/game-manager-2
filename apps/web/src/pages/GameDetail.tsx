@@ -265,9 +265,12 @@ export function GameDetailPage() {
             )}
           </div>
 
-          <div className="mt-4">
-            <p className="mb-1 text-sm font-semibold text-zinc-300">Your rating</p>
-            <StarRating value={e.rating} onChange={(v) => update.mutate({ rating: v })} />
+          <div className="mt-4 flex flex-wrap items-start gap-8">
+            <div>
+              <p className="mb-1 text-sm font-semibold text-zinc-300">Your rating</p>
+              <StarRating value={e.rating} onChange={(v) => update.mutate({ rating: v })} />
+            </div>
+            <CommunityRating gameId={e.game.id} />
           </div>
 
           {e.game.summary && (
@@ -477,6 +480,44 @@ export function GameDetailPage() {
   );
 }
 
+/**
+ * What everyone else scored this game.
+ *
+ * Withheld until enough people have rated it — that's a privacy floor rather
+ * than a quality one. With one or two raters and a friends list, an "average"
+ * is one identifiable person's opinion, so the card says it's waiting rather
+ * than showing a number that isn't really an average.
+ */
+function CommunityRating({ gameId }: { gameId: string }) {
+  const community = useQuery({
+    queryKey: ["community", gameId],
+    queryFn: () => api.getCommunityStats(gameId),
+  });
+  const data = community.data;
+  if (!data) return null;
+
+  return (
+    <div>
+      <p className="mb-1 text-sm font-semibold text-zinc-300">Everyone's rating</p>
+      {data.rating ? (
+        <div className="flex items-center gap-2">
+          <StarRating value={data.rating.average} />
+          <span className="text-sm text-zinc-400">
+            {data.rating.average.toFixed(1)}
+            <span className="ml-1 text-xs text-zinc-600">
+              ({data.rating.count} rating{data.rating.count === 1 ? "" : "s"})
+            </span>
+          </span>
+        </div>
+      ) : (
+        <p className="pt-1.5 text-xs text-zinc-600">
+          Needs {data.minRatings} ratings before an average is shown.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Ttb({ label, value }: { label: string; value: string | null }) {
   if (!value) return null;
   return (
@@ -503,9 +544,10 @@ function toSeconds(hours: string): number | null {
 /**
  * How long to beat, with a manual override.
  *
- * IGDB doesn't have times for everything and isn't always right, so the three
- * figures are editable. They're a property of the *game*, not of your copy of
- * it, so saving writes the shared catalog row and stamps it `manual`.
+ * IGDB has no times for most niche games, so the three figures are editable.
+ * What you enter is *your* submission — it drives your own estimate, and the
+ * average of everyone's is what the app shows other people who own a game
+ * IGDB knows nothing about.
  */
 function TimeToBeatCard({
   entry,
@@ -523,10 +565,20 @@ function TimeToBeatCard({
   const g = entry.game;
   const hasAny = g.ttbMain != null || g.ttbMainExtra != null || g.ttbCompletionist != null;
 
+  const community = useQuery({
+    queryKey: ["community", g.id],
+    queryFn: () => api.getCommunityStats(g.id),
+  });
+
   function startEditing() {
-    setMain(toHours(g.ttbMain));
-    setExtra(toHours(g.ttbMainExtra));
-    setFull(toHours(g.ttbCompletionist));
+    // seed the fields from *your* submission when there is one, not from the
+    // community average — editing is about correcting what you said
+    const yours = community.data?.yours;
+    setMain(toHours(yours?.ttbMain ?? (g.ttbSource === "yours" ? g.ttbMain : null)));
+    setExtra(toHours(yours?.ttbMainExtra ?? (g.ttbSource === "yours" ? g.ttbMainExtra : null)));
+    setFull(
+      toHours(yours?.ttbCompletionist ?? (g.ttbSource === "yours" ? g.ttbCompletionist : null)),
+    );
     setEditing(true);
   }
 
@@ -542,21 +594,35 @@ function TimeToBeatCard({
       queryClient.invalidateQueries({ queryKey: ["entry", entry.id] });
       queryClient.invalidateQueries({ queryKey: ["library"] });
       queryClient.invalidateQueries({ queryKey: ["progress"] });
+      queryClient.invalidateQueries({ queryKey: ["community", g.id] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
+
+  const sourceNote =
+    g.ttbSource === "community"
+      ? `Averaged from ${g.ttbCount ?? 0} player${g.ttbCount === 1 ? "" : "s"}`
+      : g.ttbSource === "yours"
+        ? "Your own figure"
+        : g.ttbSource === "manual"
+          ? "Set by hand"
+          : g.ttbSource === "igdb"
+            ? "From IGDB"
+            : null;
 
   if (!hasAny && !editing) {
     return (
       <div className="mt-4 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/50 p-4 text-sm">
         <p className="font-semibold text-zinc-300">How long to beat</p>
         <p className="mt-1 text-xs text-zinc-500">
-          IGDB has no play time for this game.
+          Nobody has said how long this one takes — IGDB has no figure and no player has
+          added one.
         </p>
         <button
           onClick={startEditing}
           className="mt-3 rounded-lg border border-indigo-500/50 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-600/20"
         >
-          + Add play time
+          + Add your play time
         </button>
       </div>
     );
@@ -570,9 +636,9 @@ function TimeToBeatCard({
           <button
             onClick={startEditing}
             className="text-xs text-zinc-500 hover:text-indigo-300"
-            title={g.ttbSource === "manual" ? "Set by hand" : "From IGDB"}
+            title={sourceNote ?? undefined}
           >
-            {g.ttbSource === "manual" ? "Edit ✎" : "Edit"}
+            {community.data?.yours ? "Edit yours ✎" : "+ Add yours"}
           </button>
         )}
       </div>
@@ -588,8 +654,8 @@ function TimeToBeatCard({
           <HoursField label="Main + extras" value={extra} onChange={setExtra} />
           <HoursField label="Completionist" value={full} onChange={setFull} />
           <p className="mt-2 text-xs text-zinc-500">
-            Hours. Leave a field empty to clear it — these are shared, so the correction applies
-            wherever the game appears.
+            Hours, as it went for you. Clear every field to withdraw your figure. Yours drives
+            your own estimate; the average of everyone's fills in games IGDB has no data for.
           </p>
           {save.isError && (
             <p className="mt-2 text-xs text-red-400">
@@ -618,6 +684,15 @@ function TimeToBeatCard({
           <Ttb label="Main story" value={formatHours(g.ttbMain)} />
           <Ttb label="Main + extras" value={formatHours(g.ttbMainExtra)} />
           <Ttb label="Completionist" value={formatHours(g.ttbCompletionist)} />
+          {sourceNote && <p className="mt-1 text-xs text-zinc-600">{sourceNote}</p>}
+          {/* the figure on show comes from IGDB, but players have said
+              otherwise — worth seeing both */}
+          {g.ttbSource !== "community" && community.data?.timeToBeat?.ttbMain != null && (
+            <p className="mt-1 text-xs text-zinc-600">
+              Players say {formatHours(community.data.timeToBeat.ttbMain)} (
+              {community.data.timeToBeat.count} submitted)
+            </p>
+          )}
           {entry.estimatedRemainingSeconds !== null && (
             <div className="mt-2 flex justify-between border-t border-zinc-800 pt-2">
               <span className="text-indigo-300">Estimated left</span>
