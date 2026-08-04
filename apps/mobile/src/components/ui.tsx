@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import type { VoteCounts } from "@gm/shared";
 import { colors, radius, space, TOUCH, type } from "@/lib/theme";
 
 /**
@@ -315,6 +316,61 @@ export function Chevron() {
 }
 
 /**
+ * Thumbs up/down with the running score between them — the web app's
+ * `VoteButtons`, in Ionicons.
+ *
+ * Tapping the vote you already cast takes it back, the same way the star
+ * rating clears itself, so there's no third control to find. Render it only
+ * on other people's lists: the API refuses a vote on your own, and a score
+ * you can pad isn't a score.
+ */
+export function VoteRow({
+  votes,
+  disabled,
+  onVote,
+}: {
+  votes: VoteCounts;
+  disabled?: boolean;
+  onVote: (value: 1 | 0 | -1) => void;
+}) {
+  const cast = (value: 1 | -1) => onVote(votes.mine === value ? 0 : value);
+  const scoreColor =
+    votes.score > 0 ? colors.success : votes.score < 0 ? colors.danger : colors.textGhost;
+
+  return (
+    <View style={styles.voteRow}>
+      <Pressable
+        onPress={() => cast(1)}
+        disabled={disabled}
+        hitSlop={8}
+        accessibilityLabel={votes.mine === 1 ? "Remove your upvote" : "Upvote"}
+      >
+        <Icon
+          name={votes.mine === 1 ? "thumbs-up" : "thumbs-up-outline"}
+          size={16}
+          color={votes.mine === 1 ? colors.success : colors.textGhost}
+        />
+      </Pressable>
+      <Text style={[type.micro, { color: scoreColor, minWidth: 14, textAlign: "center" }]}>
+        {votes.score}
+      </Text>
+      <Pressable
+        onPress={() => cast(-1)}
+        disabled={disabled}
+        hitSlop={8}
+        accessibilityLabel={votes.mine === -1 ? "Remove your downvote" : "Downvote"}
+      >
+        <Icon
+          name={votes.mine === -1 ? "thumbs-down" : "thumbs-down-outline"}
+          size={16}
+          color={votes.mine === -1 ? colors.danger : colors.textGhost}
+        />
+      </Pressable>
+    </View>
+  );
+}
+
+/**
  * Half-star rating, 0.5–5.0 — the same interaction as the web app's
  * `StarRating`: tap the left half of a star for the half value, the right half
  * for the whole, and tap the current value again to clear it. Ten chips
@@ -605,6 +661,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   fill: { height: 6, borderRadius: 3 },
+  voteRow: { flexDirection: "row", alignItems: "center", gap: space.xs },
   stars: { flexDirection: "row", gap: 6 },
   starHalves: { flex: 1, flexDirection: "row" },
   starHalf: { flex: 1 },

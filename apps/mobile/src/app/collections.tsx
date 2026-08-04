@@ -37,6 +37,7 @@ import {
   Screen,
   Sheet,
   SheetSection,
+  VoteRow,
 } from "@/components/ui";
 
 type Tab = "mine" | "public";
@@ -71,6 +72,11 @@ export default function CollectionsScreen() {
       queryClient.invalidateQueries({ queryKey: ["public-collections"] });
       router.push(`/collection/${created.id}`);
     },
+  });
+
+  const vote = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: 1 | 0 | -1 }) => api.voteCollection(id, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["public-collections"] }),
   });
 
   return (
@@ -163,6 +169,7 @@ export default function CollectionsScreen() {
               onAdopt={() => adopt.mutate(item.id)}
               onOpen={() => router.push(`/collection/${item.id}`)}
               onAddAll={() => setAddingAll(item)}
+              onVote={(value) => vote.mutate({ id: item.id, value })}
             />
           )}
         />
@@ -360,12 +367,14 @@ function PublicCard({
   onAdopt,
   onOpen,
   onAddAll,
+  onVote,
 }: {
   collection: PublicCollection;
   busy: boolean;
   onAdopt: () => void;
   onOpen: () => void;
   onAddAll: () => void;
+  onVote: (value: 1 | 0 | -1) => void;
 }) {
   const accent = c.accentColor ?? colors.accent;
   return (
@@ -379,9 +388,13 @@ function PublicCard({
               {c.name}
             </Text>
           </View>
-          <Text style={[type.micro, { marginTop: 2 }]} numberOfLines={1}>
-            by {c.mine ? "you" : c.authorName} · {c.total} games
-          </Text>
+          <View style={styles.byRow}>
+            <Text style={[type.micro, { flex: 1 }]} numberOfLines={1}>
+              by {c.mine ? "you" : c.authorName} · {c.total} games
+            </Text>
+            {/* no vote control on your own — the API refuses it anyway */}
+            {c.mine ? null : <VoteRow votes={c.votes} onVote={onVote} />}
+          </View>
           {c.description ? (
             <Text style={[type.caption, { marginTop: 2 }]} numberOfLines={2}>
               {c.description}
@@ -424,6 +437,7 @@ const styles = StyleSheet.create({
   card: { marginBottom: space.sm },
   cardTop: { flexDirection: "row", alignItems: "center", gap: space.md },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  byRow: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: 2 },
   accent: { width: 4, alignSelf: "stretch", borderRadius: radius.sm },
   copiedTag: {
     borderRadius: radius.pill,

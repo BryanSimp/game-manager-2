@@ -6,6 +6,14 @@ import { db, schema } from "../db/index.js";
 import { requireUser, type SessionUser } from "../plugins/auth.js";
 import { logEvent } from "../services/analytics.js";
 import { inspectAll } from "../services/content-filter.js";
+import {
+  NO_VOTES,
+  castChecklistVote,
+  checklistVoteCounts,
+  voteSchema,
+  type VoteCounts,
+} from "../services/votes.js";
+import { voteRateLimit } from "../plugins/rate-limits.js";
 
 const titleSchema = z.object({
   title: z.string().min(1).max(200),
@@ -352,6 +360,30 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     reply.status(201);
     return { id: copy!.id };
   });
+
+  /**
+   * Thumb a published list up or down. Only public lists — a private list has
+   * no audience — and never your own: an author voting on their own work is
+   * noise, not signal.
+   */
+  app.put<{ Params: { id: string } }>(
+    "/api/checklists/:id/vote",
+    { config: voteRateLimit },
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const tpl = await getTemplate(request.params.id);
+      if (!tpl || !tpl.isPublic) return reply.status(404).send({ message: "Checklist not found" });
+      if (tpl.authorUserId === user.id) {
+        return reply.status(400).send({ message: "You can't rate your own list" });
+      }
+      const parsed = voteSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ message: "Invalid vote" });
+      await castChecklistVote(tpl.id, user.id, parsed.data.value);
+      const counts = await checklistVoteCounts([tpl.id], user.id);
+      return counts.get(tpl.id) ?? NO_VOTES;
+    },
+  );
 
   // ---- items (author only) ----
 

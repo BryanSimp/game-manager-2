@@ -5,6 +5,7 @@ import type { CollectionSummary, PublicCollection } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { AddCollectionToLibrary } from "../components/AddCollectionToLibrary.js";
+import { VoteButtons } from "../components/VoteButtons.js";
 
 type Tab = "mine" | "public";
 
@@ -39,6 +40,11 @@ export function CollectionsPage() {
       queryClient.invalidateQueries({ queryKey: ["public-collections"] });
       navigate({ to: "/collection/$id", params: { id: created.id } });
     },
+  });
+
+  const vote = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: 1 | 0 | -1 }) => api.voteCollection(id, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["public-collections"] }),
   });
 
   return (
@@ -123,6 +129,7 @@ export function CollectionsPage() {
                 collection={c}
                 busy={adopt.isPending}
                 onAdopt={() => adopt.mutate(c.id)}
+                onVote={(value) => vote.mutate({ id: c.id, value })}
               />
             ))}
           </div>
@@ -197,10 +204,12 @@ function PublicCard({
   collection: c,
   busy,
   onAdopt,
+  onVote,
 }: {
   collection: PublicCollection;
   busy: boolean;
   onAdopt: () => void;
+  onVote: (value: 1 | 0 | -1) => void;
 }) {
   return (
     <div
@@ -214,9 +223,14 @@ function PublicCard({
         <span className="text-amber-400">★</span>
         <span className="min-w-0 truncate">{c.name}</span>
       </h2>
-      <p className="mt-1 text-xs text-zinc-500">
-        by {c.mine ? "you" : c.authorName} · {c.total} games
-      </p>
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-xs text-zinc-500">
+          by {c.mine ? "you" : c.authorName} · {c.total} games
+        </p>
+        {/* your own collection has no vote control — the API refuses it, and
+            a score you can pad isn't a score */}
+        {!c.mine && <VoteButtons votes={c.votes} onVote={onVote} />}
+      </div>
       {c.description && <p className="mt-1 line-clamp-2 text-sm text-zinc-400">{c.description}</p>}
       <Covers preview={c.preview} />
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">

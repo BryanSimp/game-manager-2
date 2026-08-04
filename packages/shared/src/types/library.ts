@@ -263,6 +263,18 @@ export interface ImportItem {
 export interface ImportJobDetail extends ImportJobSummary {
   items: ImportItem[];
 }
+/**
+ * Thumbs on a published list or collection — the only signal for whether
+ * someone else's is worth copying.
+ */
+export interface VoteCounts {
+  up: number;
+  down: number;
+  /** up − down; what "best first" sorts by */
+  score: number;
+  /** your own vote: 1, -1, or 0 for none */
+  mine: number;
+}
 export interface CollectionSummary {
   id: string;
   name: string;
@@ -292,6 +304,7 @@ export interface PublicCollection {
   adopted: boolean;
   /** true when it's yours */
   mine: boolean;
+  votes: VoteCounts;
   preview: Array<{ gameId: string; title: string; coverSrc: string | null }>;
 }
 export interface CollectionNode {
@@ -375,6 +388,11 @@ export interface ChecklistSummary {
   mine: boolean;
   itemCount: number;
   doneCount: number;
+  /** where this list sits among your lists for the game, 1-based */
+  position: number;
+  /** set when this is your copy of someone else's published list */
+  adoptedFromId: string | null;
+  votes: VoteCounts;
 }
 export interface ChecklistItemView {
   id: string;

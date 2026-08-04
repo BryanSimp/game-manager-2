@@ -23,6 +23,7 @@ import type {
   GameChecklists,
   GameProgress,
   ImportMissionsInput,
+  VoteCounts,
   SteamImportRule,
   SteamImportRuleInput,
   SteamStatus,
@@ -347,6 +348,14 @@ export class ApiClient {
     return this.request(`/api/collections/${id}/adopt`, { method: "POST" });
   }
 
+  /** Thumb a published collection: 1, -1, or 0 to take your vote back. */
+  voteCollection(id: string, value: 1 | 0 | -1): Promise<VoteCounts> {
+    return this.request<VoteCounts>(`/api/collections/${id}/vote`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+  }
+
   deleteCollection(id: string): Promise<{ ok: true }> {
     return this.request(`/api/collections/${id}`, { method: "DELETE" });
   }
@@ -490,6 +499,14 @@ export class ApiClient {
 
   adoptChecklist(id: string): Promise<{ id: string }> {
     return this.request(`/api/checklists/${id}/adopt`, { method: "POST" });
+  }
+
+  /** Thumb a published list: 1, -1, or 0 to take your vote back. */
+  voteChecklist(id: string, value: 1 | 0 | -1): Promise<VoteCounts> {
+    return this.request<VoteCounts>(`/api/checklists/${id}/vote`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
   }
 
   addChecklistItem(

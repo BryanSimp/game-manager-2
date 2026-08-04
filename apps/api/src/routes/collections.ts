@@ -9,6 +9,13 @@ import { logEvent } from "../services/analytics.js";
 import { isValidCategory } from "../services/categories.js";
 import { rememberConsoles } from "../services/consoles.js";
 import { inspectAll } from "../services/content-filter.js";
+import {
+  NO_VOTES,
+  castCollectionVote,
+  collectionVoteCounts,
+  voteSchema,
+} from "../services/votes.js";
+import { voteRateLimit } from "../plugins/rate-limits.js";
 
 const collectionSchema = z.object({
   name: z.string().min(1).max(100),
@@ -191,6 +198,10 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     const adopted = new Set(mine.map((m) => m.adoptedFromId).filter(Boolean) as string[]);
 
     const previews = await previewsFor(rows.map((r) => r.id));
+    const votes = await collectionVoteCounts(
+      rows.map((r) => r.id),
+      user.id,
+    );
 
     return rows.map((r) => ({
       id: r.id,
@@ -201,9 +212,35 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       total: totalMap.get(r.id) ?? 0,
       adopted: adopted.has(r.id),
       mine: r.userId === user.id,
+      votes: votes.get(r.id) ?? NO_VOTES,
       preview: previews.get(r.id) ?? [],
     }));
   });
+
+  /** Thumb a published collection. Public only, and never your own. */
+  app.put<{ Params: { id: string } }>(
+    "/api/collections/:id/vote",
+    { config: voteRateLimit },
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const [collection] = await db
+        .select({ id: schema.collections.id, userId: schema.collections.userId })
+        .from(schema.collections)
+        .where(
+          and(eq(schema.collections.id, request.params.id), eq(schema.collections.isPublic, true)),
+        );
+      if (!collection) return reply.status(404).send({ message: "Collection not found" });
+      if (collection.userId === user.id) {
+        return reply.status(400).send({ message: "You can't rate your own collection" });
+      }
+      const parsed = voteSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ message: "Invalid vote" });
+      await castCollectionVote(collection.id, user.id, parsed.data.value);
+      const counts = await collectionVoteCounts([collection.id], user.id);
+      return counts.get(collection.id) ?? NO_VOTES;
+    },
+  );
 
   /**
    * Take a private copy of a public collection — games, positions and play

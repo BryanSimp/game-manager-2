@@ -20,6 +20,15 @@ export const importRateLimit = {
   rateLimit: { max: 10, timeWindow: "1 minute" },
 };
 
+/**
+ * Thumbs on public lists and collections. Cheap per call, but it's a write
+ * loop anyone can point at someone else's list, so it gets a ceiling well
+ * above real use — you can't read and judge sixty lists in a minute.
+ */
+export const voteRateLimit = {
+  rateLimit: { max: 60, timeWindow: "1 minute" },
+};
+
 /** Barcode lookups: UPCitemdb's trial tier is ~100/day per IP. */
 export const barcodeRateLimit = {
   rateLimit: { max: 10, timeWindow: "1 minute" },
