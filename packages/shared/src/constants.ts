@@ -56,20 +56,29 @@ export type UserRole = (typeof USER_ROLES)[number];
 /**
  * Checklist flavour.
  *  - 'missions'     — ordered main-story beats, optionally grouped into
- *                     chapters. The only kind the time estimate divides up.
- *  - 'side_quests'  — optional content, tracked but deliberately untimed:
- *                     how much side content you do is up to you, so pinning
- *                     an estimate to it would be inventing a number.
- *  - 'completion'   — free-form collectibles/endings lists.
+ *                     chapters. The only kind the time estimate divides up,
+ *                     and you get at most one per game.
+ *  - 'side_quests'  — every other list you keep for a game (side quests,
+ *                     collectibles, endings…). Unlimited, and deliberately
+ *                     untimed: how much side content you do is up to you, so
+ *                     pinning an estimate to it would be inventing a number.
+ *                     The list's own title is what users see — the kind is
+ *                     just "not the main story".
+ *  - 'completion'   — the original free-form flavour. Migration 0020 folded
+ *                     every one of these into 'side_quests', so the enum
+ *                     value survives but backs nothing.
  */
 export const CHECKLIST_KINDS = ["completion", "missions", "side_quests"] as const;
 export type ChecklistKind = (typeof CHECKLIST_KINDS)[number];
 
-/** Lists shown on the Progress tab, in order, with their headings. */
-export const MISSION_LIST_KINDS = [
-  { kind: "missions" as const, label: "Main story", timed: true },
-  { kind: "side_quests" as const, label: "Side quests", timed: false },
-];
+/** The one timed list per game — what `estimateProgress` divides up. */
+export const MAIN_LIST_KIND = "missions" as const;
+/** Everything after it. New lists are always created as this kind. */
+export const EXTRA_LIST_KIND = "side_quests" as const;
+
+export function isMainList(kind: ChecklistKind): boolean {
+  return kind === MAIN_LIST_KIND;
+}
 
 /**
  * Friend requests are accepted before anything is shared — a friend code

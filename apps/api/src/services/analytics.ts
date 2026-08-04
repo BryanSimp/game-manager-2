@@ -13,11 +13,20 @@ export type AnalyticsEventType =
   | "game_added"
   | "collection_created"
   | "activity"
+  // a write rejected by services/content-filter.ts — worth watching, both to
+  // catch abuse and to notice the filter rejecting things it shouldn't
+  | "content_blocked"
+  // someone recorded how long a game took them, which is what the community
+  // average is built out of
+  | "time_submitted"
   | "scrape";
 
-/** External sources the app fetches from — the system-health view groups by this. */
+/**
+ * External sources the app fetches from — the system-health view groups by
+ * this. 'missions' is gone (the Fandom scraper was removed in phase 16); the
+ * admin chart groups by the stored value, so historical rows still render.
+ */
 export type ScrapeSource =
-  | "missions"
   | "boxart"
   | "upc"
   | "console_art"
@@ -56,7 +65,7 @@ export function logEvent(
   }
 }
 
-/** Outcome of one external fetch (wiki, box art repo, UPC db, Steam API…). */
+/** Outcome of one external fetch (box art repo, UPC db, Steam API…). */
 export function logScrape(source: ScrapeSource, ok: boolean, detail?: string): void {
   logEvent("scrape", null, { source, ok, ...(detail ? { detail: detail.slice(0, 300) } : {}) });
 }

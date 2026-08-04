@@ -23,7 +23,7 @@ import type {
   GameChecklists,
   GameProgress,
   ImportMissionsInput,
-  MissionSuggestion,
+  VoteCounts,
   SteamImportRule,
   SteamImportRuleInput,
   SteamStatus,
@@ -39,12 +39,15 @@ import type {
   Platform,
   Preferences,
   PublicCollection,
+  PublicCollectionPage,
+  PublicCollectionQuery,
   ScraperHealth,
   SearchOptions,
   SearchResponse,
   Tag,
   TagInput,
   TimeToBeatInput,
+  CommunityStats,
   UpdateEntryInput,
   User,
 } from "@gm/shared";
@@ -249,15 +252,19 @@ export class ApiClient {
   }
 
   /**
-   * Correct a game's how-long-to-beat figures by hand, in seconds. Writes the
-   * shared catalog row (a game's length is a fact about the game), stamped
-   * `ttb_source = 'manual'`.
+   * Record how long a game took you, in seconds. Yours alone — the average
+   * of everyone's is what fills in games IGDB has no figure for.
    */
   saveTimeToBeat(entryId: string, input: TimeToBeatInput): Promise<{ ok: true }> {
     return this.request(`/api/library/${entryId}/time-to-beat`, {
       method: "PUT",
       body: JSON.stringify(input),
     });
+  }
+
+  /** Average score and play time across everyone who owns a game. */
+  getCommunityStats(gameId: string): Promise<CommunityStats> {
+    return this.request<CommunityStats>(`/api/games/${gameId}/community`);
   }
 
   updateEntry(id: string, input: UpdateEntryInput): Promise<{ ok: true }> {
@@ -338,14 +345,35 @@ export class ApiClient {
     return this.request(`/api/collections/${id}`, { method: "PATCH", body: JSON.stringify(input) });
   }
 
-  /** Every published collection, anyone's — yours are flagged, not hidden. */
-  getPublicCollections(): Promise<PublicCollection[]> {
-    return this.request<PublicCollection[]>("/api/collections/public");
+  /**
+   * Browse published collections — yours are flagged, not hidden.
+   *
+   * `q` searches game titles as well as collection names, which is how you
+   * find "the Zelda games in order" without knowing it's called "Hyrule run";
+   * `gameId` is the exact-match form a game's own page uses.
+   */
+  getPublicCollections(query: PublicCollectionQuery = {}): Promise<PublicCollectionPage> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
+    const qs = params.toString();
+    return this.request<PublicCollectionPage>(
+      `/api/collections/public${qs ? `?${qs}` : ""}`,
+    );
   }
 
   /** Take a private, independently editable copy of a public collection. */
   adoptCollection(id: string): Promise<{ id: string; name: string }> {
     return this.request(`/api/collections/${id}/adopt`, { method: "POST" });
+  }
+
+  /** Thumb a published collection: 1, -1, or 0 to take your vote back. */
+  voteCollection(id: string, value: 1 | 0 | -1): Promise<VoteCounts> {
+    return this.request<VoteCounts>(`/api/collections/${id}/vote`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
   }
 
   deleteCollection(id: string): Promise<{ ok: true }> {
@@ -443,10 +471,11 @@ export class ApiClient {
     return this.request<GameChecklists>(`/api/games/${gameId}/checklists`);
   }
 
+  /** Defaults to an extra list; 'missions' for the one timed main-story list. */
   createChecklist(
     gameId: string,
     title: string,
-    kind: ChecklistKind = "completion",
+    kind: ChecklistKind = "side_quests",
   ): Promise<{ id: string }> {
     return this.request(`/api/games/${gameId}/checklists`, {
       method: "POST",
@@ -454,17 +483,17 @@ export class ApiClient {
     });
   }
 
-  // ---- mission lists + time remaining ----
-
-  /** Parse a mission list off a wiki for review. Saves nothing. */
-  suggestMissions(gameId: string, url?: string): Promise<MissionSuggestion> {
-    return this.request<MissionSuggestion>(`/api/games/${gameId}/missions/suggest`, {
-      method: "POST",
-      body: JSON.stringify(url ? { url } : {}),
+  /** Rearrange your lists for a game; ids in the order you want them. */
+  saveChecklistOrder(gameId: string, ids: string[]): Promise<{ ok: true; ordered: number }> {
+    return this.request(`/api/games/${gameId}/checklists/order`, {
+      method: "PUT",
+      body: JSON.stringify({ ids }),
     });
   }
 
-  /** Save a reviewed mission list as a 'missions' checklist. */
+  // ---- mission lists + time remaining ----
+
+  /** Create a list from pasted or generated entries. */
   importMissions(
     gameId: string,
     input: ImportMissionsInput,
@@ -499,6 +528,14 @@ export class ApiClient {
 
   adoptChecklist(id: string): Promise<{ id: string }> {
     return this.request(`/api/checklists/${id}/adopt`, { method: "POST" });
+  }
+
+  /** Thumb a published list: 1, -1, or 0 to take your vote back. */
+  voteChecklist(id: string, value: 1 | 0 | -1): Promise<VoteCounts> {
+    return this.request<VoteCounts>(`/api/checklists/${id}/vote`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
   }
 
   addChecklistItem(

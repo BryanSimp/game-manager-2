@@ -4,6 +4,7 @@ import type {
   PlatformFamily,
   ProgressBasis,
 } from "../constants.js";
+import type { TtbSource } from "../progress.js";
 export interface GameSummary {
   id: string;
   igdbId: number | null;
@@ -16,7 +17,14 @@ export interface GameSummary {
   ttbMain: number | null;
   ttbMainExtra: number | null;
   ttbCompletionist: number | null;
-  ttbSource: "igdb" | "manual" | null;
+  /**
+   * Where these times came from — resolved per request, so 'yours' and
+   * 'community' appear here even though the catalog column only stores
+   * 'igdb' and 'manual'. See `resolveTtb`.
+   */
+  ttbSource: TtbSource | null;
+  /** players averaged, when `ttbSource` is 'community' */
+  ttbCount: number | null;
 }
 export interface OwnedPlatform {
   platformId: string;
@@ -136,15 +144,35 @@ export interface AddGameInput {
   platforms?: Array<{ platformId: string; format: OwnershipFormat }>;
 }
 /**
- * Manual how-long-to-beat figures, in **seconds**, matching the columns they
- * land in. `games` is the shared catalog, so this corrects the figure for
- * everyone — that's the point of `ttbSource: 'manual'`, which stops a later
- * IGDB refresh putting the wrong number back. A null clears that figure.
+ * How long a game took **you**, in seconds, matching the columns they land in.
+ * Yours alone: your figure drives your own estimate, and the average of
+ * everyone's fills in games IGDB has no data for. A null clears that figure;
+ * clearing all three removes your submission. See `resolveTtb` for which one
+ * a game actually displays.
  */
 export interface TimeToBeatInput {
   ttbMain?: number | null;
   ttbMainExtra?: number | null;
   ttbCompletionist?: number | null;
+}
+/** Aggregates across everyone who owns a game. */
+export interface CommunityStats {
+  /** null until `minRatings` people have rated it */
+  rating: { average: number; count: number } | null;
+  /** average of submitted play times, in seconds; null when nobody has said */
+  timeToBeat: {
+    ttbMain: number | null;
+    ttbMainExtra: number | null;
+    ttbCompletionist: number | null;
+    count: number;
+  } | null;
+  /** your own submission, so the editor can show what you said */
+  yours: {
+    ttbMain: number | null;
+    ttbMainExtra: number | null;
+    ttbCompletionist: number | null;
+  } | null;
+  minRatings: number;
 }
 export interface UpdateEntryInput {
   status?: string;
@@ -263,6 +291,18 @@ export interface ImportItem {
 export interface ImportJobDetail extends ImportJobSummary {
   items: ImportItem[];
 }
+/**
+ * Thumbs on a published list or collection — the only signal for whether
+ * someone else's is worth copying.
+ */
+export interface VoteCounts {
+  up: number;
+  down: number;
+  /** up − down; what "best first" sorts by */
+  score: number;
+  /** your own vote: 1, -1, or 0 for none */
+  mine: number;
+}
 export interface CollectionSummary {
   id: string;
   name: string;
@@ -292,6 +332,7 @@ export interface PublicCollection {
   adopted: boolean;
   /** true when it's yours */
   mine: boolean;
+  votes: VoteCounts;
   preview: Array<{ gameId: string; title: string; coverSrc: string | null }>;
 }
 export interface CollectionNode {
@@ -323,8 +364,27 @@ export interface CollectionDetail {
   accentColor: string | null;
   isPublic: boolean;
   adoptedFromId: string | null;
+  /** false when you're looking at someone else's published collection */
+  isOwner: boolean;
+  /** set only when it isn't yours */
+  authorName: string | null;
+  votes: VoteCounts;
   games: CollectionNode[];
   links: CollectionLink[];
+}
+/** How the public browse list is filtered and ordered. */
+export interface PublicCollectionQuery {
+  /** matches collection names, descriptions, *and* the titles of games inside */
+  q?: string;
+  /** collections containing this exact game */
+  gameId?: string;
+  sort?: "top" | "new";
+  limit?: number;
+  offset?: number;
+}
+export interface PublicCollectionPage {
+  items: PublicCollection[];
+  hasMore: boolean;
 }
 /**
  * Adding a game to a collection. `gameId` for something already in the
@@ -362,7 +422,11 @@ export interface ChecklistSummary {
   title: string;
   kind: ChecklistKind;
   isPublic: boolean;
-  /** wiki page a scraped mission list came from — attribution, CC-BY-SA */
+  /**
+   * Wiki page a mission list was scraped from, back when the app scraped —
+   * kept for CC-BY-SA attribution on lists that predate phase 16, and still
+   * rendered as a link. Nothing writes it any more.
+   */
   sourceUrl: string | null;
   /** played in order: ticking an entry implies everything before it */
   sequential: boolean;
@@ -371,6 +435,11 @@ export interface ChecklistSummary {
   mine: boolean;
   itemCount: number;
   doneCount: number;
+  /** where this list sits among your lists for the game, 1-based */
+  position: number;
+  /** set when this is your copy of someone else's published list */
+  adoptedFromId: string | null;
+  votes: VoteCounts;
 }
 export interface ChecklistItemView {
   id: string;
@@ -396,32 +465,9 @@ export interface GameChecklists {
   public: ChecklistSummary[];
 }
 // ---- mission progress + time remaining ----
-/** One wiki page that looks like it holds a mission/chapter list. */
-export interface MissionSourceCandidate {
-  wikiName: string;
-  /** e.g. "metalgear.fandom.com" */
-  domain: string;
-  pageTitle: string;
-  url: string;
-}
-/**
- * A parsed mission list, returned for review. Nothing is saved until the
- * user confirms — wiki parsing is heuristic and picks up stray rows.
- */
-export interface MissionSuggestion {
-  sourceUrl: string;
-  wikiName: string;
-  pageTitle: string;
-  /** heading the list was pulled from, e.g. "Main missions" */
-  sectionTitle: string | null;
-  missions: string[];
-  /** other pages worth trying if this one parsed badly */
-  alternatives: MissionSourceCandidate[];
-}
 export interface ImportMissionsInput {
   title: string;
   missions: string[];
-  sourceUrl?: string | null;
   /** defaults to 'missions' (the timed main-story list) */
   kind?: Extract<ChecklistKind, "missions" | "side_quests">;
 }

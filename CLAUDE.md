@@ -132,6 +132,16 @@ Phase 0–8 roadmap — read it before making design decisions.
   including tagged `sql` templates); the one real find was
   `suggestMissionsFromUrl` accepting any host *ending* in "fandom.com"
   ("evil-fandom.com") — now exact-host or dot-suffix plus http(s) only.
+- **Crowd-sourced data has one shape**: a user makes something private, opts
+  into publishing it, and everyone else takes an independent copy. Checklists
+  and collections both work this way, and both are now rated by the same
+  `services/votes.ts`. Publishing is always a deliberate act — an adopted copy
+  starts private, because publishing someone else's work is their call — and
+  every publishable string passes `services/content-filter.ts` on write *and*
+  again, in full, at publish. **Aggregates** (`services/community.ts`) are the
+  one exception to "opt in": an average rating or play time is derived from
+  data you already store, so it needs no publish step, and is protected by a
+  minimum-contributor floor instead.
 - **One funnel for category badges**: `statusChip()` (`apps/web/src/lib/format.ts`)
   resolves colour *and* applies `preferences.badge_opacity`, so the opacity setting
   lands on every badge on every page for free. Mobile mirrors it through
@@ -205,6 +215,8 @@ was dev-only). Never use `db push`.
 
 | 15 password reset | see git log | **Not the better-auth built-in** — better-auth 1.6 stores reset tokens *raw* in `verification`, so `routes/auth-recovery.ts` owns the flow: `password_reset_token` (migration 0019) keeps only a SHA-256 hash of a 32-byte token, 15-min expiry, single-use (consumed via `DELETE … RETURNING`), one live token per user. The routes are static `POST /api/auth/request-reset` / `reset-password`, which Fastify matches ahead of the better-auth wildcard — deliberately shadowing its unhashed equivalents. The password *update* still goes through `auth.$context` (scrypt hash + `internalAdapter`, mirroring better-auth's own resetPassword) and revokes every session. Request-reset answers identically for known/unknown emails, checks config *before* touching accounts (503 when unconfigured), fire-and-forgets the send so response timing can't leak account existence, and rate-limits 3/15-min per IP and per email in memory. **Email is Resend** (`services/email.ts`, plain fetch): `resend_api_key`/`email_from` DB-first with `RESEND_API_KEY`/`EMAIL_FROM` fallback, admin Settings card with send-test button; reset links target `APP_URL` → first CORS origin → `BETTER_AUTH_URL`. Web: `/forgot-password` + `/reset-password?token=` pages; mobile: "Forgot password?" on the sign-in screen reuses the typed email (no new screen — the emailed link opens web) |
 
+| 16 shared lists + community data | see git log | **One list surface per game** (migration 0020): `checklist_templates.position`, so a game has one main-story list plus unlimited extras in an order you set. `ChecklistPanel` is gone — the Progress tab's `ListCard` publishes, copies, votes, reorders and edits every list identically, which is what finally made *mission* lists shareable (the API always allowed it; only the `kind='completion'` filter stopped it). `completion` folded into `side_quests` and now backs nothing. One `missions` list per game, enforced with a 409, because it's what the time estimate divides. **Wiki scraping removed** — `services/missions.ts`, the suggest route, `scraperRateLimit` and `MissionReview` all gone; pasting a list is the create path now. **Votes** (`checklist_votes`, `collection_votes`, `services/votes.ts`): thumbs on published lists and collections, aggregated on read, public-only and never your own. **Community data** (`services/community.ts`): average rating (floor of 3 raters — a privacy floor, not a quality one) and average play time. `PUT /time-to-beat` stopped writing the shared catalog row and writes `user_time_to_beat`; `resolveTtb` (shared) picks catalog → yours → community per request, and the dashboard's backlog total goes through the same resolver. **Content filter** (`services/content-filter.ts`): hate terms + PII on every write to a collection or list, plus a whole-list re-scan at publish. **Collection discovery**: `GET /api/collections/public` takes `q`/`gameId`/`sort`/paging, `q` matches game titles inside a collection, `GET /:id` opens to owner-or-public, and the graph opens read-only with click-through to a game. List tab moved first |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), backlog
 randomizer with filters, admin panel (users, password resets, registration
@@ -232,6 +244,14 @@ file to be provided for reference).
 - Barcode scan flow verified end-to-end at the API level (real BOTW/GoW barcodes) but
   the camera screen itself needs an on-device Expo Go run — simulators have no camera.
 - Play-order graph *editing* is web-only; mobile flattens the graph to an ordered list.
+- **The graph opens read-only** (phase 16). It used to be permanently
+  editable, which meant the only thing clicking a game could do was drag it —
+  and a stray drag silently PUT a new layout. A click now opens the game (your
+  copy if you own it, `/add?q=<title>` if you don't, the same rule the list
+  rows follow); "Arrange" turns dragging, connecting and arrow-deletion back
+  on. Someone else's published collection has no Arrange at all. The **List**
+  tab is first and default: a numbered run is what most people open a
+  collection for.
 - **A collection has two views, and two orderings to match.** The graph answers
   "what branches into what" (`position_x/y` + `collection_links`); the list
   answers "what's 1, 2, 3" (`collection_games.sort_order`, migration 0016).
@@ -249,6 +269,17 @@ file to be provided for reference).
   the add-game search when you don't (web passes `?q=<title>`, which is why
   `/add` has a `validateSearch`). Rows stop being tappable while you're editing
   the order — a mis-tap that navigates away would lose the whole draft.
+- **`GET /api/collections/:id` is owner-or-public**, not owner-only: browsing
+  the public list is pointless if you can't look inside before copying.
+  `userGameId`/`status` on each node resolve against *whoever is asking*, so a
+  visitor sees which of the games they own, not which the author owns.
+- **Finding a public collection searches the games inside it.** `q` on
+  `GET /api/collections/public` matches the collection's name and description
+  *and* the titles of its games, because nobody hunting for a Zelda marathon
+  knows it's filed as "Hyrule run". `gameId` is the exact-match form a game's
+  own page uses for its "In public collections" block. Score is a scalar
+  subquery so `sort=top` orders and paginates in the database rather than over
+  one page's worth of rows.
 - **`POST /api/collections/:id/add-to-library`** pulls a whole collection in at
   once, which is the point of browsing someone else's. Works on any collection
   you can see (yours or public). Games you already own count as `skipped` and
@@ -269,13 +300,35 @@ file to be provided for reference).
   because "the Zelda games in order" is a reading list, not an inventory.
   `CollectionNode.userGameId` is null for those, which is what the UI uses to
   say "not in library".
-- **Manual play times** (`PUT /api/library/:id/time-to-beat`) write the
-  **shared `games` row**, not a per-user override: how long a game takes is a
-  fact about the game. Values are seconds, `normalizeTtb` enforces
-  main ≤ main+extras ≤ completionist so a typo can't invert the columns, and
-  clearing every figure resets `ttb_source` to null rather than pinning an
-  empty manual override. Nothing overwrites a manual figure today —
-  `upsertGameFromIgdb` returns early for a game already in the catalog.
+- **Play times are per-user** (`user_time_to_beat`, phase 16). They used to be
+  written straight onto the shared `games` row — a game's length is a fact
+  about the game — but on a public app that meant one person's typo became
+  everyone's number and there was nothing left to average. `resolveTtb`
+  (`packages/shared/src/progress.ts`) decides what a game shows: the catalog
+  row when it has anything, then your own submission, then the average of
+  everyone else's. `'yours'` and `'community'` are **computed** `ttbSource`
+  values that never hit the database, which is why the pg enum is still two
+  values wide. Values are seconds and `normalizeTtb` still enforces
+  main ≤ main+extras ≤ completionist.
+- **Anything reading a play time must go through `resolveTtbFor`**, not
+  `games.ttb_main`. `entryToJson`, `GET /api/library/:id/progress` and the
+  dashboard's backlog total all do; a fourth reader that didn't would quietly
+  disagree with the other three.
+- Legacy `games.ttb_source = 'manual'` rows still win over everything, since
+  they predate per-user submissions and nobody knows who wrote them. The only
+  way to clear one is to submit and then clear your own figure for that game —
+  `PUT /time-to-beat` treats an all-null submission as "and drop the stale
+  manual override too". Nothing else writes `games.ttb_*` any more.
+- Community ratings need **3 raters** before an average appears
+  (`MIN_RATINGS`). That's a privacy floor, not a quality one: with one or two
+  raters and a friends list, an "average" is one identifiable person's
+  opinion. Play times publish from **one** submission — how long a game took
+  is a fact someone measured, not an opinion about them — and the UI says how
+  many players it averages.
+- `GET /api/games/:gameId/community` is deliberately its own request rather
+  than fields on `GET /api/library`: one query pair per detail page beats
+  weight on the app's hottest route. The trade is that library cards can't
+  show a community score without a new endpoint.
 - UPCitemdb trial tier is ~100 lookups/day per IP (results cached in-process); a paid
   key or alternate provider is the upgrade path if scanning whole shelves.
 - **Retail listings are not game titles** (`services/product-title.ts`):
@@ -348,7 +401,8 @@ file to be provided for reference).
 - Pasting an image (Ctrl+V) on the Import page is web-only, and asks whether
   it's a launcher screenshot or a shelf photo rather than guessing — the two
   take different OCR paths.
-- Checklist authoring is web-only on mobile (tracking + adopting work).
+- List authoring is web-only on mobile: ticking entries, voting and copying
+  work, but creating, editing, reordering and publishing a list don't.
 - Friends on mobile (`friends.tsx`, `friend/[userId].tsx`) does everything the
   web page does except copy-to-clipboard: React Native dropped `Clipboard` from
   core and no clipboard package is installed, so the code is selectable text
@@ -357,29 +411,38 @@ file to be provided for reference).
   opening the friends page.
 - A friend's library shows status/rating/platforms/100%%, never notes. If more
   gets exposed later, `routes/friends.ts` is the single place that decides.
-- **Wiki mission scraping is best-effort and often wrong.** Measured on 6 games:
-  GTA V (74 missions) and RDR2 (51) correct, MGSV correct but incomplete (19 — the
-  wiki page only documents 19), Halo CE picked up enemy names, Mass Effect 2 and
-  Resident Evil 4 found nothing. Every wiki lays mission pages out differently, so
-  the review step and the paste-a-URL / manual-entry fallbacks are the real
-  interface, not a nicety. `MIN_SCORE` in `services/missions.ts` deliberately
-  prefers returning nothing over returning a wrong list.
+- **Wiki mission scraping is gone** (phase 16). It was measured on 6 games:
+  GTA V (74 missions) and RDR2 (51) correct, MGSV correct but incomplete (the
+  wiki only documented 19), Halo CE returned enemy names, Mass Effect 2 and
+  Resident Evil 4 found nothing. Every wiki lays mission pages out
+  differently, and a scraper that is wrong more often than right cost a
+  Cloudflare-fronted dependency, a rate-limit bucket and a review UI to save
+  nobody any typing. Pasting a list is the create path now, and publishing one
+  means the next person doesn't retype it. Don't reintroduce it — if lists
+  ever need a source again, the honest version is an import format, not a
+  guess. `checklist_templates.source_url` survives for CC-BY-SA attribution on
+  lists scraped before the removal; nothing writes it.
 - Time estimate divides the TTB figure evenly across missions — real missions vary
   a lot, and no source gives per-mission timings.
-- Mission lists can't be **published/adopted** yet, unlike completion checklists:
-  `ChecklistPanel` filters to `kind='completion'`, so a public mission list would
-  have nowhere to be adopted from. The tables support it (`is_public`,
-  `adopted_from_id`) — it needs UI on both sides. This matters more than it
-  sounds: sharing was the reason mission lists were built on checklists at all,
-  so scraping is currently repeated per user.
 - Mission list *editing* (rename/reorder/add/delete/chapter) is web-only; mobile
-  ticks entries off but can't change them. Reordering swaps the two rows' stored
-  positions rather than renumbering the list, so it relies on positions being
-  distinct — true for imported lists.
-- **Two list kinds per game**: `kind='missions'` (main story, timed, groupable
-  into chapters) and `kind='side_quests'` (tracked, deliberately untimed — how
-  much side content you do is a choice, so an estimate would be invented).
-  Only `'missions'` feeds `missionCountsByGame` and the progress route.
+  ticks entries off, votes and copies, but can't change a list. Entry reordering
+  swaps the two rows' stored positions rather than renumbering the list, so it
+  relies on positions being distinct — true for imported lists. **List**
+  reordering (`PUT /api/games/:gameId/checklists/order`) rewrites the whole
+  array instead, because lists get created and deleted often enough that
+  distinct positions can't be assumed.
+- **One main-story list per game, unlimited extras.** `kind='missions'` is the
+  timed one — the only kind `missionCountsByGame` and the progress route look
+  at — and a second is refused with a 409, since two would mean two answers to
+  "how much is left". `kind='side_quests'` is every other list you keep
+  (collectibles, endings, side quests), untimed by design, ordered by
+  `position`. `kind='completion'` was folded into `side_quests` by migration
+  0020 and now backs nothing, like `game_status`.
+- The 409 on a second main-story list also fires on **adopt**: copying
+  someone's main story list when you have your own is refused rather than
+  filed as an extra, which would silently change what you copied it for.
+  Delete yours first. Legacy duplicates from before the rule still exist,
+  which is why the estimate keeps its own oldest-wins tiebreak.
 - **Chapters are `checklist_items.category`** — no separate table, and a chapter
   exists only by being named on a mission, so there's no empty-chapter state to
   keep in sync. Mission numbering stays continuous across chapters, and chapter
@@ -388,12 +451,31 @@ file to be provided for reference).
   ticks 1..N-1 in one `PUT /api/checklists/:id/items/check` call — 70 missions
   would otherwise be 70 requests. Unticking clears *only* that entry, so a
   skipped mission stays a gap; that asymmetry is deliberate, not a bug.
-- Wiki search is offered for the main story list only: `services/missions.ts`
-  denylists "side" sections, so pointing it at a side-quest list re-imports the
-  main story.
 - The Progress tab's estimate uses the *oldest* mission checklist for a game if
   several exist; there's no picker. `missionCountsByGame` in `routes/library.ts`
-  applies the same rule for the list payload — keep the two in step.
+  applies the same rule for the list payload — keep the two in step. New
+  duplicates are refused (see the 409 above), so this only covers rows that
+  predate phase 16.
+- **Publishing re-scans, not just the field you changed.** `PATCH` with
+  `isPublic: true` runs `inspectAll` over a list's title *and* every entry (or
+  a collection's name and description), because content written before the
+  filter existed would otherwise reach the public list on an isPublic-only
+  request. Everything else is checked per write.
+- **`services/content-filter.ts` is deliberately narrow**: hate terms and PII
+  (emails, phone numbers, street addresses), not profanity. Games ship
+  missions with swearing in the title and "Kill the bastard" is a fair
+  description of a boss. Every term added to `HATE_TERMS` is a title someone
+  can no longer write, so resist padding it — "kill all" is absent on purpose,
+  since "Kill all the guards" is an actual mission in a lot of games. The
+  street-address pattern skips ordinary-English suffixes (`way`, `place`,
+  `st`) for the same reason: numbered mission lists are full of things like
+  "12 The Only Way Out". `pnpm --filter @gm/api check:content` covers 38
+  cases, most of them things that must *not* be blocked. It's a speed bump,
+  not a guarantee; admin delete is still the backstop.
+- **Votes are aggregated on read**, never denormalised onto the parent row — a
+  counter drifts the first time a delete cascades. Public rows only, never
+  your own (the control isn't rendered *and* the API refuses it), and a vote
+  isn't carried across an adopt: a copy starts at zero.
 - Mobile's library has no "Estimated shortest" sort (web-only), though
   `LibraryEntry.estimatedRemainingSeconds` is available to it. Sort moved into
   an `Alert` picker rather than a fifth row of chips — the four sort buttons

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
@@ -37,6 +37,7 @@ import {
   Screen,
   Sheet,
   SheetSection,
+  VoteRow,
 } from "@/components/ui";
 
 type Tab = "mine" | "public";
@@ -48,11 +49,19 @@ export default function CollectionsScreen() {
   const [tab, setTab] = useState<Tab>("mine");
   const [name, setName] = useState("");
   const [addingAll, setAddingAll] = useState<PublicCollection | null>(null);
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+
+  // settle the text before it becomes a query key, so typing isn't a request each
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const collections = useQuery({ queryKey: ["collections"], queryFn: () => api.getCollections() });
   const publicOnes = useQuery({
-    queryKey: ["public-collections"],
-    queryFn: () => api.getPublicCollections(),
+    queryKey: ["public-collections", query],
+    queryFn: () => api.getPublicCollections({ q: query || undefined }),
     enabled: tab === "public",
   });
 
@@ -71,6 +80,11 @@ export default function CollectionsScreen() {
       queryClient.invalidateQueries({ queryKey: ["public-collections"] });
       router.push(`/collection/${created.id}`);
     },
+  });
+
+  const vote = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: 1 | 0 | -1 }) => api.voteCollection(id, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["public-collections"] }),
   });
 
   return (
@@ -136,7 +150,7 @@ export default function CollectionsScreen() {
         </>
       ) : (
         <FlatList
-          data={publicOnes.data ?? []}
+          data={publicOnes.data?.items ?? []}
           keyExtractor={(c) => c.id}
           contentContainerStyle={{ padding: space.md, paddingBottom: space.xxl + insets.bottom }}
           refreshControl={
@@ -145,9 +159,24 @@ export default function CollectionsScreen() {
               onRefresh={() => publicOnes.refetch()}
             />
           }
+          ListHeaderComponent={
+            <Field
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search by collection or game"
+              autoCorrect={false}
+              style={{ marginBottom: space.md }}
+            />
+          }
           ListEmptyComponent={
             publicOnes.isLoading ? (
               <ActivityIndicator style={{ marginTop: 48 }} color={colors.accentBorder} />
+            ) : query ? (
+              <EmptyState
+                icon="search-outline"
+                title="Nothing matches that"
+                text="Try a game name — the search looks inside collections too."
+              />
             ) : (
               <EmptyState
                 icon="star-outline"
@@ -163,6 +192,7 @@ export default function CollectionsScreen() {
               onAdopt={() => adopt.mutate(item.id)}
               onOpen={() => router.push(`/collection/${item.id}`)}
               onAddAll={() => setAddingAll(item)}
+              onVote={(value) => vote.mutate({ id: item.id, value })}
             />
           )}
         />
@@ -360,12 +390,14 @@ function PublicCard({
   onAdopt,
   onOpen,
   onAddAll,
+  onVote,
 }: {
   collection: PublicCollection;
   busy: boolean;
   onAdopt: () => void;
   onOpen: () => void;
   onAddAll: () => void;
+  onVote: (value: 1 | 0 | -1) => void;
 }) {
   const accent = c.accentColor ?? colors.accent;
   return (
@@ -379,9 +411,13 @@ function PublicCard({
               {c.name}
             </Text>
           </View>
-          <Text style={[type.micro, { marginTop: 2 }]} numberOfLines={1}>
-            by {c.mine ? "you" : c.authorName} · {c.total} games
-          </Text>
+          <View style={styles.byRow}>
+            <Text style={[type.micro, { flex: 1 }]} numberOfLines={1}>
+              by {c.mine ? "you" : c.authorName} · {c.total} games
+            </Text>
+            {/* no vote control on your own — the API refuses it anyway */}
+            {c.mine ? null : <VoteRow votes={c.votes} onVote={onVote} />}
+          </View>
           {c.description ? (
             <Text style={[type.caption, { marginTop: 2 }]} numberOfLines={2}>
               {c.description}
@@ -424,6 +460,7 @@ const styles = StyleSheet.create({
   card: { marginBottom: space.sm },
   cardTop: { flexDirection: "row", alignItems: "center", gap: space.md },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  byRow: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: 2 },
   accent: { width: 4, alignSelf: "stretch", borderRadius: radius.sm },
   copiedTag: {
     borderRadius: radius.pill,

@@ -8,6 +8,14 @@ import { upsertGameFromIgdb } from "../services/catalog.js";
 import { logEvent } from "../services/analytics.js";
 import { isValidCategory } from "../services/categories.js";
 import { rememberConsoles } from "../services/consoles.js";
+import { inspectAll } from "../services/content-filter.js";
+import {
+  NO_VOTES,
+  castCollectionVote,
+  collectionVoteCounts,
+  voteSchema,
+} from "../services/votes.js";
+import { voteRateLimit } from "../plugins/rate-limits.js";
 
 const collectionSchema = z.object({
   name: z.string().min(1).max(100),
@@ -22,6 +30,20 @@ const collectionSchema = z.object({
 
 /** A handful of covers for a collection card, in play-order-ish layout order. */
 const PREVIEW_LIMIT = 5;
+
+/**
+ * Browsing the public list. `q` matches collection names *and* the titles of
+ * the games inside them; `gameId` is the exact-match form the game detail page
+ * uses to ask "who has put this in a collection?".
+ */
+const publicQuerySchema = z.object({
+  q: z.string().trim().min(1).max(100).optional(),
+  gameId: z.string().uuid().optional(),
+  sort: z.enum(["top", "new"]).default("top"),
+  limit: z.coerce.number().int().min(1).max(60).default(30),
+  offset: z.coerce.number().int().min(0).max(10_000).default(0),
+});
+type PublicQuery = z.input<typeof publicQuerySchema>;
 
 const layoutSchema = z.object({
   nodes: z
@@ -43,6 +65,14 @@ const layoutSchema = z.object({
     )
     .max(400),
 });
+
+/** Postgres unique-violation, however deeply drizzle has wrapped it. */
+function isUniqueViolation(err: unknown): boolean {
+  for (let e = err; e instanceof Error; e = (e as { cause?: unknown }).cause) {
+    if ((e as { code?: string }).code === "23505") return true;
+  }
+  return false;
+}
 
 async function ownedCollection(userId: string, id: string) {
   const [row] = await db
@@ -141,9 +171,41 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
    * shared one is findable; yours are included and flagged rather than hidden,
    * so you can see what other people see.
    */
-  app.get("/api/collections/public", async (request, reply) => {
+  app.get<{ Querystring: PublicQuery }>("/api/collections/public", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
+    const query = publicQuerySchema.safeParse(request.query);
+    if (!query.success) return reply.status(400).send({ message: "Invalid search" });
+    const { q, gameId, sort, limit, offset } = query.data;
+
+    const filters = [eq(schema.collections.isPublic, true)];
+    if (gameId) {
+      filters.push(
+        sql`exists (select 1 from ${schema.collectionGames}
+                    where ${schema.collectionGames.collectionId} = ${schema.collections.id}
+                      and ${schema.collectionGames.gameId} = ${gameId})`,
+      );
+    }
+    if (q) {
+      // Matching a *game title* as well as the collection's own name is what
+      // makes this browse-by-game rather than browse-by-whatever-they-called-it:
+      // nobody searching for a Zelda marathon knows it's filed as "Hyrule run".
+      const like = `%${q}%`;
+      filters.push(
+        sql`(${schema.collections.name} ilike ${like}
+             or ${schema.collections.description} ilike ${like}
+             or exists (select 1 from ${schema.collectionGames}
+                          join ${schema.games} on ${schema.games.id} = ${schema.collectionGames.gameId}
+                         where ${schema.collectionGames.collectionId} = ${schema.collections.id}
+                           and ${schema.games.title} ilike ${like}))`,
+      );
+    }
+
+    // score as a scalar subquery, so "best first" sorts and paginates in the
+    // database rather than over whatever one page happened to contain
+    const score = sql<number>`coalesce((select sum(${schema.collectionVotes.value})
+                                          from ${schema.collectionVotes}
+                                         where ${schema.collectionVotes.collectionId} = ${schema.collections.id}), 0)::int`;
 
     const rows = await db
       .select({
@@ -157,10 +219,19 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       })
       .from(schema.collections)
       .innerJoin(schema.user, eq(schema.user.id, schema.collections.userId))
-      .where(eq(schema.collections.isPublic, true))
-      .orderBy(sql`${schema.collections.createdAt} desc`);
+      .where(and(...filters))
+      .orderBy(
+        ...(sort === "top"
+          ? [sql`${score} desc`, sql`${schema.collections.createdAt} desc`]
+          : [sql`${schema.collections.createdAt} desc`]),
+      )
+      // one extra row is the cheapest possible "is there another page"
+      .limit(limit + 1)
+      .offset(offset);
 
-    if (rows.length === 0) return [];
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    if (rows.length === 0) return { items: [], hasMore: false };
 
     const totals = await db
       .select({ collectionId: schema.collectionGames.collectionId, total: count() })
@@ -182,19 +253,52 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     const adopted = new Set(mine.map((m) => m.adoptedFromId).filter(Boolean) as string[]);
 
     const previews = await previewsFor(rows.map((r) => r.id));
+    const votes = await collectionVoteCounts(
+      rows.map((r) => r.id),
+      user.id,
+    );
 
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      accentColor: r.accentColor,
-      authorName: r.authorName,
-      total: totalMap.get(r.id) ?? 0,
-      adopted: adopted.has(r.id),
-      mine: r.userId === user.id,
-      preview: previews.get(r.id) ?? [],
-    }));
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        accentColor: r.accentColor,
+        authorName: r.authorName,
+        total: totalMap.get(r.id) ?? 0,
+        adopted: adopted.has(r.id),
+        mine: r.userId === user.id,
+        votes: votes.get(r.id) ?? NO_VOTES,
+        preview: previews.get(r.id) ?? [],
+      })),
+      hasMore,
+    };
   });
+
+  /** Thumb a published collection. Public only, and never your own. */
+  app.put<{ Params: { id: string } }>(
+    "/api/collections/:id/vote",
+    { config: voteRateLimit },
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const [collection] = await db
+        .select({ id: schema.collections.id, userId: schema.collections.userId })
+        .from(schema.collections)
+        .where(
+          and(eq(schema.collections.id, request.params.id), eq(schema.collections.isPublic, true)),
+        );
+      if (!collection) return reply.status(404).send({ message: "Collection not found" });
+      if (collection.userId === user.id) {
+        return reply.status(400).send({ message: "You can't rate your own collection" });
+      }
+      const parsed = voteSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ message: "Invalid vote" });
+      await castCollectionVote(collection.id, user.id, parsed.data.value);
+      const counts = await collectionVoteCounts([collection.id], user.id);
+      return counts.get(collection.id) ?? NO_VOTES;
+    },
+  );
 
   /**
    * Take a private copy of a public collection — games, positions and play
@@ -283,6 +387,11 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     if (!parsed.success) {
       return reply.status(400).send({ message: parsed.error.issues[0]?.message });
     }
+    const issue = inspectAll([parsed.data.name, parsed.data.description]);
+    if (issue) {
+      logEvent("content_blocked", user.id, { surface: "collection", kind: issue.kind });
+      return reply.status(400).send({ message: issue.message });
+    }
     const [created] = await db
       .insert(schema.collections)
       .values({
@@ -308,11 +417,39 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     if (!parsed.success) {
       return reply.status(400).send({ message: parsed.error.issues[0]?.message });
     }
-    const updated = await db
-      .update(schema.collections)
-      .set(parsed.data)
-      .where(and(eq(schema.collections.id, request.params.id), eq(schema.collections.userId, user.id)))
-      .returning();
+    const existing = await ownedCollection(user.id, request.params.id);
+    if (!existing) return reply.status(404).send({ message: "Collection not found" });
+
+    // Publishing re-checks the whole collection, not just the fields in this
+    // request: a collection written before the filter existed would otherwise
+    // walk straight into the public list on an isPublic-only PATCH.
+    const toCheck =
+      parsed.data.isPublic === true
+        ? [parsed.data.name ?? existing.name, parsed.data.description ?? existing.description]
+        : [parsed.data.name, parsed.data.description];
+    const issue = inspectAll(toCheck);
+    if (issue) {
+      logEvent("content_blocked", user.id, { surface: "collection", kind: issue.kind });
+      return reply.status(400).send({ message: issue.message });
+    }
+
+    let updated;
+    try {
+      updated = await db
+        .update(schema.collections)
+        .set(parsed.data)
+        .where(
+          and(eq(schema.collections.id, request.params.id), eq(schema.collections.userId, user.id)),
+        )
+        .returning();
+    } catch (err) {
+      // (user_id, name) is unique, so renaming onto a name you already use is
+      // a 409 like it is on create — not the raw 500 it used to be
+      if (isUniqueViolation(err)) {
+        return reply.status(409).send({ message: "You already have a collection with that name" });
+      }
+      throw err;
+    }
     if (updated.length === 0) return reply.status(404).send({ message: "Collection not found" });
     return updated[0];
   });
@@ -328,11 +465,31 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  /**
+   * One collection in full.
+   *
+   * Readable if it's yours *or* it's published — browsing the public list is
+   * pointless if you can't look inside before taking a copy. The per-game
+   * `userGameId`/`status` are resolved against whoever is asking, so a visitor
+   * sees which of the games they own rather than which the author owns.
+   */
   app.get<{ Params: { id: string } }>("/api/collections/:id", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const collection = await ownedCollection(user.id, request.params.id);
-    if (!collection) return reply.status(404).send({ message: "Collection not found" });
+    const [collection] = await db
+      .select()
+      .from(schema.collections)
+      .where(eq(schema.collections.id, request.params.id));
+    if (!collection || (collection.userId !== user.id && !collection.isPublic)) {
+      return reply.status(404).send({ message: "Collection not found" });
+    }
+    const isOwner = collection.userId === user.id;
+    const [author] = isOwner
+      ? []
+      : await db
+          .select({ name: schema.user.name })
+          .from(schema.user)
+          .where(eq(schema.user.id, collection.userId));
 
     const nodes = await db
       .select({
@@ -364,6 +521,8 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       .from(schema.collectionLinks)
       .where(eq(schema.collectionLinks.collectionId, collection.id));
 
+    const votes = await collectionVoteCounts([collection.id], user.id);
+
     return {
       id: collection.id,
       name: collection.name,
@@ -371,6 +530,9 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       accentColor: collection.accentColor,
       isPublic: collection.isPublic,
       adoptedFromId: collection.adoptedFromId,
+      isOwner,
+      authorName: author?.name ?? null,
+      votes: votes.get(collection.id) ?? NO_VOTES,
       games: nodes.map((n) => ({
         gameId: n.gameId,
         title: n.title,

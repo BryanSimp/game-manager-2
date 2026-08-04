@@ -1,15 +1,9 @@
 /**
  * Per-route rate-limit configs, consumed by @fastify/rate-limit via a route's
  * `config` option. The global ceiling (server.ts) stops floods; these protect
- * the routes where one request is expensive — CPU (image re-encode, OCR), an
- * upstream quota (UPCitemdb ~100/day), or an upstream that bans IPs (Fandom
- * sits behind Cloudflare, and one scrape fans out into several wiki fetches).
+ * the routes where one request is expensive — CPU (image re-encode, OCR) or
+ * an upstream quota (UPCitemdb ~100/day).
  */
-
-/** Wiki mission scraping: each call probes multiple Fandom endpoints. */
-export const scraperRateLimit = {
-  rateLimit: { max: 5, timeWindow: "1 minute" },
-};
 
 /** Image uploads and server-side image fetches: sharp re-encode per request. */
 export const uploadRateLimit = {
@@ -24,6 +18,15 @@ export const externalLookupRateLimit = {
 /** OCR import jobs: each one occupies a worker for a while. */
 export const importRateLimit = {
   rateLimit: { max: 10, timeWindow: "1 minute" },
+};
+
+/**
+ * Thumbs on public lists and collections. Cheap per call, but it's a write
+ * loop anyone can point at someone else's list, so it gets a ceiling well
+ * above real use — you can't read and judge sixty lists in a minute.
+ */
+export const voteRateLimit = {
+  rateLimit: { max: 60, timeWindow: "1 minute" },
 };
 
 /** Barcode lookups: UPCitemdb's trial tier is ~100/day per IP. */

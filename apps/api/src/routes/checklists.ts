@@ -1,12 +1,19 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import { CHECKLIST_KINDS } from "@gm/shared";
+import { CHECKLIST_KINDS, EXTRA_LIST_KIND, MAIN_LIST_KIND } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser, type SessionUser } from "../plugins/auth.js";
-import { suggestMissions, suggestMissionsFromUrl } from "../services/missions.js";
-import { logScrape } from "../services/analytics.js";
-import { scraperRateLimit } from "../plugins/rate-limits.js";
+import { logEvent } from "../services/analytics.js";
+import { inspectAll } from "../services/content-filter.js";
+import {
+  NO_VOTES,
+  castChecklistVote,
+  checklistVoteCounts,
+  voteSchema,
+  type VoteCounts,
+} from "../services/votes.js";
+import { voteRateLimit } from "../plugins/rate-limits.js";
 
 const titleSchema = z.object({
   title: z.string().min(1).max(200),
@@ -21,15 +28,10 @@ const itemSchema = z.object({
   text: z.string().min(1).max(500),
   category: z.string().max(100).nullable().optional(),
 });
-const suggestSchema = z.object({
-  /** a specific wiki page to parse; omitted = search Fandom for one */
-  url: z.string().url().max(500).optional(),
-});
 const importMissionsSchema = z.object({
   title: z.string().min(1).max(200),
   missions: z.array(z.string().min(1).max(500)).min(1).max(500),
-  sourceUrl: z.string().url().max(500).nullable().optional(),
-  // only the main-story list feeds the time estimate; side quests are untimed
+  // only the main-story list feeds the time estimate; everything else is untimed
   kind: z.enum(["missions", "side_quests"]).default("missions"),
 });
 const bulkCheckSchema = z.object({
@@ -40,6 +42,9 @@ const itemPatchSchema = z.object({
   text: z.string().min(1).max(500).optional(),
   category: z.string().max(100).nullable().optional(),
   position: z.number().int().min(0).optional(),
+});
+const listOrderSchema = z.object({
+  ids: z.array(z.string().uuid()).max(100),
 });
 
 async function getTemplate(id: string) {
@@ -53,6 +58,62 @@ async function getTemplate(id: string) {
 /** Author sees their own; everyone sees public. */
 function canView(tpl: { authorUserId: string; isPublic: boolean }, user: SessionUser) {
   return tpl.authorUserId === user.id || tpl.isPublic;
+}
+
+/** Where a new list lands among this user's lists for the game. */
+async function nextPosition(userId: string, gameId: string): Promise<number> {
+  const [row] = await db
+    .select({ max: sql<number>`coalesce(max(${schema.checklistTemplates.position}), 0)::int` })
+    .from(schema.checklistTemplates)
+    .where(
+      and(
+        eq(schema.checklistTemplates.gameId, gameId),
+        eq(schema.checklistTemplates.authorUserId, userId),
+      ),
+    );
+  return (row?.max ?? 0) + 1;
+}
+
+/**
+ * You get one main-story list per game.
+ *
+ * It's the list `estimateProgress` divides the how-long-to-beat figure
+ * across, so a second one would mean two different answers to "how much is
+ * left". Extra lists are unlimited precisely because they're untimed.
+ * Duplicates from before this rule still exist, which is why the estimate
+ * keeps its own oldest-wins tiebreak rather than trusting this alone.
+ */
+async function hasMainList(userId: string, gameId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: schema.checklistTemplates.id })
+    .from(schema.checklistTemplates)
+    .where(
+      and(
+        eq(schema.checklistTemplates.gameId, gameId),
+        eq(schema.checklistTemplates.authorUserId, userId),
+        eq(schema.checklistTemplates.kind, MAIN_LIST_KIND),
+      ),
+    )
+    .limit(1);
+  return !!row;
+}
+
+/**
+ * Reject text that shouldn't be shared, and say which rule it hit.
+ *
+ * Returns true when the reply has been sent, so callers read as
+ * `if (await rejectBadContent(...)) return;`.
+ */
+async function rejectBadContent(
+  reply: FastifyReply,
+  userId: string,
+  texts: Array<string | null | undefined>,
+): Promise<boolean> {
+  const issue = inspectAll(texts);
+  if (!issue) return false;
+  logEvent("content_blocked", userId, { surface: "checklist", kind: issue.kind });
+  await reply.status(400).send({ message: issue.message });
+  return true;
 }
 
 async function summarize(
@@ -86,6 +147,8 @@ async function summarize(
     .where(inArray(schema.user.id, authorIds));
   const authorNames = new Map(authors.map((a) => [a.id, a.name]));
 
+  const votes = await checklistVoteCounts(ids, user.id);
+
   return templates.map((t) => ({
     id: t.id,
     title: t.title,
@@ -93,15 +156,26 @@ async function summarize(
     sourceUrl: t.sourceUrl,
     sequential: t.sequential,
     isPublic: t.isPublic,
+    position: t.position,
+    adoptedFromId: t.adoptedFromId,
     mine: t.authorUserId === user.id,
     authorName: t.authorUserId === user.id ? null : (authorNames.get(t.authorUserId) ?? null),
     itemCount: byTemplate.get(t.id)?.itemCount ?? 0,
     doneCount: byTemplate.get(t.id)?.doneCount ?? 0,
+    votes: votes.get(t.id) ?? NO_VOTES,
   }));
 }
 
+/** Best first, then newest — the order that makes browsing worth doing. */
+function byScore(a: { votes: VoteCounts }, b: { votes: VoteCounts }): number {
+  return b.votes.score - a.votes.score;
+}
+
 export function registerChecklistRoutes(app: FastifyInstance): void {
-  // All checklists for a game: mine + other users' public templates
+  /**
+   * Every list for a game: yours in the order you arranged them, then other
+   * people's published ones, best-rated first.
+   */
   app.get<{ Params: { gameId: string } }>(
     "/api/games/:gameId/checklists",
     async (request, reply) => {
@@ -116,7 +190,8 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
             eq(schema.checklistTemplates.authorUserId, user.id),
           ),
         )
-        .orderBy(asc(schema.checklistTemplates.createdAt));
+        // createdAt breaks ties, and covers rows the 0020 backfill left at 0
+        .orderBy(asc(schema.checklistTemplates.position), asc(schema.checklistTemplates.createdAt));
       const pub = await db
         .select()
         .from(schema.checklistTemplates)
@@ -127,8 +202,11 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
             ne(schema.checklistTemplates.authorUserId, user.id),
           ),
         )
-        .orderBy(asc(schema.checklistTemplates.createdAt));
-      return { mine: await summarize(mine, user), public: await summarize(pub, user) };
+        .orderBy(sql`${schema.checklistTemplates.createdAt} desc`);
+      return {
+        mine: await summarize(mine, user),
+        public: (await summarize(pub, user)).sort(byScore),
+      };
     },
   );
 
@@ -139,18 +217,27 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       if (!user) return;
       const parsed = titleSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ message: "Title is required" });
+      if (await rejectBadContent(reply, user.id, [parsed.data.title])) return;
       const [game] = await db
         .select({ id: schema.games.id })
         .from(schema.games)
         .where(eq(schema.games.id, request.params.gameId));
       if (!game) return reply.status(404).send({ message: "Game not found" });
+
+      const kind = parsed.data.kind ?? EXTRA_LIST_KIND;
+      if (kind === MAIN_LIST_KIND && (await hasMainList(user.id, game.id))) {
+        return reply
+          .status(409)
+          .send({ message: "You already have a main story list for this game" });
+      }
       const [tpl] = await db
         .insert(schema.checklistTemplates)
         .values({
           gameId: game.id,
           authorUserId: user.id,
           title: parsed.data.title.trim(),
-          kind: parsed.data.kind ?? "completion",
+          kind,
+          position: await nextPosition(user.id, game.id),
         })
         .returning();
       reply.status(201);
@@ -158,50 +245,54 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     },
   );
 
-  // ---- mission lists scraped from Fandom (Phase 9) ----
-
   /**
-   * Parse a mission list off a wiki and hand it back for review. Deliberately
-   * saves nothing: extraction is heuristic, so the user confirms the list
-   * (same safety net as the OCR importer) before it becomes a checklist.
+   * Rearrange your lists for a game. Full-array rewrite rather than the
+   * pairwise swap the item rows use: lists get inserted and deleted often
+   * enough that positions can't be assumed distinct, and a handful of lists
+   * is nothing like a 70-mission renumber.
    */
-  app.post<{ Params: { gameId: string } }>(
-    "/api/games/:gameId/missions/suggest",
-    { config: scraperRateLimit },
+  app.put<{ Params: { gameId: string } }>(
+    "/api/games/:gameId/checklists/order",
     async (request, reply) => {
       const user = await requireUser(request, reply);
       if (!user) return;
-      const parsed = suggestSchema.safeParse(request.body ?? {});
+      const parsed = listOrderSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ message: "Invalid input" });
 
-      const [game] = await db
-        .select({ id: schema.games.id, title: schema.games.title })
-        .from(schema.games)
-        .where(eq(schema.games.id, request.params.gameId));
-      if (!game) return reply.status(404).send({ message: "Game not found" });
+      const owned = await db
+        .select({ id: schema.checklistTemplates.id })
+        .from(schema.checklistTemplates)
+        .where(
+          and(
+            eq(schema.checklistTemplates.gameId, request.params.gameId),
+            eq(schema.checklistTemplates.authorUserId, user.id),
+          ),
+        );
+      const ownedIds = new Set(owned.map((o) => o.id));
+      // ids you don't own are dropped rather than rejected; lists you own but
+      // didn't name keep their places at the end
+      const ordered = parsed.data.ids.filter((id) => ownedIds.has(id));
+      const rest = owned.map((o) => o.id).filter((id) => !ordered.includes(id));
+      const final = [...ordered, ...rest];
 
-      let suggestion;
-      try {
-        suggestion = parsed.data.url
-          ? await suggestMissionsFromUrl(parsed.data.url)
-          : await suggestMissions(game.title);
-      } catch (err) {
-        logScrape("missions", false, err instanceof Error ? err.message : game.title);
-        throw err;
-      }
-      logScrape("missions", suggestion !== null, game.title);
-      if (!suggestion) {
-        return reply.status(404).send({
-          message: parsed.data.url
-            ? "Couldn't find a mission list on that page — check the URL, or add missions manually."
-            : "No mission list found on Fandom for this game — you can add missions manually.",
-        });
-      }
-      return suggestion;
+      await Promise.all(
+        final.map((id, i) =>
+          db
+            .update(schema.checklistTemplates)
+            .set({ position: i + 1 })
+            .where(eq(schema.checklistTemplates.id, id)),
+        ),
+      );
+      return { ok: true, ordered: final.length };
     },
   );
 
-  /** Save a reviewed mission list as a 'missions' checklist. */
+  /**
+   * Create a list from entries the user already has — pasted in, or generated
+   * as "Mission 1..N". This is the only bulk create path; the wiki scraper
+   * that used to feed it was removed in phase 16 for being wrong more often
+   * than it was right.
+   */
   app.post<{ Params: { gameId: string } }>(
     "/api/games/:gameId/missions",
     async (request, reply) => {
@@ -220,7 +311,13 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       if (missions.length === 0) {
         return reply.status(400).send({ message: "At least one mission is required" });
       }
+      if (await rejectBadContent(reply, user.id, [parsed.data.title, ...missions])) return;
 
+      if (parsed.data.kind === MAIN_LIST_KIND && (await hasMainList(user.id, game.id))) {
+        return reply
+          .status(409)
+          .send({ message: "You already have a main story list for this game" });
+      }
       const [tpl] = await db
         .insert(schema.checklistTemplates)
         .values({
@@ -228,7 +325,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
           authorUserId: user.id,
           title: parsed.data.title.trim(),
           kind: parsed.data.kind,
-          sourceUrl: parsed.data.sourceUrl?.trim() || null,
+          position: await nextPosition(user.id, game.id),
         })
         .returning();
       await db.insert(schema.checklistItems).values(
@@ -296,6 +393,22 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     }
     const parsed = patchSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ message: "Invalid input" });
+
+    // Publishing re-checks every entry, not just the fields in this request.
+    // A list written before the filter existed, or built one item at a time
+    // by an older client, would otherwise reach the public list on an
+    // isPublic-only PATCH.
+    if (parsed.data.isPublic === true) {
+      const items = await db
+        .select({ text: schema.checklistItems.text, category: schema.checklistItems.category })
+        .from(schema.checklistItems)
+        .where(eq(schema.checklistItems.templateId, tpl.id));
+      const texts = [parsed.data.title ?? tpl.title, ...items.flatMap((i) => [i.text, i.category])];
+      if (await rejectBadContent(reply, user.id, texts)) return;
+    } else if (await rejectBadContent(reply, user.id, [parsed.data.title])) {
+      return;
+    }
+
     await db
       .update(schema.checklistTemplates)
       .set({
@@ -329,6 +442,14 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     if (tpl.authorUserId === user.id) {
       return reply.status(400).send({ message: "This checklist is already yours" });
     }
+    // A copy of someone's main story list is only useful *as* your main story
+    // list — that's the one the estimate divides up. Filing it as an extra
+    // instead would silently change what you copied it for.
+    if (tpl.kind === MAIN_LIST_KIND && (await hasMainList(user.id, tpl.gameId))) {
+      return reply.status(409).send({
+        message: "You already have a main story list for this game — delete it first to copy this one",
+      });
+    }
     const items = await db
       .select()
       .from(schema.checklistItems)
@@ -341,11 +462,14 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
         authorUserId: user.id,
         title: tpl.title,
         kind: tpl.kind,
-        // the copy keeps pointing at the wiki the list was scraped from
+        // a scraped list's CC-BY-SA attribution travels with the copy
         sourceUrl: tpl.sourceUrl,
         sequential: tpl.sequential,
+        // a copy always starts private — publishing someone else's work is
+        // their call, not yours
         isPublic: false,
         adoptedFromId: tpl.id,
+        position: await nextPosition(user.id, tpl.gameId),
       })
       .returning();
     if (items.length > 0) {
@@ -362,6 +486,30 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     return { id: copy!.id };
   });
 
+  /**
+   * Thumb a published list up or down. Only public lists — a private list has
+   * no audience — and never your own: an author voting on their own work is
+   * noise, not signal.
+   */
+  app.put<{ Params: { id: string } }>(
+    "/api/checklists/:id/vote",
+    { config: voteRateLimit },
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const tpl = await getTemplate(request.params.id);
+      if (!tpl || !tpl.isPublic) return reply.status(404).send({ message: "Checklist not found" });
+      if (tpl.authorUserId === user.id) {
+        return reply.status(400).send({ message: "You can't rate your own list" });
+      }
+      const parsed = voteSchema.safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ message: "Invalid vote" });
+      await castChecklistVote(tpl.id, user.id, parsed.data.value);
+      const counts = await checklistVoteCounts([tpl.id], user.id);
+      return counts.get(tpl.id) ?? NO_VOTES;
+    },
+  );
+
   // ---- items (author only) ----
 
   app.post<{ Params: { id: string } }>("/api/checklists/:id/items", async (request, reply) => {
@@ -373,6 +521,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     }
     const parsed = itemSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ message: "Item text is required" });
+    if (await rejectBadContent(reply, user.id, [parsed.data.text, parsed.data.category])) return;
     const [maxRow] = await db
       .select({ max: sql<number>`coalesce(max(${schema.checklistItems.position}), -1)::int` })
       .from(schema.checklistItems)
@@ -409,6 +558,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       }
       const parsed = itemPatchSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ message: "Invalid input" });
+      if (await rejectBadContent(reply, user.id, [parsed.data.text, parsed.data.category])) return;
       await db
         .update(schema.checklistItems)
         .set({

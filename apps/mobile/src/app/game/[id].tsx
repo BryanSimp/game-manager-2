@@ -33,6 +33,7 @@ import {
   Sheet,
   SheetSection,
   StarRating,
+  VoteRow,
 } from "@/components/ui";
 
 /** seconds → the hours string the play-time editor shows, e.g. 5400 → "1.5" */
@@ -173,6 +174,7 @@ export default function GameDetailScreen() {
             <Text style={[type.caption, { color: colors.star }]}>{e.rating.toFixed(1)}</Text>
           )}
         </View>
+        <CommunityRating gameId={e.game.id} />
 
         {(allTags.data?.length ?? 0) > 0 && (
           <>
@@ -238,7 +240,6 @@ export default function GameDetailScreen() {
         <TimeToBeatSection entry={e} />
         <ProgressSection entryId={id} gameId={e.game.id} />
         <AchievementsSection entryId={id} />
-        <ChecklistsSection gameId={e.game.id} />
 
         <Button
           label="Remove from library"
@@ -267,9 +268,12 @@ export default function GameDetailScreen() {
 }
 
 /**
- * How long to beat, editable. IGDB doesn't have times for everything and isn't
- * always right; the figures belong to the game rather than to your copy of it,
- * so saving writes the shared catalog row (see the API route).
+ * How long to beat, editable.
+ *
+ * What you enter is *your* figure, not a correction to the shared catalog:
+ * IGDB has no times for most niche games, so the average of everyone's
+ * submissions is what fills the gap. See `resolveTtb` for which one a game
+ * ends up showing.
  */
 function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
   const queryClient = useQueryClient();
@@ -281,10 +285,20 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
   const g = entry.game;
   const hasAny = g.ttbMain != null || g.ttbMainExtra != null || g.ttbCompletionist != null;
 
+  const community = useQuery({
+    queryKey: ["community", g.id],
+    queryFn: () => api.getCommunityStats(g.id),
+  });
+
   function startEditing() {
-    setMain(toHours(g.ttbMain));
-    setExtra(toHours(g.ttbMainExtra));
-    setFull(toHours(g.ttbCompletionist));
+    // seed from your own submission, not the community average — editing is
+    // about correcting what you said
+    const yours = community.data?.yours;
+    setMain(toHours(yours?.ttbMain ?? (g.ttbSource === "yours" ? g.ttbMain : null)));
+    setExtra(toHours(yours?.ttbMainExtra ?? (g.ttbSource === "yours" ? g.ttbMainExtra : null)));
+    setFull(
+      toHours(yours?.ttbCompletionist ?? (g.ttbSource === "yours" ? g.ttbCompletionist : null)),
+    );
     setEditing(true);
   }
 
@@ -300,17 +314,30 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
       queryClient.invalidateQueries({ queryKey: ["entry", entry.id] });
       queryClient.invalidateQueries({ queryKey: ["library"] });
       queryClient.invalidateQueries({ queryKey: ["progress"] });
+      queryClient.invalidateQueries({ queryKey: ["community", g.id] });
     },
   });
+
+  const sourceNote =
+    g.ttbSource === "community"
+      ? `Averaged from ${g.ttbCount ?? 0} player${g.ttbCount === 1 ? "" : "s"}`
+      : g.ttbSource === "yours"
+        ? "Your own figure"
+        : g.ttbSource === "manual"
+          ? "Set by hand"
+          : "From IGDB";
 
   if (!hasAny && !editing) {
     return (
       <>
         <SectionTitle>Play time</SectionTitle>
         <View style={styles.ttbCard}>
-          <Text style={type.caption}>IGDB has no play time for this game.</Text>
+          <Text style={type.caption}>
+            Nobody has said how long this one takes — IGDB has no figure and no player has added
+            one.
+          </Text>
           <Button
-            label="Add play time"
+            label="Add your play time"
             icon="add"
             tone="ghost"
             fill
@@ -332,8 +359,8 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
             <HoursField label="Main + extras" value={extra} onChange={setExtra} />
             <HoursField label="Completionist" value={full} onChange={setFull} />
             <Text style={[type.micro, { marginTop: space.sm }]}>
-              Hours. Leave a field empty to clear it — these are shared, so the correction applies
-              wherever the game appears.
+              Hours, as it went for you. Clear every field to withdraw your figure. Yours drives
+              your own estimate; the average of everyone's fills in games IGDB has no data for.
             </Text>
             {save.isError && (
               <Text style={[type.caption, { color: colors.danger, marginTop: space.xs }]}>
@@ -356,12 +383,17 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
             <TtbRow label="Main story" value={formatHours(g.ttbMain)} />
             <TtbRow label="Main + extras" value={formatHours(g.ttbMainExtra)} />
             <TtbRow label="Completionist" value={formatHours(g.ttbCompletionist)} />
-            <View style={styles.ttbFooter}>
-              <Text style={type.micro}>
-                {g.ttbSource === "manual" ? "Set by hand" : "From IGDB"}
+            {/* the figure on show is IGDB's, but players have said otherwise */}
+            {g.ttbSource !== "community" && community.data?.timeToBeat?.ttbMain != null ? (
+              <Text style={[type.micro, { marginTop: space.xs }]}>
+                Players say {formatHours(community.data.timeToBeat.ttbMain)} (
+                {community.data.timeToBeat.count} submitted)
               </Text>
+            ) : null}
+            <View style={styles.ttbFooter}>
+              <Text style={type.micro}>{sourceNote}</Text>
               <Button
-                label="Edit"
+                label={community.data?.yours ? "Edit yours" : "Add yours"}
                 icon="create-outline"
                 tone="ghost"
                 onPress={startEditing}
@@ -372,6 +404,30 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
         )}
       </View>
     </>
+  );
+}
+
+/**
+ * What everyone else scored this game. Withheld below the API's threshold —
+ * a privacy floor, not a quality one: with one or two raters, an "average" is
+ * one identifiable person's opinion.
+ */
+function CommunityRating({ gameId }: { gameId: string }) {
+  const community = useQuery({
+    queryKey: ["community", gameId],
+    queryFn: () => api.getCommunityStats(gameId),
+  });
+  const data = community.data;
+  if (!data) return null;
+
+  return (
+    <Text style={[type.micro, { marginTop: space.xs }]}>
+      {data.rating
+        ? `Everyone: ${data.rating.average.toFixed(1)} from ${data.rating.count} rating${
+            data.rating.count === 1 ? "" : "s"
+          }`
+        : `Needs ${data.minRatings} ratings before an average is shown`}
+    </Text>
   );
 }
 
@@ -521,10 +577,14 @@ function CoverSheet({
 }
 
 /**
- * Mission progress + estimated time left. Read-only apart from ticking
- * missions off — building the list is web-first, like checklist authoring.
+ * Every list you keep for this game, plus the time estimate the main story
+ * one drives, plus other people's published lists to copy.
+ *
+ * Read-only apart from ticking entries off, voting and copying — building and
+ * editing a list stays web-first.
  */
 function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string }) {
+  const queryClient = useQueryClient();
   const progress = useQuery({
     queryKey: ["progress", entryId],
     queryFn: () => api.getEntryProgress(entryId),
@@ -534,11 +594,21 @@ function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string 
     queryFn: () => api.getGameChecklists(gameId),
   });
 
+  const adopt = useMutation({
+    mutationFn: (id: string) => api.adoptChecklist(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklists", gameId] }),
+    onError: (err: Error) => Alert.alert("Couldn't save a copy", err.message),
+  });
+  const vote = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: 1 | 0 | -1 }) => api.voteChecklist(id, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklists", gameId] }),
+  });
+
   const p = progress.data;
-  const missionList = lists.data?.mine.find((c) => c.kind === "missions");
-  // side quests are tracked but untimed, so they show up even with no estimate
-  const sideList = lists.data?.mine.find((c) => c.kind === "side_quests");
-  if (!missionList && !sideList) return null;
+  // already ordered by position, main story first
+  const mine = lists.data?.mine ?? [];
+  const shared = lists.data?.public ?? [];
+  if (mine.length === 0 && shared.length === 0) return null;
   const remaining = p ? formatHours(p.remainingSeconds) : null;
 
   return (
@@ -553,8 +623,39 @@ function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string 
           <ProgressBar percent={p.percent} />
         </View>
       )}
-      {missionList && <ChecklistCard summary={missionList} gameId={gameId} />}
-      {sideList && <ChecklistCard summary={sideList} gameId={gameId} />}
+      {mine.map((c) => (
+        <ChecklistCard key={c.id} summary={c} gameId={gameId} />
+      ))}
+
+      {shared.length > 0 && (
+        <>
+          <SectionTitle>Shared by other players</SectionTitle>
+          {shared.map((c) => (
+            <View key={c.id} style={styles.checklistCard}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={type.bodyStrong} numberOfLines={2}>
+                  {c.title}
+                </Text>
+                <Text style={type.micro}>
+                  {c.itemCount} entries{c.authorName ? ` · by ${c.authorName}` : ""}
+                </Text>
+                <VoteRow
+                  votes={c.votes}
+                  disabled={vote.isPending}
+                  onVote={(value) => vote.mutate({ id: c.id, value })}
+                />
+              </View>
+              <Button
+                label="Save a copy"
+                tone="ghost"
+                busy={adopt.isPending}
+                onPress={() => adopt.mutate(c.id)}
+                style={styles.adoptBtn}
+              />
+            </View>
+          ))}
+        </>
+      )}
     </>
   );
 }
@@ -596,52 +697,6 @@ function AchievementsSection({ entryId }: { entryId: string }) {
           </View>
         </>
       )}
-    </>
-  );
-}
-
-function ChecklistsSection({ gameId }: { gameId: string }) {
-  const queryClient = useQueryClient();
-  const lists = useQuery({
-    queryKey: ["checklists", gameId],
-    queryFn: () => api.getGameChecklists(gameId),
-  });
-  const adopt = useMutation({
-    mutationFn: (id: string) => api.adoptChecklist(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklists", gameId] }),
-  });
-
-  const data = lists.data;
-  // mission lists render in ProgressSection alongside their time estimate
-  const mine = data?.mine.filter((c) => c.kind === "completion") ?? [];
-  const shared = data?.public.filter((c) => c.kind === "completion") ?? [];
-  if (mine.length === 0 && shared.length === 0) return null;
-
-  return (
-    <>
-      <SectionTitle>Checklists</SectionTitle>
-      {mine.map((c) => (
-        <ChecklistCard key={c.id} summary={c} gameId={gameId} />
-      ))}
-      {shared.map((c) => (
-        <View key={c.id} style={styles.checklistCard}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={type.bodyStrong} numberOfLines={2}>
-              {c.title}
-            </Text>
-            <Text style={type.micro}>
-              {c.itemCount} items{c.authorName ? ` · by ${c.authorName}` : ""}
-            </Text>
-          </View>
-          <Button
-            label="Adopt"
-            tone="ghost"
-            busy={adopt.isPending}
-            onPress={() => adopt.mutate(c.id)}
-            style={styles.adoptBtn}
-          />
-        </View>
-      ))}
     </>
   );
 }
