@@ -33,6 +33,7 @@ import {
   Sheet,
   SheetSection,
   StarRating,
+  VoteRow,
 } from "@/components/ui";
 
 /** seconds → the hours string the play-time editor shows, e.g. 5400 → "1.5" */
@@ -238,7 +239,6 @@ export default function GameDetailScreen() {
         <TimeToBeatSection entry={e} />
         <ProgressSection entryId={id} gameId={e.game.id} />
         <AchievementsSection entryId={id} />
-        <ChecklistsSection gameId={e.game.id} />
 
         <Button
           label="Remove from library"
@@ -521,10 +521,14 @@ function CoverSheet({
 }
 
 /**
- * Mission progress + estimated time left. Read-only apart from ticking
- * missions off — building the list is web-first, like checklist authoring.
+ * Every list you keep for this game, plus the time estimate the main story
+ * one drives, plus other people's published lists to copy.
+ *
+ * Read-only apart from ticking entries off, voting and copying — building and
+ * editing a list stays web-first.
  */
 function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string }) {
+  const queryClient = useQueryClient();
   const progress = useQuery({
     queryKey: ["progress", entryId],
     queryFn: () => api.getEntryProgress(entryId),
@@ -534,11 +538,21 @@ function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string 
     queryFn: () => api.getGameChecklists(gameId),
   });
 
+  const adopt = useMutation({
+    mutationFn: (id: string) => api.adoptChecklist(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklists", gameId] }),
+    onError: (err: Error) => Alert.alert("Couldn't save a copy", err.message),
+  });
+  const vote = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: 1 | 0 | -1 }) => api.voteChecklist(id, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklists", gameId] }),
+  });
+
   const p = progress.data;
-  const missionList = lists.data?.mine.find((c) => c.kind === "missions");
-  // side quests are tracked but untimed, so they show up even with no estimate
-  const sideList = lists.data?.mine.find((c) => c.kind === "side_quests");
-  if (!missionList && !sideList) return null;
+  // already ordered by position, main story first
+  const mine = lists.data?.mine ?? [];
+  const shared = lists.data?.public ?? [];
+  if (mine.length === 0 && shared.length === 0) return null;
   const remaining = p ? formatHours(p.remainingSeconds) : null;
 
   return (
@@ -553,8 +567,39 @@ function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string 
           <ProgressBar percent={p.percent} />
         </View>
       )}
-      {missionList && <ChecklistCard summary={missionList} gameId={gameId} />}
-      {sideList && <ChecklistCard summary={sideList} gameId={gameId} />}
+      {mine.map((c) => (
+        <ChecklistCard key={c.id} summary={c} gameId={gameId} />
+      ))}
+
+      {shared.length > 0 && (
+        <>
+          <SectionTitle>Shared by other players</SectionTitle>
+          {shared.map((c) => (
+            <View key={c.id} style={styles.checklistCard}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={type.bodyStrong} numberOfLines={2}>
+                  {c.title}
+                </Text>
+                <Text style={type.micro}>
+                  {c.itemCount} entries{c.authorName ? ` · by ${c.authorName}` : ""}
+                </Text>
+                <VoteRow
+                  votes={c.votes}
+                  disabled={vote.isPending}
+                  onVote={(value) => vote.mutate({ id: c.id, value })}
+                />
+              </View>
+              <Button
+                label="Save a copy"
+                tone="ghost"
+                busy={adopt.isPending}
+                onPress={() => adopt.mutate(c.id)}
+                style={styles.adoptBtn}
+              />
+            </View>
+          ))}
+        </>
+      )}
     </>
   );
 }
@@ -596,52 +641,6 @@ function AchievementsSection({ entryId }: { entryId: string }) {
           </View>
         </>
       )}
-    </>
-  );
-}
-
-function ChecklistsSection({ gameId }: { gameId: string }) {
-  const queryClient = useQueryClient();
-  const lists = useQuery({
-    queryKey: ["checklists", gameId],
-    queryFn: () => api.getGameChecklists(gameId),
-  });
-  const adopt = useMutation({
-    mutationFn: (id: string) => api.adoptChecklist(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklists", gameId] }),
-  });
-
-  const data = lists.data;
-  // mission lists render in ProgressSection alongside their time estimate
-  const mine = data?.mine.filter((c) => c.kind === "completion") ?? [];
-  const shared = data?.public.filter((c) => c.kind === "completion") ?? [];
-  if (mine.length === 0 && shared.length === 0) return null;
-
-  return (
-    <>
-      <SectionTitle>Checklists</SectionTitle>
-      {mine.map((c) => (
-        <ChecklistCard key={c.id} summary={c} gameId={gameId} />
-      ))}
-      {shared.map((c) => (
-        <View key={c.id} style={styles.checklistCard}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={type.bodyStrong} numberOfLines={2}>
-              {c.title}
-            </Text>
-            <Text style={type.micro}>
-              {c.itemCount} items{c.authorName ? ` · by ${c.authorName}` : ""}
-            </Text>
-          </View>
-          <Button
-            label="Adopt"
-            tone="ghost"
-            busy={adopt.isPending}
-            onPress={() => adopt.mutate(c.id)}
-            style={styles.adoptBtn}
-          />
-        </View>
-      ))}
     </>
   );
 }

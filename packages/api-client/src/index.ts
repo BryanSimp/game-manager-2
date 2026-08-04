@@ -451,14 +451,23 @@ export class ApiClient {
     return this.request<GameChecklists>(`/api/games/${gameId}/checklists`);
   }
 
+  /** Defaults to an extra list; 'missions' for the one timed main-story list. */
   createChecklist(
     gameId: string,
     title: string,
-    kind: ChecklistKind = "completion",
+    kind: ChecklistKind = "side_quests",
   ): Promise<{ id: string }> {
     return this.request(`/api/games/${gameId}/checklists`, {
       method: "POST",
       body: JSON.stringify({ title, kind }),
+    });
+  }
+
+  /** Rearrange your lists for a game; ids in the order you want them. */
+  saveChecklistOrder(gameId: string, ids: string[]): Promise<{ ok: true; ordered: number }> {
+    return this.request(`/api/games/${gameId}/checklists/order`, {
+      method: "PUT",
+      body: JSON.stringify({ ids }),
     });
   }
 
