@@ -5,6 +5,7 @@ import { CHECKLIST_KINDS } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser, type SessionUser } from "../plugins/auth.js";
 import { suggestMissions, suggestMissionsFromUrl } from "../services/missions.js";
+import { logScrape } from "../services/analytics.js";
 import { scraperRateLimit } from "../plugins/rate-limits.js";
 
 const titleSchema = z.object({
@@ -179,9 +180,16 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
         .where(eq(schema.games.id, request.params.gameId));
       if (!game) return reply.status(404).send({ message: "Game not found" });
 
-      const suggestion = parsed.data.url
-        ? await suggestMissionsFromUrl(parsed.data.url)
-        : await suggestMissions(game.title);
+      let suggestion;
+      try {
+        suggestion = parsed.data.url
+          ? await suggestMissionsFromUrl(parsed.data.url)
+          : await suggestMissions(game.title);
+      } catch (err) {
+        logScrape("missions", false, err instanceof Error ? err.message : game.title);
+        throw err;
+      }
+      logScrape("missions", suggestion !== null, game.title);
       if (!suggestion) {
         return reply.status(404).send({
           message: parsed.data.url

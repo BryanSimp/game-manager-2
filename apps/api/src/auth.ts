@@ -5,6 +5,7 @@ import { expo } from "@better-auth/expo";
 import { count } from "drizzle-orm";
 import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
+import { logEvent } from "./services/analytics.js";
 
 export const auth = betterAuth({
   secret: env.BETTER_AUTH_SECRET,
@@ -56,6 +57,9 @@ export const auth = betterAuth({
           const [row] = await db.select({ n: count() }).from(schema.user);
           const isFirst = (row?.n ?? 0) === 0;
           return { data: { ...userData, role: isFirst ? "admin" : "user" } };
+        },
+        after: async (createdUser) => {
+          logEvent("sign_up", createdUser.id);
         },
       },
     },

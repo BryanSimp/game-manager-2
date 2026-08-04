@@ -12,6 +12,7 @@ import {
   getSchemaAchievements,
 } from "../services/steam.js";
 import { getBoss, STEAM_IMPORT_QUEUE, STEAM_SYNC_QUEUE } from "../services/queue.js";
+import { logEvent, logScrape } from "../services/analytics.js";
 
 /** Confidence needed to add a Steam game to the library without review. */
 const AUTO_ADD_THRESHOLD = 0.85;
@@ -123,6 +124,7 @@ export async function processSteamImport(userId: string): Promise<void> {
 
     const leftovers: Array<{ appid: number; name: string }> = [];
     const yearBudget = { left: MAX_YEAR_LOOKUPS };
+    let autoAdded = 0;
 
     for (const steamGame of owned) {
       const rule = ruleByApp.get(steamGame.appid);
@@ -195,6 +197,7 @@ export async function processSteamImport(userId: string): Promise<void> {
           })
           .returning({ id: schema.userGames.id });
         userGameId = inserted!.id;
+        autoAdded++;
       }
 
       if (steamPlatform) {
@@ -245,6 +248,7 @@ export async function processSteamImport(userId: string): Promise<void> {
       .update(schema.steamAccounts)
       .set({ lastImportAt: new Date() })
       .where(eq(schema.steamAccounts.userId, userId));
+    if (autoAdded > 0) logEvent("game_added", userId, { count: autoAdded, source: "steam" });
   } finally {
     running.import.delete(userId);
   }
@@ -336,13 +340,29 @@ export async function startSteamWorkers(): Promise<void> {
   await boss.work<{ userId: string }>(
     STEAM_IMPORT_QUEUE,
     async (jobs: Array<{ data: { userId: string } }>) => {
-      for (const job of jobs) await processSteamImport(job.data.userId);
+      for (const job of jobs) {
+        try {
+          await processSteamImport(job.data.userId);
+          logScrape("steam_import", true);
+        } catch (err) {
+          logScrape("steam_import", false, err instanceof Error ? err.message : "import failed");
+          throw err;
+        }
+      }
     },
   );
   await boss.work<{ userId: string }>(
     STEAM_SYNC_QUEUE,
     async (jobs: Array<{ data: { userId: string } }>) => {
-      for (const job of jobs) await processSteamSync(job.data.userId);
+      for (const job of jobs) {
+        try {
+          await processSteamSync(job.data.userId);
+          logScrape("steam_sync", true);
+        } catch (err) {
+          logScrape("steam_sync", false, err instanceof Error ? err.message : "sync failed");
+          throw err;
+        }
+      }
     },
   );
 }

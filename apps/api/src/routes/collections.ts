@@ -5,6 +5,7 @@ import { OWNERSHIP_FORMATS } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { upsertGameFromIgdb } from "../services/catalog.js";
+import { logEvent } from "../services/analytics.js";
 import { isValidCategory } from "../services/categories.js";
 import { rememberConsoles } from "../services/consoles.js";
 
@@ -270,6 +271,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       );
     }
 
+    logEvent("collection_created", user.id, { collectionId: copy.id, adopted: true });
     reply.status(201);
     return { id: copy.id, name: copy.name };
   });
@@ -294,6 +296,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     if (!created) {
       return reply.status(409).send({ message: "You already have a collection with that name" });
     }
+    logEvent("collection_created", user.id, { collectionId: created.id });
     reply.status(201);
     return created;
   });
@@ -615,6 +618,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         // filing games under a console adds it to your consoles list
         await rememberConsoles(user.id, platforms.map((p) => p.platformId));
       }
+      if (added > 0) logEvent("game_added", user.id, { count: added, bulk: true });
       return { added, skipped, errors };
     },
   );

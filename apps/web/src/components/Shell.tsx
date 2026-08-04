@@ -74,9 +74,14 @@ export function Shell({ children }: { children: ReactNode }) {
               Preferences
             </Link>
             {me.data?.role === "admin" && (
-              <Link to="/settings" className={link}>
-                Settings
-              </Link>
+              <>
+                <Link to="/settings" className={link}>
+                  Settings
+                </Link>
+                <Link to="/admin/analytics" className={link}>
+                  Analytics
+                </Link>
+              </>
             )}
           </nav>
           <span className="hidden shrink-0 text-xs text-zinc-500 lg:inline">{session.user.name}</span>

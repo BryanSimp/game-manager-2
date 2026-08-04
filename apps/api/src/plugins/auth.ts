@@ -9,18 +9,27 @@ export interface SessionUser {
   role: string;
 }
 
+declare module "fastify" {
+  interface FastifyRequest {
+    /** Resolved by getSessionUser so the post-response activity log knows who acted. */
+    sessionUser?: SessionUser;
+  }
+}
+
 export async function getSessionUser(request: FastifyRequest): Promise<SessionUser | null> {
   const session = await auth.api.getSession({
     headers: fromNodeHeaders(request.headers),
   });
   if (!session) return null;
   const { user } = session;
-  return {
+  const sessionUser: SessionUser = {
     id: user.id,
     email: user.email,
     name: user.name,
     role: (user as { role?: string }).role ?? "user",
   };
+  request.sessionUser = sessionUser;
+  return sessionUser;
 }
 
 export async function requireUser(
