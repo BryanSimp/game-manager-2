@@ -362,7 +362,7 @@ Ship a complete `.env.example`. **Note:** v1's repo has a real `NEXTAUTH_SECRET`
 3. **HowLongToBeat has no official API.** Scraping violates their ToS and their endpoints churn. Decision: use IGDB TTB + manual entry; revisit only if HLTB ever ships a real API.
 4. **Achievements API access.** Steam Web API is official and reliable (requires the user's Steam profile be public). Xbox needs third-party OpenXBL (keyed, rate-limited); PSN is unofficial-only and breaks periodically. Commitment is Steam-only; others best-effort.
 5. **Expo Go limitations.** Everything planned (camera, barcode scanning, secure token storage, image picker) works in Expo Go. Home-screen widgets or background sync would require an Expo **development build** — noted as the trigger condition for leaving Expo Go.
-6. **Shared-content moderation.** Public checklist templates and shared shelves mean cross-user visibility. For a personal server this is low-stakes; the moderation model is simply admin delete.
+6. **Shared-content moderation.** Public lists and collections mean cross-user visibility. This was low-stakes when the plan assumed a personal server and the model was simply admin delete; the app is public now, so phase 16 added `services/content-filter.ts` (hate terms and personal information rejected on write, and re-checked across a whole list at publish) and thumbs-up/down so bad shares sort themselves down. Admin delete remains the backstop — the filter is a speed bump, not a guarantee.
 7. **Image volume growth.** Cached covers + uploaded shelf photos accumulate; add a periodic orphan-image cleanup job (listed in `apps/api/src/jobs/`).
 
 ---
