@@ -24,6 +24,13 @@ export const auth = betterAuth({
     requireEmailVerification: false,
     disableSignUp: !env.ALLOW_REGISTRATION,
   },
+  user: {
+    additionalFields: {
+      // rides along on session.user for both clients; input:false keeps it
+      // out of the signup surface — only server-side code can grant premium
+      isPremium: { type: "boolean", defaultValue: false, input: false },
+    },
+  },
   // exp:// covers Expo Go sessions — a supported client in production too
   // (the server-hosted Metro bundler serves the app to Expo Go, which then
   // signs in against this API), so it stays trusted in every environment

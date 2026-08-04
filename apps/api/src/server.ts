@@ -75,6 +75,7 @@ export async function buildServer() {
       email: user.email,
       name: user.name,
       role: (user as { role?: string }).role ?? "user",
+      isPremium: (user as { isPremium?: boolean }).isPremium ?? false,
       createdAt: user.createdAt,
     };
   });

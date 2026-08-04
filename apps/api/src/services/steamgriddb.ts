@@ -7,6 +7,12 @@ import { getSetting } from "./settings.js";
  * (regional box art, fan-made, clean logos). Read-only and key-gated: the
  * admin pastes a free key into Settings, DB-first with an env fallback, same
  * pattern as IGDB and Steam.
+ *
+ * COMPLIANCE: used under the SteamGridDB API terms
+ * (https://www.steamgriddb.com/api/v2) — personal, non-commercial use with
+ * attribution. The credit link ("alternate artwork courtesy of SteamGridDB")
+ * is rendered in the site footer: apps/web/src/components/Footer.tsx.
+ * Artwork is community-uploaded; rights remain with the original owners.
  */
 
 const BASE = "https://www.steamgriddb.com/api/v2";
