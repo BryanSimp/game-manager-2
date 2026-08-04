@@ -120,6 +120,13 @@
       "when": 1785712980874,
       "tag": "0016_public_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785805561692,
+      "tag": "0017_daily_serpent_society",
+      "breakpoints": true
     }
   ]
 }

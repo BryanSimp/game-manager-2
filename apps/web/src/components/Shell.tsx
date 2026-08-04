@@ -3,6 +3,8 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { authClient } from "../lib/auth.js";
 import { api } from "../lib/api.js";
+import { AdBanner } from "./ads/AdBanner.js";
+import { Footer } from "./Footer.js";
 
 // stamped by CI via the APP_VERSION docker build-arg (short commit sha)
 const APP_VERSION: string = import.meta.env.VITE_APP_VERSION || "dev";
@@ -37,7 +39,7 @@ export function Shell({ children }: { children: ReactNode }) {
     "shrink-0 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 [&.active]:bg-zinc-800 [&.active]:text-white";
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3">
           <Link to="/" className="mr-2 shrink-0 text-base font-bold tracking-tight">
@@ -86,7 +88,11 @@ export function Shell({ children }: { children: ReactNode }) {
           </button>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+        {children}
+        <AdBanner slot="shell-bottom" className="mt-8" />
+      </main>
+      <Footer />
       <span
         title="Deployed build"
         className="pointer-events-none fixed right-2 bottom-1.5 z-20 text-[10px] text-zinc-600 select-none"
