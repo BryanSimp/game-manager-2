@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -13,12 +13,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AddCollectionGameInput, CollectionNode } from "@gm/shared";
 import { api } from "@/lib/api";
-import { resolveImage, statusStyle } from "@/lib/ui";
+import { formatHours, resolveImage, statusStyle } from "@/lib/ui";
 import { useBadgeOpacity } from "@/lib/prefs";
 import { colors, radius, space, type } from "@/lib/theme";
 import {
   Badge,
   Button,
+  Chevron,
+  Chip,
+  ChipBar,
   Cover,
   EmptyState,
   Field,
@@ -28,6 +31,7 @@ import {
   Screen,
   Sheet,
   SheetSection,
+  type IconName,
 } from "@/components/ui";
 
 /**
@@ -67,11 +71,55 @@ function orderNodes(detail: {
   return ordered;
 }
 
+type ViewMode = "graph" | "list";
+type ListSort = "custom" | "title" | "release" | "ttb";
+
+const VIEWS: Array<{ key: ViewMode; label: string; icon: IconName }> = [
+  { key: "graph", label: "Play order", icon: "git-branch-outline" },
+  { key: "list", label: "List", icon: "list-outline" },
+];
+
+const LIST_SORTS: Array<{ key: ListSort; label: string }> = [
+  { key: "custom", label: "Custom order" },
+  { key: "title", label: "Title" },
+  { key: "release", label: "Release date" },
+  { key: "ttb", label: "Time to beat" },
+];
+
+/**
+ * Sort for the list view. Games missing the field a sort needs sink to the
+ * bottom rather than jumbling into the middle — an unknown release date isn't
+ * "the year 0".
+ */
+function sortNodes(games: CollectionNode[], sort: ListSort): CollectionNode[] {
+  const byTitle = (a: CollectionNode, b: CollectionNode) => a.title.localeCompare(b.title);
+  return [...games].sort((a, b) => {
+    if (sort === "title") return byTitle(a, b);
+    if (sort === "release") {
+      if (!a.releaseDate && !b.releaseDate) return byTitle(a, b);
+      if (!a.releaseDate) return 1;
+      if (!b.releaseDate) return -1;
+      return a.releaseDate.localeCompare(b.releaseDate) || byTitle(a, b);
+    }
+    if (sort === "ttb") {
+      const av = a.ttbMain ?? Number.MAX_SAFE_INTEGER;
+      const bv = b.ttbMain ?? Number.MAX_SAFE_INTEGER;
+      return av - bv || byTitle(a, b);
+    }
+    return a.sortOrder - b.sortOrder || byTitle(a, b);
+  });
+}
+
 export default function CollectionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [picking, setPicking] = useState(false);
+  const [view, setView] = useState<ViewMode>("graph");
+  const [sort, setSort] = useState<ListSort>("custom");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<CollectionNode[] | null>(null);
   const badgeOpacity = useBadgeOpacity();
 
   const collection = useQuery({
@@ -93,29 +141,54 @@ export default function CollectionDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ["public-collections"] });
     },
   });
+  const saveOrder = useMutation({
+    mutationFn: (ordered: CollectionNode[]) =>
+      api.saveCollectionOrder(
+        id,
+        ordered.map((g) => g.gameId),
+      ),
+    onSuccess: () => {
+      setEditing(false);
+      setDraft(null);
+      invalidate();
+    },
+  });
+
+  function move(index: number, delta: number) {
+    setDraft((prev) => {
+      const next = [...(prev ?? [])];
+      const target = index + delta;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target]!, next[index]!];
+      return next;
+    });
+  }
 
   if (collection.isLoading || !collection.data) return <Loading />;
 
   const detail = collection.data;
-  const ordered = orderNodes(detail);
   const inCollection = new Set(detail.games.map((g) => g.gameId));
   const accent = detail.accentColor ?? colors.accent;
+
+  // the graph view walks the play-order links; the list view sorts the same
+  // games by whatever you picked
+  const rows =
+    view === "graph"
+      ? orderNodes(detail)
+      : editing && draft
+        ? draft
+        : sortNodes(detail.games, sort);
 
   return (
     <Screen>
       <FlatList
-        data={ordered}
+        data={rows}
         keyExtractor={(g) => g.gameId}
         contentContainerStyle={{ padding: space.md, paddingBottom: 96 + insets.bottom }}
         ListHeaderComponent={
           <View style={{ marginBottom: space.sm, gap: space.sm }}>
             {detail.description ? <Text style={type.prose}>{detail.description}</Text> : null}
-            {detail.links.length > 0 && (
-              <View style={styles.orderNote}>
-                <Icon name="git-branch-outline" size={13} color={colors.textFaint} />
-                <Text style={type.micro}>Listed in play order</Text>
-              </View>
-            )}
+
             <View style={styles.headerRow}>
               <Button
                 label={detail.isPublic ? "Published" : "Publish"}
@@ -132,50 +205,138 @@ export default function CollectionDetailScreen() {
                 </View>
               )}
             </View>
+
+            {/* two ways to look at the same games: the graph's play order,
+                or a numbered list you can sort and reorder */}
+            <View style={styles.tabs}>
+              {VIEWS.map((v) => (
+                <Pressable
+                  key={v.key}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: view === v.key }}
+                  style={[styles.tab, view === v.key && { borderBottomColor: accent }]}
+                  onPress={() => {
+                    setView(v.key);
+                    setEditing(false);
+                    setDraft(null);
+                  }}
+                >
+                  <Icon
+                    name={v.icon}
+                    size={14}
+                    color={view === v.key ? colors.text : colors.textFaint}
+                  />
+                  <Text style={[type.label, view === v.key ? undefined : { color: colors.textFaint }]}>
+                    {v.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {view === "graph" && detail.links.length > 0 && (
+              <View style={styles.orderNote}>
+                <Icon name="git-branch-outline" size={13} color={colors.textFaint} />
+                <Text style={type.micro}>Following the play-order links</Text>
+              </View>
+            )}
+
+            {view === "list" && (
+              <>
+                <ChipBar style={{ marginHorizontal: -space.md }}>
+                  {LIST_SORTS.map((s) => (
+                    <Chip
+                      key={s.key}
+                      label={s.label}
+                      active={sort === s.key}
+                      onPress={() => {
+                        setSort(s.key);
+                        if (s.key !== "custom") {
+                          setEditing(false);
+                          setDraft(null);
+                        }
+                      }}
+                    />
+                  ))}
+                </ChipBar>
+                {sort === "custom" && (
+                  <View style={styles.headerRow}>
+                    {editing ? (
+                      <>
+                        <Button
+                          label="Save order"
+                          icon="checkmark"
+                          busy={saveOrder.isPending}
+                          onPress={() => saveOrder.mutate(draft ?? sortNodes(detail.games, sort))}
+                          style={styles.headerBtn}
+                        />
+                        <Button
+                          label="Cancel"
+                          tone="ghost"
+                          onPress={() => {
+                            setEditing(false);
+                            setDraft(null);
+                          }}
+                          style={styles.headerBtn}
+                        />
+                      </>
+                    ) : (
+                      <Button
+                        label="Edit order"
+                        icon="swap-vertical"
+                        tone="ghost"
+                        onPress={() => {
+                          setDraft(sortNodes(detail.games, "custom"));
+                          setEditing(true);
+                        }}
+                        style={styles.headerBtn}
+                      />
+                    )}
+                  </View>
+                )}
+                {editing && (
+                  <Text style={type.micro}>
+                    Use the arrows to set the order, then save. Rows don't open while editing.
+                  </Text>
+                )}
+              </>
+            )}
           </View>
         }
         ListEmptyComponent={
           <EmptyState
             icon="albums-outline"
             title="No games here yet"
-            text="Tap + to pull games in from your library."
+            text="Tap + to add games — yours, or ones you don't own."
           />
         }
-        renderItem={({ item, index }) => {
-          const status = item.status ? statusStyle(item.status, badgeOpacity) : null;
-          return (
-            <View style={styles.row}>
-              <Text style={[type.label, styles.orderNum, { color: accent }]}>{index + 1}</Text>
-              <Cover src={resolveImage(item.coverSrc)} width={40} height={53} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={type.bodyStrong} numberOfLines={2}>
-                  {item.title}
-                </Text>
-                <View style={{ marginTop: 5 }}>
-                  {status ? (
-                    <Badge label={status.label} bg={status.bg} fg={status.text} />
-                  ) : (
-                    <Text style={type.micro}>Not in library</Text>
-                  )}
-                </View>
-              </View>
-              <IconButton
-                name="close"
-                accessibilityLabel={`Remove ${item.title} from this collection`}
-                onPress={() =>
-                  Alert.alert("Remove game", `Remove "${item.title}" from this collection?`, [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Remove",
-                      style: "destructive",
-                      onPress: () => removeGame.mutate(item.gameId),
-                    },
-                  ])
-                }
-              />
-            </View>
-          );
-        }}
+        renderItem={({ item, index }) => (
+          <CollectionRow
+            game={item}
+            index={index}
+            accent={accent}
+            badgeOpacity={badgeOpacity}
+            editing={editing}
+            isFirst={index === 0}
+            isLast={index === rows.length - 1}
+            onMove={(delta) => move(index, delta)}
+            onOpen={() => {
+              // owned → your copy of the game; not owned → the add screen,
+              // which is where you'd go to get it
+              if (item.userGameId) router.push(`/game/${item.userGameId}`);
+              else router.push("/add");
+            }}
+            onRemove={() =>
+              Alert.alert("Remove game", `Remove "${item.title}" from this collection?`, [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Remove",
+                  style: "destructive",
+                  onPress: () => removeGame.mutate(item.gameId),
+                },
+              ])
+            }
+          />
+        )}
       />
 
       <AddGameSheet
@@ -202,6 +363,112 @@ export default function CollectionDetailScreen() {
         </Pressable>
       )}
     </Screen>
+  );
+}
+
+/**
+ * One game in a collection. Tapping opens it while you're reading; while
+ * you're editing the order it doesn't, because a mis-tap that navigates away
+ * mid-reorder loses the whole draft.
+ */
+function CollectionRow({
+  game,
+  index,
+  accent,
+  badgeOpacity,
+  editing,
+  isFirst,
+  isLast,
+  onMove,
+  onOpen,
+  onRemove,
+}: {
+  game: CollectionNode;
+  index: number;
+  accent: string;
+  badgeOpacity: number;
+  editing: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  onMove: (delta: number) => void;
+  onOpen: () => void;
+  onRemove: () => void;
+}) {
+  const status = game.status ? statusStyle(game.status, badgeOpacity) : null;
+  const year = game.releaseDate ? game.releaseDate.slice(0, 4) : null;
+  const ttb = formatHours(game.ttbMain);
+
+  const body = (
+    <>
+      <Text style={[type.label, styles.orderNum, { color: accent }]}>{index + 1}</Text>
+      <Cover src={resolveImage(game.coverSrc)} width={40} height={53} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={type.bodyStrong} numberOfLines={2}>
+          {game.title}
+        </Text>
+        <View style={styles.metaRow}>
+          {status ? (
+            <Badge label={status.label} bg={status.bg} fg={status.text} />
+          ) : (
+            <View style={styles.notOwned}>
+              <Text style={type.micro}>Not in library</Text>
+            </View>
+          )}
+          {year && <Text style={type.micro}>{year}</Text>}
+          {ttb && (
+            <View style={styles.metaItem}>
+              <Icon name="time-outline" size={11} color={colors.textFaint} />
+              <Text style={type.micro}>{ttb}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </>
+  );
+
+  if (editing) {
+    return (
+      <View style={styles.row}>
+        {body}
+        <View style={styles.moveButtons}>
+          <IconButton
+            name="chevron-up"
+            accessibilityLabel={`Move ${game.title} up`}
+            onPress={() => !isFirst && onMove(-1)}
+            color={isFirst ? colors.border : colors.textMuted}
+            size={16}
+          />
+          <IconButton
+            name="chevron-down"
+            accessibilityLabel={`Move ${game.title} down`}
+            onPress={() => !isLast && onMove(1)}
+            color={isLast ? colors.border : colors.textMuted}
+            size={16}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={game.userGameId ? `Open ${game.title}` : `Add ${game.title}`}
+      onPress={onOpen}
+      style={({ pressed }) => [styles.row, !game.userGameId && styles.rowGhost, pressed && { opacity: 0.7 }]}
+    >
+      {body}
+      {game.userGameId ? (
+        <Chevron />
+      ) : (
+        <Icon name="add-circle-outline" size={20} color={accent} />
+      )}
+      <IconButton
+        name="close"
+        accessibilityLabel={`Remove ${game.title} from this collection`}
+        onPress={onRemove}
+      />
+    </Pressable>
   );
 }
 
@@ -355,10 +622,34 @@ function AddRow({
 }
 
 const styles = StyleSheet.create({
-  orderNote: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: space.xs },
+  orderNote: { flexDirection: "row", alignItems: "center", gap: 5 },
   headerRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
   headerBtn: { minHeight: 38, paddingHorizontal: space.md },
   copiedTag: { flexDirection: "row", alignItems: "center", gap: 4 },
+  tabs: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border },
+  tab: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    flex: 1,
+    minHeight: 40,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+    marginBottom: -1,
+  },
+  metaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: space.sm, marginTop: 5 },
+  metaItem: { flexDirection: "row", alignItems: "center", gap: 3 },
+  notOwned: {
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: colors.borderStrong,
+    paddingHorizontal: 8,
+    paddingVertical: 1,
+  },
+  rowGhost: { borderStyle: "dashed" },
+  moveButtons: { gap: 2 },
   row: {
     flexDirection: "row",
     alignItems: "center",

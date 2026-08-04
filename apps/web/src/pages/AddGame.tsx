@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AddGameInput, OwnershipFormat, SearchResult } from "@gm/shared";
 import { api } from "../lib/api.js";
@@ -13,8 +13,10 @@ export function AddGamePage() {
   const queryClient = useQueryClient();
   const prefs = usePreferences();
   const categories = useCategories();
-  const [input, setInput] = useState("");
-  const [query, setQuery] = useState("");
+  // ?q= arrives when something links here to add a specific game
+  const { q } = useSearch({ from: "/add" });
+  const [input, setInput] = useState(q ?? "");
+  const [query, setQuery] = useState(q ?? "");
   const [yearInput, setYearInput] = useState("");
   const [addedTitles, setAddedTitles] = useState<Set<string>>(new Set());
 

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CollectionSummary, PublicCollection } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
+import { AddCollectionToLibrary } from "../components/AddCollectionToLibrary.js";
 
 type Tab = "mine" | "public";
 
@@ -218,12 +219,12 @@ function PublicCard({
       </p>
       {c.description && <p className="mt-1 line-clamp-2 text-sm text-zinc-400">{c.description}</p>}
       <Covers preview={c.preview} />
-      <div className="mt-auto pt-4">
+      <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
         {c.mine ? (
           <Link
             to="/collection/$id"
             params={{ id: c.id }}
-            className="inline-block rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800"
+            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800"
           >
             Open yours
           </Link>
@@ -237,6 +238,7 @@ function PublicCard({
             {c.adopted ? "Save another copy" : "Save a copy"}
           </button>
         )}
+        <AddCollectionToLibrary collectionId={c.id} total={c.total} />
       </div>
     </div>
   );

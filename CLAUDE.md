@@ -107,6 +107,31 @@ Phase 0–8 roadmap — read it before making design decisions.
   game — set from the game's page ("Wrong game?"), reviewed in the Steam card.
 - **jsonb only for display config** (dashboard layout, status colors) — everything else
   that v1 stored as JSON strings is normalized tables here.
+- **Security hardening** (pre-deployment pass): every stored image — uploaded
+  *or* fetched from an allowlisted host — goes through
+  `services/image-pipeline.ts`: magic-byte sniff (PNG/JPEG/WebP/AVIF; the
+  client's mimetype header is never consulted), full re-encode through
+  `sharp` (strips EXIF/GPS, destroys polyglot files, `rotate()` first so
+  phone photos keep their orientation), 8192² pixel cap against
+  decompression bombs; AVIF re-encodes to JPEG (AVIF encode is seconds of
+  CPU). Upload limit is 5MB (multipart), remote fetches capped at 20MB —
+  filenames were already the DB row's uuid. `plugins/sanitize.ts` is a global
+  preValidation hook stripping *active* HTML only (script/iframe blocks,
+  `on*=` handlers, `javascript:` URIs) from body/query strings — plain text
+  like "boss < 50% hp" must survive, and `/api/auth/*` is skipped because
+  altering a password silently breaks the account (React escaping remains
+  the primary XSS defense; this keeps payloads out of the DB for future
+  non-escaping consumers). `@fastify/rate-limit`: global 1000/min per IP
+  (`trustProxy: true` — the API only ever sits behind Traefik or the Vite
+  proxy, so X-Forwarded-For is honest), with tight per-route configs in
+  `plugins/rate-limits.ts` for the expensive routes: wiki scrape 5/min
+  (Fandom is Cloudflare-fronted and bans IPs), uploads 20/min, art/cover
+  browses 30/min, OCR imports 10/min, barcode 10/min (UPCitemdb ~100/day).
+  better-auth's own `rateLimit` guards credentials: sign-in 5/min,
+  sign-up 5/hour. SQL was already clean (Drizzle parameterizes everything,
+  including tagged `sql` templates); the one real find was
+  `suggestMissionsFromUrl` accepting any host *ending* in "fandom.com"
+  ("evil-fandom.com") — now exact-host or dot-suffix plus http(s) only.
 - **One funnel for category badges**: `statusChip()` (`apps/web/src/lib/format.ts`)
   resolves colour *and* applies `preferences.badge_opacity`, so the opacity setting
   lands on every badge on every page for free. Mobile mirrors it through
@@ -174,6 +199,8 @@ was dev-only). Never use `db push`.
 
 | 13 sharing + corrections | see git log | **Collections publish/adopt** (migration 0015): `is_public` + `adopted_from_id`, `GET /api/collections/public`, `POST /:id/adopt` deep-copying games and links, star badge on both apps, Yours/Public tabs. Adding a game is now a **search** (library first, IGDB underneath) and accepts `igdbId`, so a collection can list games you don't own. **Manual play times** (`PUT /api/library/:id/time-to-beat`) with an "Add play time" affordance when IGDB has none. Mobile caught up on three things web had: a **half-star rating** widget, **cover browsing/upload**, and **console art browsing/upload**. Header button became a hamburger |
 
+| 13b collection views + bulk add | see git log | **Two views per collection**: the play-order graph, and a **list** sortable by custom order / title / release date / time to beat. `collection_games.sort_order` (migration 0016, backfilled from the graph layout) holds the custom order, written only by `PUT /:id/order` so the graph and the list can't scramble each other. Rows link to your copy of a game, or to the add-game search when you don't own it (`/add?q=`). **`POST /:id/add-to-library`** adds every game in a collection at once with a chosen category and platform — the reason to browse a public one |
+
 **Next: Phase 6 (skipped for now, still open)** — email verification/password reset
 (better-auth config flip + SMTP), data export (JSON/CSV), backlog randomizer with
 filters, admin panel (users, password resets, registration toggle, settings).
@@ -193,6 +220,29 @@ file to be provided for reference).
 - Barcode scan flow verified end-to-end at the API level (real BOTW/GoW barcodes) but
   the camera screen itself needs an on-device Expo Go run — simulators have no camera.
 - Play-order graph *editing* is web-only; mobile flattens the graph to an ordered list.
+- **A collection has two views, and two orderings to match.** The graph answers
+  "what branches into what" (`position_x/y` + `collection_links`); the list
+  answers "what's 1, 2, 3" (`collection_games.sort_order`, migration 0016).
+  They're deliberately independent — `PUT /:id/layout` only writes positions
+  and links, `PUT /:id/order` only writes `sort_order` — so rearranging the
+  graph can't scramble a numbered run you set by hand. Migration 0016
+  backfills `sort_order` from the existing layout (top-to-bottom,
+  left-to-right) so "Custom order" doesn't open as a jumble on collections
+  that already had a deliberate arrangement.
+- The list's other sorts (title, release date, time to beat) are derived, and
+  games missing the field sink to the bottom rather than sorting as zero —
+  an unknown release date isn't "the year 0". Reordering is only offered on
+  "Custom order", because a drag while sorted by title has nowhere to save to.
+- Tapping a row in the list view opens the game: **your** copy when you own it,
+  the add-game search when you don't (web passes `?q=<title>`, which is why
+  `/add` has a `validateSearch`). Rows stop being tappable while you're editing
+  the order — a mis-tap that navigates away would lose the whole draft.
+- **`POST /api/collections/:id/add-to-library`** pulls a whole collection in at
+  once, which is the point of browsing someone else's. Works on any collection
+  you can see (yours or public). Games you already own count as `skipped` and
+  keep their category — but the chosen platform *is* applied to them, the same
+  rule `POST /api/library/bulk` follows, because "I own this marathon on
+  Switch" is true of the ones you already had.
 - **Collections publish and adopt like checklists do** (migration 0015:
   `collections.is_public`, `adopted_from_id`). Adopting takes a **deep copy** —
   games, node positions and play-order links — not a live reference: your edits

@@ -1,9 +1,12 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "./auth.js";
 import { env } from "./env.js";
 import multipart from "@fastify/multipart";
+import { registerSanitizer } from "./plugins/sanitize.js";
+import { IMAGE_UPLOAD_LIMIT } from "./services/image-pipeline.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerGameRoutes } from "./routes/games.js";
 import { registerImageRoutes } from "./routes/images.js";
@@ -22,13 +25,30 @@ import { registerFriendRoutes } from "./routes/friends.js";
 import { registerCategoryRoutes } from "./routes/categories.js";
 
 export async function buildServer() {
-  const app = Fastify({ logger: true });
+  // trustProxy: the API is only reachable through Traefik (prod) or the Vite
+  // proxy (dev), so X-Forwarded-For is honest — without this, rate limiting
+  // would key every visitor to the proxy's IP and share one bucket.
+  const app = Fastify({ logger: true, trustProxy: true });
 
   await app.register(cors, {
     origin: env.CORS_ORIGINS,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
+
+  // Per-IP flood ceiling on everything. Generous because legit browsing is
+  // chatty (a library page fans out into one image request per cover); the
+  // expensive routes (wiki scraper, uploads, OCR imports, barcode lookups)
+  // carry much tighter per-route configs where they're registered.
+  await app.register(rateLimit, {
+    global: true,
+    max: 1000,
+    timeWindow: "1 minute",
+  });
+
+  // Strip active HTML (script/iframe/on*=/javascript:) out of user-submitted
+  // text before any handler sees it — see plugins/sanitize.ts.
+  registerSanitizer(app);
 
   // Mount better-auth: translate Fastify request -> Fetch Request -> auth.handler
   app.route({
@@ -81,7 +101,7 @@ export async function buildServer() {
   });
 
   await app.register(multipart, {
-    limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+    limits: { fileSize: IMAGE_UPLOAD_LIMIT, files: 1 },
   });
 
   registerLibraryRoutes(app);
