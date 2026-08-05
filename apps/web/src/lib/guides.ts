@@ -225,7 +225,7 @@ export const GUIDES: Guide[] = [
     slug: "catalogue-physical-game-collection",
     title: "Cataloguing a physical game collection",
     excerpt:
-      "Barcode scanning, box art, and how to record condition and completeness for a shelf of cartridges and discs.",
+      "Barcode scanning, cover art, and how to record a shelf of cartridges and discs alongside your digital library.",
     category: "Collecting",
     readMinutes: 6,
     updated: "2026-07-02",
@@ -256,11 +256,11 @@ export const GUIDES: Guide[] = [
         ],
       },
       {
-        heading: "Get real box art where it exists",
+        heading: "Fix the cover art you don't recognise",
         paragraphs: [
-          "Storefront cover images are made for storefronts: square or portrait crops of key art, usually with logos placed for a digital tile. They are wrong for a physical collection, where the thing you own is a specific regional box with a specific spine.",
-          "Scan archives cover most retro platforms with genuine retail box fronts, and they are worth using — a shelf view built from real box scans is recognisably your shelf, which is the entire appeal. Modern platforms are patchier, and for those a synthesised case using the platform's standard livery is the honest fallback.",
-          "Pay attention to dimensions. Retail cases are not all the same shape — an N64 box is landscape, a PS1 jewel case is nearly square, a DS case is a different ratio again — and rendering everything at one aspect ratio is what makes most virtual shelves look like a spreadsheet.",
+          "Automatic cover art comes from storefronts, and storefront art is made for storefronts: a crop of the key art, with the logo placed for a digital tile. For a retro game it is often the wrong region's art entirely, and for an obscure one there may be none at all.",
+          "This matters more than it sounds, because a library is scanned visually. You do not read four hundred titles — you look for the box you remember owning, and a wall of wrong or missing art turns a two-second glance into a search.",
+          "Both fixes are quick. Browse for an alternate cover and pick the one that matches the copy on your shelf, or upload your own image — a photograph of the actual box works, and for a collection where the specific edition matters it is better than anything a database will hand you.",
         ],
       },
       {

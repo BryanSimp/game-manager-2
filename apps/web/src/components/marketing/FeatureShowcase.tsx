@@ -337,38 +337,55 @@ const FEATURES: Feature[] = [
   },
   {
     id: "physical",
-    name: "Physical shelf & box art",
+    name: "Physical & digital together",
     tagline: "Cartridges get the same treatment as downloads",
-    body: "A physical copy is filed under the console it belongs to and marked physical rather than digital, so 'do I own this?' has one answer across a shelf and four storefronts. Retro platforms pull genuine retail box-front scans where they exist, and any boxed game can be opened in a 3D viewer that renders the case at its true retail dimensions — an N64 box is landscape, and it looks like one.",
+    body: "A physical copy is filed under the console it belongs to and marked physical rather than digital, so 'do I own this?' has one answer across a shelf and four storefronts — and 'yes, a disc for the PS5 and digitally on Steam' is an answer it can give. Owning the same game twice, in two forms, is a normal thing for a real collection to do.",
     points: [
       "Physical and digital are separate ownership formats, per platform",
-      "Real retail box-front scans on 21 retro platforms",
-      "3D box viewer at true retail case dimensions",
-      "Modern platforms with no scan archive get a synthesised case",
+      "One game can be owned in both forms, on different machines",
+      "Barcode scanning on the phone for working through a shelf",
       "Upload your own cover art, or browse alternates online",
     ],
     path: "gamesmanager.app/game/842",
     preview: (
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-zinc-200">Owned on</span>
-          <Chip tone="indigo">📦 Physical</Chip>
+        <div className="flex items-center gap-3">
+          <Cover className="h-14 w-11" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Block className="h-3 w-1/2" />
+            <Block className="h-2 w-1/4 bg-zinc-800/70" />
+          </div>
         </div>
-        <div className="flex items-end justify-center gap-4 rounded-lg border border-zinc-800 bg-zinc-900 py-5">
-          <div
-            aria-hidden="true"
-            className="h-24 w-20 rounded-sm bg-gradient-to-br from-zinc-600 to-zinc-800 shadow-lg"
-            style={{ transform: "perspective(300px) rotateY(22deg)" }}
-          />
-          <div
-            aria-hidden="true"
-            className="h-20 w-28 rounded-sm bg-gradient-to-br from-zinc-700 to-zinc-800 shadow-lg"
-            style={{ transform: "perspective(300px) rotateY(-16deg)" }}
-          />
-        </div>
-        <p className="text-center text-[11px] text-zinc-500">
-          🖱 Drag to spin · N64 boxes are landscape
+        <p className="pt-1 text-xs font-semibold text-zinc-300">
+          Owned on <span className="font-normal text-zinc-500">(click to toggle)</span>
         </p>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { name: "PS5", format: "📦" },
+            { name: "Steam", format: "💾" },
+            { name: "Switch", format: null },
+            { name: "GOG", format: null },
+          ].map((p) => (
+            <span
+              key={p.name}
+              className={`inline-flex overflow-hidden rounded-lg border border-zinc-700 text-xs ${
+                p.format ? "" : "opacity-50"
+              }`}
+            >
+              <span
+                className={`px-2.5 py-1 ${
+                  p.format ? "bg-indigo-950 text-indigo-200" : "text-zinc-500"
+                }`}
+              >
+                {p.name}
+              </span>
+              {p.format && (
+                <span className="border-l border-zinc-700 bg-zinc-800 px-1.5 py-1">{p.format}</span>
+              )}
+            </span>
+          ))}
+        </div>
+        <p className="text-[11px] text-zinc-500">📦 physical · 💾 digital</p>
       </div>
     ),
   },

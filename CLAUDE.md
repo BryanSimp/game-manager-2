@@ -146,13 +146,11 @@ Phase 0–8 roadmap — read it before making design decisions.
   resolves colour *and* applies `preferences.badge_opacity`, so the opacity setting
   lands on every badge on every page for free. Mobile mirrors it through
   `statusStyle(status, opacity)` in `lib/ui.ts`.
-- **Real box art** (`services/boxart.ts`): physical games fetch genuine retail box-front
-  scans from libretro-thumbnails (21 retro platforms; validated repo names). Dedup
-  pointer files are followed; PNG dims parsed from IHDR; misses recorded in
-  `game_box_art` so they aren't retried. Boxes render at true retail mm dimensions
-  (`BOX_SPECS` in `packages/shared/src/case-colors.ts` — N64 is landscape!) and adopt
-  the scan's exact aspect. Modern platforms (Switch, PS4+, Xbox One+) have no scan
-  archive → synthesized banner case. 3D spin viewer: `apps/web/src/components/BoxViewer3D.tsx`.
+- **Physical vs digital is a format, not a shelf** — `user_game_platforms.format`,
+  toggled per platform on a game's page. That's the whole of the physical-copy
+  feature now. The 3D box viewer, `services/boxart.ts` (libretro-thumbnails
+  scans) and `packages/shared/src/case-colors.ts` were removed in phase 20;
+  `game_box_art` survives as a parked table backing nothing.
 
 ## Commands
 
@@ -223,6 +221,8 @@ was dev-only). Never use `db push`.
 | 18 demo tour + honest landing page | see git log | **`/demo`** is the real app served from a seeded showcase account (`user.is_demo`, migration 0022) — not a second, fake build that rots the moment a screen changes. A request opts in with the `x-gm-demo` header; `getSessionUser` hands back the demo user as if it had signed in, and **one `onRequest` hook in `server.ts` refuses any demo request that isn't a read**. That hook is the entire view-only guarantee: no route knows the demo exists, and routes added later are covered without being told. The client refuses writes too (`lib/api.ts`) so visitors read a sentence about signing up rather than a 403. Demo accounts have **no `account` row**, so there are no credentials to sign in with, and `is_demo` keeps them out of the first-user-becomes-admin count, community rating/play-time averages, the DAU activity log and the analytics user total. `scripts/seed-demo.ts` (`pnpm db:seed-demo`) is idempotent and pulls games through `upsertGameFromIgdb` when IGDB is configured, so the tour has real covers — degrading to title-only rows when it isn't. `GET /api/demo/status` lets the button hide itself on instances that never seeded. **Landing page audited against the code**: removed wiki mission import (gone in phase 16), "cartridge/boxed/sealed" completeness (only physical/digital exists) and "export your data whenever you like" (not built); added backlog planning, the physical shelf + 3D box viewer, the mobile app, community averages and list publishing |
 
 | 19 admin demo control | see git log | **Scraper health is gone** — the card, `GET /api/admin/analytics/scrapers`, `getScraperHealth`, the `ScraperHealth` type, `logScrape` and all 15 call sites. The wiki scraper died in phase 16 and the rest (boxart/upc/steam/ocr) were writing `type='scrape'` rows nothing read. Historical rows stay; nothing queries them. **The demo is admin-managed**: the seed moved from `scripts/seed-demo.ts` into `services/demo-seed.ts` (the script is now a wrapper) and gained `seedDemo()`/`removeDemo()`/`demoStats()` plus in-memory progress, because two dozen throttled IGDB lookups can't sit in a request — `POST /api/admin/demo/seed` returns 202 and `/admin/demo` polls. **Editing the demo is the app itself**: `x-gm-demo-edit` makes every route act on the demo account while keeping the admin's own role, so the tour is curated with the Library, Collections and Progress screens it advertises. It's a *different* header from the tour's `x-gm-demo`, so the view-only hook doesn't fire, and it's honoured only when the session user is already an admin. Amber banner + header pill throughout, because every screen looks exactly like your own. **The Demo button is now unconditional** (it used to hide when unseeded, which left an admin with no button and no explanation); `/demo` handles an unbuilt demo with a page that says so and links admins to `/admin/demo`. Button order is Get started → Demo → Log in on all three surfaces |
+
+| 20 drop the 3D boxes | see git log | **The 3D box viewer is removed entirely**, with the pipeline behind it: `BoxViewer3D.tsx`, `services/boxart.ts`, `packages/shared/src/case-colors.ts` (`BOX_SPECS`/`caseColorFor`/`FAMILY_ACCENT`), the `game_box_art` join in `entryPlatforms`, and `boxArtSrc`/`boxArtW`/`boxArtH` on `OwnedPlatform`. Half of it was already dead: nothing had called `ensureBoxArt` since the virtual shelf went in phase 11, so the library route was joining a table nothing wrote to. **Physical vs digital ownership stays** — that was never part of the viewer, it's `user_game_platforms.format` and the per-platform toggle on a game's page. `game_box_art` is parked rather than dropped (its rows point at image files on the volume, and there's no orphan cleanup). Landing copy corrected again: the physical feature tab now shows the ownership toggle instead of a spinning box, and the box-scan claims came out of `Landing.tsx`, `Faq.tsx` and the physical-collection guide |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), backlog
@@ -361,9 +361,16 @@ file to be provided for reference).
 - Consoles are **web-only to manage** — mobile's `consoles.tsx` lists what you own
   (storefronts nested under their platform) and each card opens
   `console/[platformId]`, but adding and removing is still web-only.
-- The 3D box viewer and `services/boxart.ts` outlived the shelf: box scans are
-  still fetched, but only lazily from `GET /api/library` (the shelf used to be
-  what warmed them), and the viewer now lives only on a game's detail page.
+- **The 3D box viewer is gone** (phase 20), and so is everything that fed it:
+  `BoxViewer3D.tsx`, `services/boxart.ts`, `case-colors.ts`, and `boxArtSrc`
+  /`boxArtW`/`boxArtH` on `OwnedPlatform`. Worth knowing why it was cheap to
+  remove: `boxart.ts` had already been dead since the virtual shelf went in
+  phase 11 — nothing called `ensureBoxArt`, so `GET /api/library` was joining
+  a table that only ever got rows written to it by a code path that no longer
+  ran. Physical/digital ownership is untouched. `game_box_art` is **left in
+  place, not dropped**: its rows point at `images` rows whose files are still
+  on the volume and there's no orphaned-image cleanup job, so dropping it
+  would strand data rather than reclaim it.
 - Console logos come from IGDB and are **hot-linked**, not cached in
   `/data/images` like covers. Platforms IGDB doesn't know (the PC storefronts,
   Switch 2) have no logo at all — upload your own art, or live with the

@@ -36,7 +36,7 @@ const AUDIENCE = [
   },
   {
     title: "The physical collector",
-    body: "Discs and cartridges filed under the console they belong to, marked physical rather than digital, with genuine retail box-front scans on retro platforms and a 3D box you can spin at true retail dimensions.",
+    body: "Discs and cartridges filed under the console they belong to and marked physical rather than digital, in the same library as everything else — so 'do I already own this?' has one answer in a shop, whichever form you own it in.",
   },
   {
     title: "The completionist",

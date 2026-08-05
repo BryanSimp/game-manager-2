@@ -4,5 +4,4 @@ export * from "./schemas/contact.js";
 export * from "./schemas/feedback.js";
 export * from "./schemas/user.js";
 export * from "./types/library.js";
-export * from "./case-colors.js";
 export * from "./progress.js";

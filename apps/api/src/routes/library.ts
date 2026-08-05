@@ -27,8 +27,6 @@ import { rememberConsoles } from "../services/consoles.js";
 import { defaultPlatformFor, defaultStatusFor } from "../services/preferences.js";
 import { logEvent } from "../services/analytics.js";
 
-const boxArtImage = alias(schema.images, "box_art_image");
-
 /** A category key: a built-in, or the id of one of the user's custom ones. */
 const categoryKey = z.string().min(1).max(64);
 
@@ -161,33 +159,17 @@ async function entryPlatforms(userGameIds: string[]) {
       parentPlatformId: schema.platforms.parentPlatformId,
       parentName: parentPlatform.name,
       format: schema.userGamePlatforms.format,
-      boxArtImageId: schema.gameBoxArt.imageId,
-      boxArtW: boxArtImage.width,
-      boxArtH: boxArtImage.height,
     })
     .from(schema.userGamePlatforms)
     .innerJoin(schema.platforms, eq(schema.userGamePlatforms.platformId, schema.platforms.id))
     .innerJoin(schema.userGames, eq(schema.userGamePlatforms.userGameId, schema.userGames.id))
     .leftJoin(parentPlatform, eq(schema.platforms.parentPlatformId, parentPlatform.id))
-    .leftJoin(
-      schema.gameBoxArt,
-      and(
-        eq(schema.gameBoxArt.gameId, schema.userGames.gameId),
-        eq(schema.gameBoxArt.platformId, schema.platforms.id),
-      ),
-    )
-    .leftJoin(boxArtImage, eq(schema.gameBoxArt.imageId, boxArtImage.id))
     .where(inArray(schema.userGamePlatforms.userGameId, userGameIds));
   const map = new Map<string, unknown[]>();
   for (const row of rows) {
-    const { userGameId, boxArtImageId, boxArtW, boxArtH, ...rest } = row;
+    const { userGameId, ...rest } = row;
     if (!map.has(userGameId)) map.set(userGameId, []);
-    map.get(userGameId)!.push({
-      ...rest,
-      boxArtSrc: boxArtImageId ? `/api/images/${boxArtImageId}` : null,
-      boxArtW,
-      boxArtH,
-    });
+    map.get(userGameId)!.push(rest);
   }
   return map;
 }

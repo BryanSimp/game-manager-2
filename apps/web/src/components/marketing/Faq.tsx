@@ -29,7 +29,7 @@ export const FAQ_ITEMS: Array<{ question: string; answer: string }> = [
   {
     question: "Can I add physical games?",
     answer:
-      "Yes, and there are two fast routes. Scan retail barcodes with the mobile app — scans batch, so you can work through a shelf and confirm once — or add games by search and record the ownership format. Retro platforms also pull genuine retail box-front scans where they exist.",
+      "Yes, and there are two fast routes. Scan retail barcodes with the mobile app — scans batch, so you can work through a shelf and confirm once — or add games by search and mark them physical rather than digital. Either way they live in the same library as your downloads, filed under the console they belong to.",
   },
   {
     question: "What does mission progress tracking actually do?",

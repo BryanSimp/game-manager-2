@@ -110,8 +110,18 @@ export const gameGenres = pgTable(
 );
 
 /**
- * Real per-platform retail box art (front scans), fetched from
- * libretro-thumbnails and cached locally. imageId null = confirmed miss.
+ * Real per-platform retail box art (front scans) from libretro-thumbnails.
+ *
+ * **Backs nothing as of phase 20.** The 3D box viewer was the only thing that
+ * ever displayed a scan, and it's gone; `services/boxart.ts`, which was the
+ * only thing that ever wrote a row, went with it (it had already stopped
+ * being called when the virtual shelf was removed in phase 11).
+ *
+ * The table is deliberately left in place rather than dropped, the same way
+ * the `game_status` type outlived the status enum: its rows point at `images`
+ * rows whose files are still on the volume, and there is no orphaned-image
+ * cleanup job to tidy up after a DROP. Nothing reads it, so it costs nothing
+ * to keep and would cost real data to remove.
  */
 export const gameBoxArt = pgTable(
   "game_box_art",
