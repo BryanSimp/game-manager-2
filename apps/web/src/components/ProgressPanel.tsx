@@ -175,6 +175,9 @@ function Lists({ gameId, entryId }: { gameId: string; entryId: string }) {
     mutationFn: (id: string) => api.adoptChecklist(id),
     onSuccess: (copy) => {
       setError(null);
+      // the copy is yours now, so show it rather than leaving you looking at
+      // the browser you took it from
+      setBrowsing(null);
       setOpenId(copy.id);
       invalidate();
     },
