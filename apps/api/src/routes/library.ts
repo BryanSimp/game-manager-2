@@ -121,7 +121,7 @@ const bulkSchema = z.object({
  * have a resolved triple pass it; the rest get the raw row, which
  * `resolveTtb` reports as-is.
  */
-function gameToJson(game: typeof schema.games.$inferSelect, ttb?: ResolvedTtb) {
+export function gameToJson(game: typeof schema.games.$inferSelect, ttb?: ResolvedTtb) {
   const times = ttb ?? resolveTtb(game, null, null);
   return {
     id: game.id,

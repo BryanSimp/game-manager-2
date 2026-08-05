@@ -1,10 +1,13 @@
 import type { FastifyInstance } from "fastify";
-import { eq, ilike } from "drizzle-orm";
+import { and, eq, ilike } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import type { CatalogGame } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { igdbConfigured, igdbCoverUrl, searchIgdb } from "../services/igdb.js";
 import { ownedConsoleIds } from "../services/consoles.js";
+import { MIN_RATINGS, communityRatings, resolveTtbFor } from "../services/community.js";
+import { gameToJson } from "./library.js";
 
 export function registerGameRoutes(app: FastifyInstance): void {
   app.get<{ Querystring: { q?: string; year?: string } }>(
@@ -69,6 +72,42 @@ export function registerGameRoutes(app: FastifyInstance): void {
     };
     },
   );
+
+  /**
+   * One game from the shared catalog, for someone who may not own it.
+   *
+   * This is what a collection row links to when the game isn't in your
+   * library. It used to link to the add-game search with the title pre-typed,
+   * which asked you to find a game the app had already identified — so this
+   * returns the game itself, plus the entry id when you *do* own it, letting
+   * the page redirect to your copy rather than showing a stranger's view of
+   * a game you have.
+   */
+  app.get<{ Params: { gameId: string } }>("/api/games/:gameId", async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return;
+    const gameId = request.params.gameId;
+    const [game] = await db.select().from(schema.games).where(eq(schema.games.id, gameId));
+    if (!game) return reply.status(404).send({ message: "Game not found" });
+
+    const [entry] = await db
+      .select({ id: schema.userGames.id })
+      .from(schema.userGames)
+      .where(and(eq(schema.userGames.userId, user.id), eq(schema.userGames.gameId, gameId)));
+
+    const [ttbMap, ratings] = await Promise.all([
+      resolveTtbFor(user.id, [game]),
+      communityRatings([gameId]),
+    ]);
+
+    const payload: CatalogGame = {
+      game: gameToJson(game, ttbMap.get(gameId)),
+      userGameId: entry?.id ?? null,
+      communityRating: ratings.get(gameId) ?? null,
+      minRatings: MIN_RATINGS,
+    };
+    return payload;
+  });
 
   /** Every platform, flagged with whether it's on your consoles list. */
   app.get("/api/platforms", async (request, reply) => {

@@ -19,6 +19,8 @@ import { CollectionsPage } from "./pages/Collections.js";
 import { CollectionDetailPage } from "./pages/CollectionDetail.js";
 import { AddGamePage } from "./pages/AddGame.js";
 import { GameDetailPage } from "./pages/GameDetail.js";
+import { CatalogGamePage } from "./pages/CatalogGame.js";
+import { FeedbackPage } from "./pages/Feedback.js";
 import { ImportPage } from "./pages/Import.js";
 import { SettingsPage } from "./pages/Settings.js";
 import { AdminAnalyticsPage } from "./pages/AdminAnalytics.js";
@@ -59,6 +61,13 @@ const routes = [
     }),
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/game/$id", component: GameDetailPage }),
+  // a game from the shared catalog, keyed by catalog id rather than by your
+  // entry id — where a collection sends you for a game you don't own yet
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/catalog/$gameId",
+    component: CatalogGamePage,
+  }),
   createRoute({ getParentRoute: () => rootRoute, path: "/import", component: ImportPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/analytics", component: AdminAnalyticsPage }),
@@ -66,6 +75,7 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/friends", component: FriendsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/friends/$userId", component: FriendLibraryPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/preferences", component: PreferencesPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/feedback", component: FeedbackPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/dashboard", component: DashboardPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/login", component: LoginPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/register", component: RegisterPage }),

@@ -19,6 +19,8 @@ export type AnalyticsEventType =
   // someone recorded how long a game took them, which is what the community
   // average is built out of
   | "time_submitted"
+  // a bug report, feature request or opinion filed from the Feedback page
+  | "feedback_submitted"
   | "scrape";
 
 /**

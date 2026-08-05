@@ -33,8 +33,9 @@ export function Shell({ children }: { children: ReactNode }) {
     navigate({ to: "/login" });
   }
 
-  // small and non-wrapping: ten links plus the account controls have to sit on
-  // one row at 1152px without "Add game" folding onto two lines
+  // small and non-wrapping: the links plus the account controls have to sit on
+  // one row at 1152px without "Add game" folding onto two lines. Past that the
+  // nav scrolls sideways rather than wrapping into a second row.
   const link =
     "shrink-0 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 [&.active]:bg-zinc-800 [&.active]:text-white";
 
@@ -72,6 +73,9 @@ export function Shell({ children }: { children: ReactNode }) {
             </Link>
             <Link to="/preferences" className={link}>
               Preferences
+            </Link>
+            <Link to="/feedback" className={link}>
+              Feedback
             </Link>
             {me.data?.role === "admin" && (
               <>

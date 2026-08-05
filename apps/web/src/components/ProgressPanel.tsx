@@ -151,6 +151,9 @@ export function groupByChapter(items: ChecklistItemView[]): Array<[string, Numbe
 function Lists({ gameId, entryId }: { gameId: string; entryId: string }) {
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState<"main" | "extra" | null>(null);
+  // which section's public-list browser is open — the two are independent
+  // panels over the same fetched set, filtered by kind
+  const [browsing, setBrowsing] = useState<"main" | "extra" | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -172,6 +175,9 @@ function Lists({ gameId, entryId }: { gameId: string; entryId: string }) {
     mutationFn: (id: string) => api.adoptChecklist(id),
     onSuccess: (copy) => {
       setError(null);
+      // the copy is yours now, so show it rather than leaving you looking at
+      // the browser you took it from
+      setBrowsing(null);
       setOpenId(copy.id);
       invalidate();
     },
@@ -194,6 +200,10 @@ function Lists({ gameId, entryId }: { gameId: string; entryId: string }) {
   // lists migration 0020 folded in
   const extras = mine.filter((c) => c.kind !== MAIN_LIST_KIND);
   const shared = lists.data?.public ?? [];
+  // each section browses the public lists that could fill *it* — copying
+  // someone's main story into your side-quest pile isn't a thing anyone means
+  const sharedMain = shared.filter((c) => c.kind === MAIN_LIST_KIND);
+  const sharedExtra = shared.filter((c) => c.kind !== MAIN_LIST_KIND);
 
   /** Move an extra list one place, then persist the whole order. */
   const move = (index: number, delta: -1 | 1) => {
@@ -212,15 +222,34 @@ function Lists({ gameId, entryId }: { gameId: string; entryId: string }) {
       <section className="mt-6">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold text-zinc-300">Main story</p>
-          {!main && (
-            <button
-              onClick={() => setCreating(creating === "main" ? null : "main")}
-              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500"
-            >
-              Add missions
-            </button>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <BrowseButton
+              count={sharedMain.length}
+              open={browsing === "main"}
+              onClick={() => setBrowsing(browsing === "main" ? null : "main")}
+            />
+            {!main && (
+              <button
+                onClick={() => setCreating(creating === "main" ? null : "main")}
+                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-500"
+              >
+                Add missions
+              </button>
+            )}
+          </div>
         </div>
+
+        {browsing === "main" && (
+          <PublicLists
+            lists={sharedMain}
+            emptyNote="Nobody has published a main story list for this game yet. Yours could be the first — publish it from the list's own header."
+            error={error}
+            busy={adopt.isPending}
+            voting={vote.isPending}
+            onAdopt={(id) => adopt.mutate(id)}
+            onVote={(id, value) => vote.mutate({ id, value })}
+          />
+        )}
 
         {creating === "main" && (
           <CreateList
@@ -257,13 +286,32 @@ function Lists({ gameId, entryId }: { gameId: string; entryId: string }) {
             Your other lists
             <span className="ml-2 text-xs font-normal text-zinc-600">(not timed)</span>
           </p>
-          <button
-            onClick={() => setCreating(creating === "extra" ? null : "extra")}
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
-          >
-            + New list
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <BrowseButton
+              count={sharedExtra.length}
+              open={browsing === "extra"}
+              onClick={() => setBrowsing(browsing === "extra" ? null : "extra")}
+            />
+            <button
+              onClick={() => setCreating(creating === "extra" ? null : "extra")}
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            >
+              + New list
+            </button>
+          </div>
         </div>
+
+        {browsing === "extra" && (
+          <PublicLists
+            lists={sharedExtra}
+            emptyNote="No side-quest or collectible lists have been published for this game yet."
+            error={error}
+            busy={adopt.isPending}
+            voting={vote.isPending}
+            onAdopt={(id) => adopt.mutate(id)}
+            onVote={(id, value) => vote.mutate({ id, value })}
+          />
+        )}
 
         {creating === "extra" && (
           <CreateList
@@ -300,54 +348,108 @@ function Lists({ gameId, entryId }: { gameId: string; entryId: string }) {
         </div>
       </section>
 
-      {shared.length > 0 && (
-        <section className="mt-6">
-          <p className="mb-2 text-sm font-semibold text-zinc-300">Shared by other players</p>
-          <p className="mb-2 text-xs text-zinc-600">
-            Saving a copy gives you your own to tick off and edit — the original is untouched.
-          </p>
-          {error && (
-            <p className="mb-2 rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
-              {error}
-            </p>
-          )}
-          <div className="space-y-1.5">
-            {shared.map((c) => (
-              <div
-                key={c.id}
-                className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-zinc-200">
-                    {c.title}
-                    {c.kind === MAIN_LIST_KIND && (
-                      <span className="ml-2 rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-500">
-                        main story
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-xs text-zinc-500">
-                    {c.itemCount} entries{c.authorName ? ` · by ${c.authorName}` : ""}
-                  </p>
-                </div>
-                <VoteButtons
-                  votes={c.votes}
-                  disabled={vote.isPending}
-                  onVote={(value) => vote.mutate({ id: c.id, value })}
-                />
-                <button
-                  onClick={() => adopt.mutate(c.id)}
-                  disabled={adopt.isPending}
-                  className="shrink-0 rounded-lg border border-indigo-500/50 px-3 py-1 text-xs font-semibold text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
-                >
-                  Save a copy
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
     </>
+  );
+}
+
+/**
+ * "Browse public lists" — the way into other players' work, on both sections
+ * rather than only in a block at the bottom of the tab.
+ *
+ * It's shown even when the count is zero. A button that appears only once
+ * someone else has published something can't teach you that sharing exists,
+ * and the empty panel is where the invitation to publish your own lives.
+ */
+function BrowseButton({
+  count,
+  open,
+  onClick,
+}: {
+  count: number;
+  open: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title="Lists other players have published for this game"
+      className={`rounded-lg border px-3 py-1.5 text-xs transition ${
+        open
+          ? "border-indigo-500 bg-indigo-600/20 text-indigo-200"
+          : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+      }`}
+    >
+      Browse public lists
+      {count > 0 && (
+        <span className="ml-1.5 rounded-full bg-indigo-600/30 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-200">
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** The published lists that could fill one section, newest-and-best first. */
+function PublicLists({
+  lists,
+  emptyNote,
+  error,
+  busy,
+  voting,
+  onAdopt,
+  onVote,
+}: {
+  lists: ChecklistSummary[];
+  emptyNote: string;
+  error: string | null;
+  busy: boolean;
+  voting: boolean;
+  onAdopt: (id: string) => void;
+  onVote: (id: string, value: 1 | 0 | -1) => void;
+}) {
+  return (
+    <div className="mb-3 rounded-xl border border-indigo-900/60 bg-zinc-950/40 p-3">
+      <p className="mb-2 text-xs text-zinc-500">
+        Published by other players. Saving a copy gives you your own to tick off and edit — the
+        original is untouched.
+      </p>
+      {error && (
+        <p className="mb-2 rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
+          {error}
+        </p>
+      )}
+      {lists.length === 0 ? (
+        <p className="py-2 text-center text-xs text-zinc-600">{emptyNote}</p>
+      ) : (
+        <div className="space-y-1.5">
+          {lists.map((c) => (
+            <div
+              key={c.id}
+              className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-zinc-200">{c.title}</p>
+                <p className="text-xs text-zinc-500">
+                  {c.itemCount} entries{c.authorName ? ` · by ${c.authorName}` : ""}
+                </p>
+              </div>
+              <VoteButtons
+                votes={c.votes}
+                disabled={voting}
+                onVote={(value) => onVote(c.id, value)}
+              />
+              <button
+                onClick={() => onAdopt(c.id)}
+                disabled={busy}
+                className="shrink-0 rounded-lg border border-indigo-500/50 px-3 py-1 text-xs font-semibold text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
+              >
+                Save a copy
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -452,59 +554,86 @@ function ListCard({
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900">
-      <div className="flex items-center gap-2 pr-2">
+      {/*
+        Publishing sits on the header beside the title, not on a checkbox in
+        the footer: it's the one control here that changes who can see the
+        list, and a tickbox buried under seventy missions read as a setting
+        rather than as an action. It's also reachable without opening the list.
+      */}
+      <div className="flex items-center gap-2 px-3 py-2">
         <button
           onClick={onToggleOpen}
-          className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left"
+          className="flex min-w-0 shrink items-center gap-2 text-left"
         >
-          <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">
-            {summary.title}
-            {summary.isPublic && (
-              <span className="ml-2 rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
-                published
-              </span>
-            )}
-            {summary.adoptedFromId && (
-              <span
-                className="ml-2 rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-500"
-                title="Your own copy — edits here don't affect the original"
-              >
-                copied
-              </span>
-            )}
+          <span className="shrink-0 text-xs text-zinc-600">{open ? "▾" : "▸"}</span>
+          <span className="truncate text-sm text-zinc-200">{summary.title}</span>
+        </button>
+        {summary.adoptedFromId && (
+          <span
+            className="shrink-0 rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-500"
+            title="Your own copy — edits here don't affect the original"
+          >
+            copied
           </span>
-          <span className="shrink-0 text-xs text-zinc-500">
+        )}
+        <button
+          onClick={() => publish.mutate(!summary.isPublic)}
+          disabled={publish.isPending}
+          title={
+            summary.isPublic
+              ? "Published — other players can find this list on this game and take their own copy. Click to unpublish."
+              : "Publish so anyone can find this list on this game and take their own copy"
+          }
+          className={`shrink-0 rounded-lg border px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+            summary.isPublic
+              ? "border-emerald-600/60 bg-emerald-950 text-emerald-300 hover:bg-emerald-900/60"
+              : "border-indigo-500/50 text-indigo-300 hover:bg-indigo-600/20"
+          }`}
+        >
+          {publish.isPending ? "…" : summary.isPublic ? "✓ Published" : "Publish"}
+        </button>
+
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          <span className="text-xs text-zinc-500">
             {summary.doneCount}/{summary.itemCount}
           </span>
-          <span className="hidden h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-zinc-800 sm:block">
+          <span className="hidden h-1.5 w-24 overflow-hidden rounded-full bg-zinc-800 sm:block">
             <span
               className="block h-full rounded-full bg-indigo-500"
               style={{ width: `${pct}%` }}
             />
           </span>
-          <span className="shrink-0 text-zinc-600">{open ? "▾" : "▸"}</span>
-        </button>
-        {onMove && (
-          <span className="flex shrink-0 flex-col leading-none">
-            <button
-              onClick={() => onMove(-1)}
-              disabled={!canMoveUp}
-              title="Move list up"
-              className="px-1 text-[10px] text-zinc-600 hover:text-zinc-300 disabled:opacity-20"
-            >
-              ▲
-            </button>
-            <button
-              onClick={() => onMove(1)}
-              disabled={!canMoveDown}
-              title="Move list down"
-              className="px-1 text-[10px] text-zinc-600 hover:text-zinc-300 disabled:opacity-20"
-            >
-              ▼
-            </button>
-          </span>
-        )}
+          {onMove && (
+            <span className="flex flex-col leading-none">
+              <button
+                onClick={() => onMove(-1)}
+                disabled={!canMoveUp}
+                title="Move list up"
+                className="px-1 text-[10px] text-zinc-600 hover:text-zinc-300 disabled:opacity-20"
+              >
+                ▲
+              </button>
+              <button
+                onClick={() => onMove(1)}
+                disabled={!canMoveDown}
+                title="Move list down"
+                className="px-1 text-[10px] text-zinc-600 hover:text-zinc-300 disabled:opacity-20"
+              >
+                ▼
+              </button>
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* publishing works while the list is collapsed, so its errors — a slur
+          or an address caught in one of seventy entries — can't live inside
+          the open body */}
+      {publishError && (
+        <p className="mx-3 mb-2 rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
+          {publishError}
+        </p>
+      )}
 
       {open && (
         <div className="border-t border-zinc-800 px-3 py-2">
@@ -594,12 +723,6 @@ function ListCard({
             </>
           )}
 
-          {publishError && (
-            <p className="mt-2 rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
-              {publishError}
-            </p>
-          )}
-
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-zinc-800/60 pt-2">
             <button
               onClick={() => setEditing((v) => !v)}
@@ -620,18 +743,6 @@ function ListCard({
                 Sequential
               </label>
             )}
-            <label
-              className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400"
-              title="Anyone can then find this list on this game and take their own copy"
-            >
-              <input
-                type="checkbox"
-                checked={summary.isPublic}
-                disabled={publish.isPending}
-                onChange={(ev) => publish.mutate(ev.target.checked)}
-              />
-              Publish for other players
-            </label>
           </div>
         </div>
       )}

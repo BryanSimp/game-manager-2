@@ -42,3 +42,12 @@ export const barcodeRateLimit = {
 export const contactRateLimit = {
   rateLimit: { max: 3, timeWindow: "10 minutes" },
 };
+
+/**
+ * In-app feedback. Signed in, so it's already attributable and doesn't send
+ * mail — but it does write rows an admin has to read, so it gets a ceiling
+ * roomier than the contact form's and still well under a flood.
+ */
+export const feedbackRateLimit = {
+  rateLimit: { max: 10, timeWindow: "10 minutes" },
+};

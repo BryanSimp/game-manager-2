@@ -4,6 +4,14 @@ import * as Plot from "@observablehq/plot";
 import type { AdminAnalyticsOverview, ScraperHealth } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
+import { AdminFeedbackPanel } from "../components/AdminFeedbackPanel.js";
+
+type Tab = "overview" | "feedback";
+
+const TABS: Array<{ key: Tab; label: string }> = [
+  { key: "overview", label: "Overview" },
+  { key: "feedback", label: "Feedback" },
+];
 
 // Chart palette (dark-only, matching the app's zinc surfaces). The funnel's
 // ordinal ramp is validated against the zinc-900 card surface — see the
@@ -100,18 +108,20 @@ function formatDuration(minutes: number): string {
 export function AdminAnalyticsPage() {
   const me = useQuery({ queryKey: ["me"], queryFn: () => api.me() });
   const isAdmin = me.data?.role === "admin";
+  const [tab, setTab] = useState<Tab>("overview");
 
   const overview = useQuery({
     queryKey: ["admin-analytics"],
     queryFn: () => api.getAdminAnalytics(),
-    enabled: isAdmin,
+    enabled: isAdmin && tab === "overview",
     placeholderData: keepPreviousData,
   });
   // the "live" half: scraper outcomes re-poll while the page is open
   const scrapers = useQuery({
     queryKey: ["admin-scrapers"],
     queryFn: () => api.getScraperHealth(),
-    enabled: isAdmin,
+    // polling every 15s behind a tab nobody is looking at is pure noise
+    enabled: isAdmin && tab === "overview",
     refetchInterval: 15_000,
     placeholderData: keepPreviousData,
   });
@@ -258,13 +268,33 @@ export function AdminAnalyticsPage() {
 
   return (
     <Shell>
-      <div className="mb-5">
+      <div className="mb-4">
         <h1 className="text-xl font-bold text-zinc-100">Analytics</h1>
         <p className="text-sm text-zinc-500">
-          User behavior and system health, from the background event log.
+          User behavior and system health, from the background event log — and what people have
+          told us directly.
         </p>
       </div>
 
+      <div className="mb-5 flex gap-1 border-b border-zinc-800">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+              tab === t.key
+                ? "border-indigo-500 text-indigo-300"
+                : "border-transparent text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "feedback" ? <AdminFeedbackPanel /> : null}
+
+      <div className={tab === "overview" ? "" : "hidden"}>
       {overview.isError ? (
         <p className="text-sm text-red-400">Couldn't load analytics — is the API up?</p>
       ) : null}
@@ -369,6 +399,7 @@ export function AdminAnalyticsPage() {
           <p className="mt-3 text-xs text-zinc-500">No failures in the last 7 days.</p>
         ) : null}
       </Card>
+      </div>
     </Shell>
   );
 }
