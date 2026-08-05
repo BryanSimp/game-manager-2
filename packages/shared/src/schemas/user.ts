@@ -9,6 +9,8 @@ export const userSchema = z.object({
   // freemium tier flag — free accounts see ads, premium accounts don't.
   // Defaulted so payloads from an API that predates the column still parse.
   isPremium: z.boolean().default(false),
+  /** the seeded showcase account behind /demo, not a person */
+  isDemo: z.boolean().default(false),
   createdAt: z.coerce.date(),
 });
 export type User = z.infer<typeof userSchema>;

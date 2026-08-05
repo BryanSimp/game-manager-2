@@ -3,7 +3,9 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { authClient } from "../lib/auth.js";
 import { api } from "../lib/api.js";
+import { useDemoMode } from "../lib/demo.js";
 import { AdBanner } from "./ads/AdBanner.js";
+import { DemoBanner } from "./DemoBanner.js";
 import { Footer } from "./Footer.js";
 
 // stamped by CI via the APP_VERSION docker build-arg (short commit sha)
@@ -13,20 +15,30 @@ const APP_VERSION: string = import.meta.env.VITE_APP_VERSION || "dev";
 export function Shell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { data: session, isPending } = authClient.useSession();
+  // the tour is a signed-out visitor the API answers as the demo account, so
+  // it has to survive every check that would otherwise send them to /login.
+  // A real session ends it — see useDemoMode.
+  const demo = useDemoMode();
 
   useEffect(() => {
-    if (!isPending && !session) navigate({ to: "/login" });
-  }, [isPending, session, navigate]);
+    if (!demo && !isPending && !session) navigate({ to: "/login" });
+  }, [demo, isPending, session, navigate]);
 
-  const me = useQuery({ queryKey: ["me"], queryFn: () => api.me(), enabled: !!session });
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api.me(),
+    enabled: !!session || demo,
+  });
 
-  if (isPending || !session) {
+  if (!demo && (isPending || !session)) {
     return (
       <main className="flex min-h-screen items-center justify-center text-zinc-500">
         Loading…
       </main>
     );
   }
+
+  const displayName = session?.user.name ?? me.data?.name ?? "";
 
   async function signOut() {
     await authClient.signOut();
@@ -41,11 +53,21 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col">
+      {demo && <DemoBanner />}
       <header className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3">
           <Link to="/" className="mr-2 shrink-0 text-base font-bold tracking-tight">
             🎮 Game Manager
           </Link>
+          {/* stays visible after the banner has scrolled away */}
+          {demo && (
+            <span
+              title="You're browsing a sample library. Nothing can be changed."
+              className="mr-1 shrink-0 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase"
+            >
+              Demo
+            </span>
+          )}
           <nav className="flex flex-1 items-center gap-0.5 overflow-x-auto">
             <Link to="/" className={link}>
               Library
@@ -88,13 +110,22 @@ export function Shell({ children }: { children: ReactNode }) {
               </>
             )}
           </nav>
-          <span className="hidden shrink-0 text-xs text-zinc-500 lg:inline">{session.user.name}</span>
-          <button
-            onClick={signOut}
-            className="shrink-0 rounded-lg border border-zinc-700 px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
-          >
-            Sign out
-          </button>
+          <span className="hidden shrink-0 text-xs text-zinc-500 lg:inline">{displayName}</span>
+          {demo ? (
+            <Link
+              to="/register"
+              className="shrink-0 rounded-lg bg-indigo-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+            >
+              Sign up
+            </Link>
+          ) : (
+            <button
+              onClick={signOut}
+              className="shrink-0 rounded-lg border border-zinc-700 px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            >
+              Sign out
+            </button>
+          )}
         </div>
       </header>
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">

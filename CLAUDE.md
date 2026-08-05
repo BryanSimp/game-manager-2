@@ -164,6 +164,7 @@ pnpm dev:web   # :5173 (proxies /api → :3001)
 pnpm dev:mobile  # Expo Go; needs EXPO_PUBLIC_API_URL=<LAN IP> in apps/mobile/.env
 pnpm --filter @gm/api db:generate   # after schema changes → new SQL migration
 pnpm --filter <pkg> typecheck       # per-package tsc
+pnpm db:seed-demo                   # (re)build the /demo showcase account
 ```
 
 Migrations are plain SQL in `apps/api/drizzle/`, applied by `src/db/migrate.ts`
@@ -218,6 +219,8 @@ was dev-only). Never use `db push`.
 | 16 shared lists + community data | see git log | **One list surface per game** (migration 0020): `checklist_templates.position`, so a game has one main-story list plus unlimited extras in an order you set. `ChecklistPanel` is gone — the Progress tab's `ListCard` publishes, copies, votes, reorders and edits every list identically, which is what finally made *mission* lists shareable (the API always allowed it; only the `kind='completion'` filter stopped it). `completion` folded into `side_quests` and now backs nothing. One `missions` list per game, enforced with a 409, because it's what the time estimate divides. **Wiki scraping removed** — `services/missions.ts`, the suggest route, `scraperRateLimit` and `MissionReview` all gone; pasting a list is the create path now. **Votes** (`checklist_votes`, `collection_votes`, `services/votes.ts`): thumbs on published lists and collections, aggregated on read, public-only and never your own. **Community data** (`services/community.ts`): average rating (floor of 3 raters — a privacy floor, not a quality one) and average play time. `PUT /time-to-beat` stopped writing the shared catalog row and writes `user_time_to_beat`; `resolveTtb` (shared) picks catalog → yours → community per request, and the dashboard's backlog total goes through the same resolver. **Content filter** (`services/content-filter.ts`): hate terms + PII on every write to a collection or list, plus a whole-list re-scan at publish. **Collection discovery**: `GET /api/collections/public` takes `q`/`gameId`/`sort`/paging, `q` matches game titles inside a collection, `GET /:id` opens to owner-or-public, and the graph opens read-only with click-through to a game. List tab moved first |
 
 | 17 feedback + progress polish | see git log | **In-app feedback** (`feedback` table, migration 0021): `POST /api/feedback` (signed in, so it never asks who you are), `GET /api/feedback/mine` so filing isn't shouting into a void, and an admin queue at `GET /api/admin/feedback` with `q`/`kind`/`area`/`status`/`sort` plus PATCH triage, DELETE and `export.csv`. Deliberately **not** the marketing contact form (that one is anonymous and sends mail) and deliberately **not** run through `content-filter.ts` — a bug report often has to quote the thing that broke. Web: `/feedback` in the nav, and a **Feedback tab on `/admin/analytics`** with status tiles that double as filters, an expandable table with inline triage, CSV export (server-side, honours the filters, BOM'd for Excel) and PDF export (a printable window → the browser's own Save as PDF, so no PDF dependency). **Collections open the game** — `GET /api/games/:gameId` returns a catalog game plus your entry id, and `/catalog/$gameId` renders it with a one-button add; both the list rows and the graph nodes used to dump you in `/add?q=<title>`, i.e. searching for a game the app had already identified. Owning it redirects to your copy. **Progress tab**: publish moved off a footer checkbox onto a button beside the list's title (reachable while collapsed, so its content-filter errors moved out of the open body too), and both sections got a **Browse public lists** button — shown at zero as well, because a control that only appears once someone else has published can't teach you that sharing exists |
+
+| 18 demo tour + honest landing page | see git log | **`/demo`** is the real app served from a seeded showcase account (`user.is_demo`, migration 0022) — not a second, fake build that rots the moment a screen changes. A request opts in with the `x-gm-demo` header; `getSessionUser` hands back the demo user as if it had signed in, and **one `onRequest` hook in `server.ts` refuses any demo request that isn't a read**. That hook is the entire view-only guarantee: no route knows the demo exists, and routes added later are covered without being told. The client refuses writes too (`lib/api.ts`) so visitors read a sentence about signing up rather than a 403. Demo accounts have **no `account` row**, so there are no credentials to sign in with, and `is_demo` keeps them out of the first-user-becomes-admin count, community rating/play-time averages, the DAU activity log and the analytics user total. `scripts/seed-demo.ts` (`pnpm db:seed-demo`) is idempotent and pulls games through `upsertGameFromIgdb` when IGDB is configured, so the tour has real covers — degrading to title-only rows when it isn't. `GET /api/demo/status` lets the button hide itself on instances that never seeded. **Landing page audited against the code**: removed wiki mission import (gone in phase 16), "cartridge/boxed/sealed" completeness (only physical/digital exists) and "export your data whenever you like" (not built); added backlog planning, the physical shelf + 3D box viewer, the mobile app, community averages and list publishing |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), backlog
@@ -528,6 +531,37 @@ file to be provided for reference).
   there**, so data-backed screens sit empty. Auth works (better-auth's expo
   client defers to the browser cookie jar on web). Treat web as a layout
   harness only; real verification is Expo Go on a device.
+- **The demo is not seeded automatically.** Docker boot runs migrations and
+  the platform seed only; `pnpm db:seed-demo` is a deliberate manual step, so
+  a self-hosted instance doesn't get a stranger's fake library and an IGDB
+  fetch storm at first boot. Until it's run, `/api/demo/status` answers false
+  and every Demo button hides itself. Re-run it any time — it wipes the demo
+  accounts' rows and rebuilds them, and never touches a real account.
+- **Everything that makes the demo view-only is the `onRequest` hook in
+  `server.ts`.** Routes deliberately know nothing about it: a demo visitor is
+  the seeded account as far as every handler is concerned, and the only thing
+  separating that from an account takeover is that they can't send anything
+  but a GET. Don't add a demo carve-out to a route — if something needs to be
+  writable in the demo, that's a change to the hook, in one place, on purpose.
+- Demo accounts are **excluded from four aggregates**: the first-user-becomes
+  -admin count (`auth.ts`), community rating and play-time averages
+  (`notDemoUser` in `services/demo.ts`), the activity log that feeds DAU, and
+  the analytics user/entry totals. A fifth would be easy to miss — `is_demo`
+  is the flag to reach for.
+- The demo's **friend codes are hand-written** in `seed-demo.ts` and must use
+  the ambiguity-free alphabet from `services/friends.ts` (no O/0, I/L/1, S/5,
+  B). `normalizeFriendCode` rejects anything else, so a sloppy seeded code
+  renders on screen as something nobody can type back in.
+- Demo state is **sessionStorage, not a cookie or a URL param**: it has to
+  survive in-app navigation, must not survive the tab closing, and must never
+  ride along on a real signed-in session in another tab. `/demo` sets it and
+  clears the query cache; "Exit demo" does the reverse.
+- The landing page was audited against the code in phase 18. **If you remove a
+  feature, `Landing.tsx`, `FeatureShowcase.tsx` and `Faq.tsx` are the three
+  files that will still be claiming it** — that's how "mission lists imported
+  from community wikis" outlived the scraper by two phases. `Faq.tsx`'s items
+  also feed the FAQPage structured data, which Google treats a mismatch in as
+  a violation.
 - **`/catalog/$gameId` is a game you don't own**, and it redirects to
   `/game/$id` the moment you do — one game you own must not have two URLs.
   It's deliberately thinner than the owned page: no rating, notes, tags,

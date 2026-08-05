@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { normalizeTtb, resolveTtb, type ResolvedTtb, type TtbTriple } from "@gm/shared";
 import { db, schema } from "../db/index.js";
+import { notDemoUser } from "./demo.js";
 
 /**
  * What everyone else thinks, aggregated.
@@ -38,7 +39,14 @@ export async function communityRatings(
       count: sql<number>`count(${schema.userGames.rating})::int`,
     })
     .from(schema.userGames)
-    .where(and(inArray(schema.userGames.gameId, gameIds), isNotNull(schema.userGames.rating)))
+    .where(
+      and(
+        inArray(schema.userGames.gameId, gameIds),
+        isNotNull(schema.userGames.rating),
+        // the demo library's scores are invented, so they don't get a say
+        notDemoUser(schema.userGames.userId),
+      ),
+    )
     .groupBy(schema.userGames.gameId)
     .having(sql`count(${schema.userGames.rating}) >= ${MIN_RATINGS}`);
 
@@ -74,7 +82,12 @@ export async function communityTimes(gameIds: string[]): Promise<Map<string, Com
       count: sql<number>`count(*)::int`,
     })
     .from(schema.userTimeToBeat)
-    .where(inArray(schema.userTimeToBeat.gameId, gameIds))
+    .where(
+      and(
+        inArray(schema.userTimeToBeat.gameId, gameIds),
+        notDemoUser(schema.userTimeToBeat.userId),
+      ),
+    )
     .groupBy(schema.userTimeToBeat.gameId);
 
   const round = (v: number | null) => (v == null ? null : Math.round(v));

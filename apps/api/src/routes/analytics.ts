@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { count, sql } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import type { AdminAnalyticsOverview, ScraperHealth } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireAdmin } from "../plugins/auth.js";
@@ -98,8 +98,18 @@ export function registerAnalyticsRoutes(app: FastifyInstance): void {
     ).rows as Array<{ sessions: number; avg_seconds: number }>;
     const sessions = sessionRows[0] ?? { sessions: 0, avg_seconds: 0 };
 
-    const [userRow] = await db.select({ n: count() }).from(schema.user);
-    const [entryRow] = await db.select({ n: count() }).from(schema.userGames);
+    // seeded demo accounts aren't users, and would flatter every ratio here
+    const [userRow] = await db
+      .select({ n: count() })
+      .from(schema.user)
+      .where(eq(schema.user.isDemo, false));
+    // …and neither are their games, or avgGamesPerUser divides real entries
+    // by real users with a seeded library still in the numerator
+    const [entryRow] = await db
+      .select({ n: count() })
+      .from(schema.userGames)
+      .innerJoin(schema.user, eq(schema.userGames.userId, schema.user.id))
+      .where(eq(schema.user.isDemo, false));
     const totalUsers = userRow?.n ?? 0;
     const totalLibraryEntries = entryRow?.n ?? 0;
 

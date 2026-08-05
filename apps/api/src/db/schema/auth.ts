@@ -21,6 +21,12 @@ export const user = pgTable("user", {
   // future billing webhook) — better-auth's additionalFields marks it
   // input:false so a signup payload can never set it
   isPremium: boolean("is_premium").notNull().default(false),
+  // Seeded showcase accounts behind /demo. Set only by scripts/seed-demo.ts,
+  // never by a signup — these rows have no `account` row at all, so nobody
+  // can sign in as one. The flag exists because a fake account must not be
+  // counted as a real one anywhere: it's excluded from the first-user-becomes
+  // -admin check, from community averages, and from the analytics user total.
+  isDemo: boolean("is_demo").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

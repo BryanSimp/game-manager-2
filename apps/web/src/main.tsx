@@ -21,6 +21,7 @@ import { AddGamePage } from "./pages/AddGame.js";
 import { GameDetailPage } from "./pages/GameDetail.js";
 import { CatalogGamePage } from "./pages/CatalogGame.js";
 import { FeedbackPage } from "./pages/Feedback.js";
+import { DemoPage } from "./pages/Demo.js";
 import { ImportPage } from "./pages/Import.js";
 import { SettingsPage } from "./pages/Settings.js";
 import { AdminAnalyticsPage } from "./pages/AdminAnalytics.js";
@@ -94,6 +95,8 @@ const routes = [
   // The landing page's own URL, so it stays reachable while signed in and can
   // be linked to directly.
   createRoute({ getParentRoute: () => rootRoute, path: "/welcome", component: LandingPage }),
+  // flips on read-only demo mode and hands over to the library — see pages/Demo.tsx
+  createRoute({ getParentRoute: () => rootRoute, path: "/demo", component: DemoPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/guides", component: GuidesPage }),
   createRoute({
     getParentRoute: () => rootRoute,

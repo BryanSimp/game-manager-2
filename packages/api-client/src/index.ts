@@ -132,6 +132,15 @@ export class ApiClient {
     return this.request<User>("/api/me");
   }
 
+  /**
+   * Whether this server has a seeded demo to tour. Unauthenticated — the
+   * landing page asks before anyone has an account, and an instance that
+   * never ran `db:seed-demo` answers false so the button can hide itself.
+   */
+  demoStatus(): Promise<{ available: boolean; name: string | null }> {
+    return this.request("/api/demo/status");
+  }
+
   // ---- password recovery (anonymous) ----
 
   requestPasswordReset(email: string): Promise<{ ok: true; message: string }> {

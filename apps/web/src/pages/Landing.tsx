@@ -4,6 +4,7 @@ import { Hero } from "../components/marketing/Hero.js";
 import { FeatureShowcase } from "../components/marketing/FeatureShowcase.js";
 import { GuidesHub } from "../components/marketing/GuidesHub.js";
 import { Faq, FAQ_ITEMS } from "../components/marketing/Faq.js";
+import { DemoButton } from "../components/marketing/DemoButton.js";
 import { faqJsonLd, softwareApplicationJsonLd, useSeo } from "../lib/seo.js";
 
 const STEPS = [
@@ -35,11 +36,11 @@ const AUDIENCE = [
   },
   {
     title: "The physical collector",
-    body: "Cartridge, boxed, boxed with manual, sealed — completeness is most of what makes a physical collection interesting, and it gets recorded properly here rather than flattened to 'owned'.",
+    body: "Discs and cartridges filed under the console they belong to, marked physical rather than digital, with genuine retail box-front scans on retro platforms and a 3D box you can spin at true retail dimensions.",
   },
   {
     title: "The completionist",
-    body: "Mission lists, side-quest lists, achievement sync and per-game checklists, with completion tracked at the level you actually care about instead of a single vague percentage.",
+    body: "Mission lists, side-quest lists, Steam achievement sync and per-game checklists, with completion tracked at the level you actually care about instead of a single vague percentage.",
   },
 ];
 
@@ -105,7 +106,7 @@ export function LandingPage() {
           </h2>
           <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
             Create an account, link Steam, and have a sorted library in about ten minutes. It's
-            free, there's no card, and you can export or delete your data whenever you like.
+            free and there's no card. Or look round a sample library first — no account needed.
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
             <Link
@@ -114,6 +115,7 @@ export function LandingPage() {
             >
               Create a free account
             </Link>
+            <DemoButton className="rounded-xl border border-indigo-600 bg-indigo-950/40 px-6 py-3 text-base font-semibold text-indigo-200 transition hover:bg-indigo-900/50" />
             <Link
               to="/login"
               className="rounded-xl border border-zinc-700 bg-zinc-900/60 px-6 py-3 text-base font-medium text-zinc-100 transition hover:bg-zinc-800"

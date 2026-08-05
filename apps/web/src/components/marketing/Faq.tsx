@@ -9,7 +9,12 @@ export const FAQ_ITEMS: Array<{ question: string; answer: string }> = [
   {
     question: "Is Game Manager free?",
     answer:
-      "Yes. Creating an account, importing your library, tracking progress and building collections are all free, and the free tier is supported by ads. There is no trial period and no card required to sign up.",
+      "Yes. Every feature is free — creating an account, importing your library, tracking progress, building collections and sharing them. The site is supported by ads. There is no trial period, no card required to sign up, and nothing is held back behind a paid tier.",
+  },
+  {
+    question: "Can I try it without signing up?",
+    answer:
+      "Yes. The demo opens a sample library — a few hundred hours of games across a PC, a Switch, a PS5 and a shelf of N64 cartridges, with collections, mission lists and friends already set up — and lets you click through every screen. It is strictly read-only: nothing you do in the demo changes anything, and the account is not yours to keep. Signing up gives you an empty library of your own.",
   },
   {
     question: "Which platforms can I track games on?",
@@ -39,7 +44,12 @@ export const FAQ_ITEMS: Array<{ question: string; answer: string }> = [
   {
     question: "Is there a mobile app?",
     answer:
-      "Yes. The mobile app shares one account and one library with the web app, and covers your library, dashboard, collections, consoles, friends, barcode scanning and import review. Collection play-order editing and checklist authoring are currently web-only.",
+      "Yes. The mobile app shares one account and one library with the web app, and covers your library, dashboard, collections, consoles, friends, barcode scanning and import review, with offline caching so a dropped signal doesn't empty the screen. Collection play-order editing, list authoring, and managing consoles and custom categories are currently web-only.",
+  },
+  {
+    question: "Can I export or delete my data?",
+    answer:
+      "Your library is yours, and on a self-hosted instance it never leaves your own database. A one-click export is not built yet — it is on the roadmap. To have your account and everything in it deleted in the meantime, contact the operator of the instance you signed up on and it will be removed.",
   },
   {
     question: "Can I self-host it?",
