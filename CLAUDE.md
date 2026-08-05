@@ -224,10 +224,11 @@ was dev-only). Never use `db push`.
 
 | 20 drop the 3D boxes | see git log | **The 3D box viewer is removed entirely**, with the pipeline behind it: `BoxViewer3D.tsx`, `services/boxart.ts`, `packages/shared/src/case-colors.ts` (`BOX_SPECS`/`caseColorFor`/`FAMILY_ACCENT`), the `game_box_art` join in `entryPlatforms`, and `boxArtSrc`/`boxArtW`/`boxArtH` on `OwnedPlatform`. Half of it was already dead: nothing had called `ensureBoxArt` since the virtual shelf went in phase 11, so the library route was joining a table nothing wrote to. **Physical vs digital ownership stays** — that was never part of the viewer, it's `user_game_platforms.format` and the per-platform toggle on a game's page. `game_box_art` is parked rather than dropped (its rows point at image files on the volume, and there's no orphan cleanup). Landing copy corrected again: the physical feature tab now shows the ownership toggle instead of a spinning box, and the box-scan claims came out of `Landing.tsx`, `Faq.tsx` and the physical-collection guide |
 
+| 21 roll with filters, rows you choose | see git log | **The backlog randomizer takes filters** (the Phase 6 item): "What should I play next?" rolls from a chosen category *and* console — storefronts roll into their platform, so picking PC includes Steam — and says how many games it's picking between. The card grew a cover twice the size, the release year, main-story and completionist times and the summary, clamped to six lines so the text ends about level with the cover. **Recently finished fits its box**: the row measures itself (`useFitCount`, a `ResizeObserver` on a container whose width doesn't depend on its contents, so trimming can't loop) and renders only the covers that fit, with `+N more` for the rest — it used to scroll sideways and slice a cover in half at the card's edge. **Preferences is two panels to a row** above `lg`; `SteamCard` stopped setting its own width and margin. **`preferences.library_columns`** (migration 0023, 1–8, default 5) drives the library grid, with a `per row` select in its toolbar. The classes are whole literal strings in `COLUMN_CLASSES` because Tailwind can't see `grid-cols-${n}`, narrow breakpoints keep their own counts, and below five the grid is capped at `MAX_CARD_PX` per card — a full-width 3:4 cover is a poster, not a card |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
-flip, can ride on `services/email.ts` now), data export (JSON/CSV), backlog
-randomizer with filters, admin panel (users, password resets, registration
-toggle, settings).
+flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
+(users, password resets, registration toggle, settings).
 **Deployment to Bryan's Ubuntu/Portainer server is the current focus** (v1's compose
 file to be provided for reference).
 
