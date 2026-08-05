@@ -28,6 +28,8 @@ import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerContactRoutes } from "./routes/contact.js";
 import { registerFeedbackRoutes } from "./routes/feedback.js";
 import { logEvent } from "./services/analytics.js";
+import { demoUser, isDemoRequest, isReadMethod } from "./services/demo.js";
+import { requireUser } from "./plugins/auth.js";
 
 export async function buildServer() {
   // trustProxy: the API is only reachable through Traefik (prod) or the Vite
@@ -39,10 +41,28 @@ export async function buildServer() {
   // logEvent is an in-memory push (batched insert on a timer), so this adds
   // nothing to request latency. Only authenticated traffic is recorded —
   // routes resolve the user anyway and stash it on request.sessionUser.
+  /**
+   * The demo is view-only, and this hook is the whole of that guarantee.
+   *
+   * It runs before routing, so it covers every route that exists and every
+   * route added later without either having to know the demo exists. A demo
+   * visitor is a real seeded account as far as the handlers are concerned —
+   * the only thing separating them from an account takeover is that they
+   * can't send anything but a read.
+   */
+  app.addHook("onRequest", async (request, reply) => {
+    if (!isDemoRequest(request.headers) || isReadMethod(request.method)) return;
+    return reply.status(403).send({
+      message:
+        "The demo is view-only — create a free account to build a library of your own.",
+    });
+  });
+
   app.addHook("onResponse", (request, reply, done) => {
     const user = request.sessionUser;
     const route = request.routeOptions?.url;
-    if (user && route && route !== "/api/health" && reply.statusCode < 500) {
+    // demo traffic is not a user, and would otherwise show up as one in DAU
+    if (user && !user.isDemo && route && route !== "/api/health" && reply.statusCode < 500) {
       logEvent("activity", user.id, {
         route,
         method: request.method,
@@ -104,27 +124,46 @@ export async function buildServer() {
     time: new Date().toISOString(),
   }));
 
+  /**
+   * Whether this server has a demo to tour. Unauthenticated on purpose — the
+   * landing page is the one place that asks, and it asks before anyone has an
+   * account. An instance that never ran `db:seed-demo` answers false, and the
+   * button hides itself rather than offering a tour that 404s.
+   */
+  app.get("/api/demo/status", async () => {
+    const demo = await demoUser();
+    return { available: !!demo, name: demo?.name ?? null };
+  });
+
+  // Goes through getSessionUser rather than better-auth directly so a demo
+  // visitor gets an identity here too — the app shell reads its name and role
+  // from this, and a 401 would leave the tour looking signed-out-broken.
   app.get("/api/me", async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return;
+    if (user.isDemo) {
+      return {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        isPremium: false,
+        isDemo: true,
+        createdAt: new Date().toISOString(),
+      };
+    }
     const session = await auth.api.getSession({
       headers: fromNodeHeaders(request.headers),
     });
-    if (!session) {
-      return reply.status(401).send({ message: "Not authenticated" });
-    }
-    const { user } = session;
-    request.sessionUser = {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: (user as { role?: string }).role ?? "user",
-    };
+    if (!session) return reply.status(401).send({ message: "Not authenticated" });
     return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: (user as { role?: string }).role ?? "user",
-      isPremium: (user as { isPremium?: boolean }).isPremium ?? false,
-      createdAt: user.createdAt,
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      role: (session.user as { role?: string }).role ?? "user",
+      isPremium: (session.user as { isPremium?: boolean }).isPremium ?? false,
+      isDemo: false,
+      createdAt: session.user.createdAt,
     };
   });
 

@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { DemoButton } from "./DemoButton.js";
 
 /** The numbers are about what the app tracks, not about usage — nothing here
  *  claims a user count we can't back up. */
@@ -48,6 +49,10 @@ export function Hero() {
           >
             Get started — it's free
           </Link>
+          {/* the demo goes second, ahead of Log in: someone who has never
+              seen the app wants to look before they decide, and this is the
+              only button on the page that shows them anything */}
+          <DemoButton className="rounded-xl border border-indigo-600 bg-indigo-950/40 px-6 py-3 text-base font-semibold text-indigo-200 transition hover:bg-indigo-900/50" />
           <Link
             to="/login"
             className="rounded-xl border border-zinc-700 bg-zinc-900/60 px-6 py-3 text-base font-medium text-zinc-100 transition hover:bg-zinc-800"

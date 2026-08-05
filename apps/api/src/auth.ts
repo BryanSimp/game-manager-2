@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, bearer } from "better-auth/plugins";
 import { expo } from "@better-auth/expo";
-import { count } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
 import { logEvent } from "./services/analytics.js";
@@ -53,8 +53,14 @@ export const auth = betterAuth({
     user: {
       create: {
         before: async (userData) => {
-          // First account ever created becomes the admin.
-          const [row] = await db.select({ n: count() }).from(schema.user);
+          // First account ever created becomes the admin. Seeded demo
+          // accounts don't count — a fresh install that ran the demo seed
+          // first would otherwise hand its owner a plain user account with
+          // no way to reach Settings.
+          const [row] = await db
+            .select({ n: count() })
+            .from(schema.user)
+            .where(eq(schema.user.isDemo, false));
           const isFirst = (row?.n ?? 0) === 0;
           return { data: { ...userData, role: isFirst ? "admin" : "user" } };
         },

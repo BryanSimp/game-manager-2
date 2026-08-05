@@ -176,12 +176,13 @@ const FEATURES: Feature[] = [
     id: "missions",
     name: "Mission progress",
     tagline: "Percent complete that means something",
-    body: "\"Playing\" is not progress. Game Manager tracks a story mission by mission, grouped into chapters, so a game's completion figure reflects where you actually are in it. Tick off the mission you just finished and the estimate of time remaining updates from real time-to-beat data rather than a guess.",
+    body: "\"Playing\" is not progress. Game Manager tracks a story mission by mission, grouped into chapters, so a game's completion figure reflects where you actually are in it. Tick off the mission you just finished and the estimate of time remaining updates from real time-to-beat data rather than a guess. Lists are yours to build — paste one in, or number them — and publishing one saves the next person the job.",
     points: [
-      "Mission lists imported from community wikis, or entered by hand",
+      "Paste a mission list in, generate a numbered one, or start empty",
       "Sequential mode: ticking mission 12 fills in 1–11 in one go",
-      "Side quests tracked separately and deliberately untimed",
+      "Side quests and collectibles kept as separate, untimed lists",
       "Time remaining derived from time-to-beat, not invented",
+      "Publish a list you've built; anyone can take their own copy",
     ],
     path: "gamesmanager.app/game/1284",
     preview: (
@@ -288,15 +289,100 @@ const FEATURES: Feature[] = [
     ),
   },
   {
+    id: "backlog",
+    name: "Backlog planning",
+    tagline: "Pick tonight's game in four seconds",
+    body: "A dashboard that answers the only question a big library raises: what now? It totals the hours left in your backlog, breaks your collection down by category and console, and will pick a game at random when you can't. Endless games — the roguelike you'll never 'finish' — are excluded from the maths rather than skewing it.",
+    points: [
+      "Backlog hours totalled from real time-to-beat figures",
+      "Sort the library by estimated time left, shortest first",
+      "Random pick for when the decision is the problem",
+      "Endless games excluded from backlog time on purpose",
+      "Your own categories and colour-coded tags, grouped how you like",
+    ],
+    path: "gamesmanager.app/dashboard",
+    preview: (
+      <div className="space-y-3">
+        <span className="text-sm font-semibold text-zinc-200">Dashboard</span>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { n: "312", l: "In library" },
+            { n: "184", l: "Backlog" },
+            { n: "1,940h", l: "Hours left" },
+          ].map((tile) => (
+            <div key={tile.l} className="rounded-lg border border-zinc-800 bg-zinc-900 p-2.5">
+              <p className="text-base font-bold text-zinc-100">{tile.n}</p>
+              <p className="text-[10px] text-zinc-500">{tile.l}</p>
+            </div>
+          ))}
+        </div>
+        <div className="rounded-lg border border-indigo-900/60 bg-indigo-950/30 p-3">
+          <p className="text-[10px] tracking-wide text-indigo-300 uppercase">Random pick</p>
+          <div className="mt-2 flex items-center gap-3">
+            <Cover className="h-12 w-9" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Block className="h-2.5 w-1/2" />
+              <Block className="h-2 w-1/4 bg-zinc-800/70" />
+            </div>
+            <Chip tone="indigo">≈ 14h</Chip>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {["Backlog", "Playing", "Finished", "Shelved", "Dropped"].map((c) => (
+            <Chip key={c}>{c}</Chip>
+          ))}
+        </div>
+      </div>
+    ),
+  },
+  {
+    id: "physical",
+    name: "Physical shelf & box art",
+    tagline: "Cartridges get the same treatment as downloads",
+    body: "A physical copy is filed under the console it belongs to and marked physical rather than digital, so 'do I own this?' has one answer across a shelf and four storefronts. Retro platforms pull genuine retail box-front scans where they exist, and any boxed game can be opened in a 3D viewer that renders the case at its true retail dimensions — an N64 box is landscape, and it looks like one.",
+    points: [
+      "Physical and digital are separate ownership formats, per platform",
+      "Real retail box-front scans on 21 retro platforms",
+      "3D box viewer at true retail case dimensions",
+      "Modern platforms with no scan archive get a synthesised case",
+      "Upload your own cover art, or browse alternates online",
+    ],
+    path: "gamesmanager.app/game/842",
+    preview: (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold text-zinc-200">Owned on</span>
+          <Chip tone="indigo">📦 Physical</Chip>
+        </div>
+        <div className="flex items-end justify-center gap-4 rounded-lg border border-zinc-800 bg-zinc-900 py-5">
+          <div
+            aria-hidden="true"
+            className="h-24 w-20 rounded-sm bg-gradient-to-br from-zinc-600 to-zinc-800 shadow-lg"
+            style={{ transform: "perspective(300px) rotateY(22deg)" }}
+          />
+          <div
+            aria-hidden="true"
+            className="h-20 w-28 rounded-sm bg-gradient-to-br from-zinc-700 to-zinc-800 shadow-lg"
+            style={{ transform: "perspective(300px) rotateY(-16deg)" }}
+          />
+        </div>
+        <p className="text-center text-[11px] text-zinc-500">
+          🖱 Drag to spin · N64 boxes are landscape
+        </p>
+      </div>
+    ),
+  },
+  {
     id: "friends",
     name: "Friends & sharing",
     tagline: "Compare libraries, keep the notes private",
-    body: "Add friends by a short friend code and see what you both own before you buy a co-op game twice. Adding is request-and-accept, so a code on its own never exposes a library, and your private notes are never part of what a friend can see. Collections and checklists you publish can be adopted by anyone as their own private copy.",
+    body: "Add friends by a short friend code and see what you both own before you buy a co-op game twice. Adding is request-and-accept, so a code on its own never exposes a library, and your private notes are never part of what a friend can see. Collections and mission lists you publish can be adopted by anyone as their own private copy, and thumbed up or down so the good ones surface.",
     points: [
       "Friend codes, with request-and-accept in both directions",
       "Overlap counts and an 'in common' filter on their library",
       "Private notes are never exposed to friends",
-      "Publish a collection or checklist; adopters get their own copy",
+      "Publish a collection or list; adopters get their own copy",
+      "Average ratings and play times pooled from everyone who owns a game",
     ],
     path: "gamesmanager.app/friends",
     preview: (
@@ -321,15 +407,58 @@ const FEATURES: Feature[] = [
       </div>
     ),
   },
+  {
+    id: "mobile",
+    name: "Mobile app",
+    tagline: "The barcode scanner lives in your pocket",
+    body: "One account and one library across web and phone. The mobile app is where cataloguing a shelf actually happens — point the camera at a barcode, it queues the game, scan the next one, and confirm the whole batch at the end. Everything you'd want to check away from a desk is there too, and it keeps working on a train.",
+    points: [
+      "Batch barcode scanning: queue a shelf, confirm once",
+      "Library, dashboard, collections, consoles and friends on the phone",
+      "Offline caching, so a signal drop doesn't empty the screen",
+      "Play-order editing and list authoring stay on the web",
+    ],
+    // no store claim here on purpose — the app runs on both phones, but it
+    // isn't published to the App Store or Play, and the preview frame is the
+    // easiest place in the world to accidentally imply that it is
+    path: "Game Manager · on your phone",
+    preview: (
+      <div className="mx-auto max-w-[200px] space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-zinc-200">Scan</span>
+          <Chip tone="indigo">3 queued</Chip>
+        </div>
+        <div className="relative aspect-[3/4] overflow-hidden rounded-lg bg-zinc-950">
+          <div
+            aria-hidden="true"
+            className="absolute inset-x-5 top-1/2 h-0.5 -translate-y-1/2 bg-indigo-500"
+          />
+          <div
+            aria-hidden="true"
+            className="absolute inset-6 rounded border-2 border-dashed border-zinc-700"
+          />
+        </div>
+        <ul className="space-y-1.5">
+          {[0, 1, 2].map((i) => (
+            <li key={i} className="flex items-center gap-2">
+              <Cover className="h-7 w-5" />
+              <Block className="h-2 flex-1" />
+              <Chip tone="emerald">✓</Chip>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ),
+  },
 ];
 
 /**
  * The 'preview dashboard': a scrollable list of features on the left, a
  * sketched screen of the selected one on the right.
  *
- * Built as a tablist rather than an accordion so all six headings stay
- * visible — every one of them is a phrase somebody might search for, and a
- * collapsed accordion buries five of the six.
+ * Built as a tablist rather than an accordion so every heading stays visible
+ * — each one is a phrase somebody might search for, and a collapsed accordion
+ * buries all but one of them.
  */
 export function FeatureShowcase() {
   const [activeId, setActiveId] = useState(FEATURES[0]!.id);

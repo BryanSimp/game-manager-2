@@ -122,11 +122,11 @@ export const GUIDES: Guide[] = [
         heading: "Build the list once, tick it forever",
         paragraphs: [
           "The obvious objection is that entering 51 mission names is worse than the problem it solves. It would be, if you had to type them. In practice there are three routes, in descending order of convenience.",
-          "The first is importing a mission list from a community wiki. This works well for large games with well-maintained wikis and poorly for everything else — every wiki lays its mission pages out differently, so treat an import as a first draft to review rather than a finished list. A good importer prefers returning nothing to returning a wrong list; if it hands you a list of enemy names instead of missions, that is the failure mode to watch for.",
-          "The second is pasting a list you found yourself. The third is typing chapter headings as you reach them, which sounds laborious but is about four words per session and produces the most accurate list of the three.",
+          "The first is taking a list someone else has already published for that game and saving your own copy of it. Your copy is yours — edit it, reorder it, tick it off — and the original is untouched by anything you do. Automated scraping of community wikis sounds like the obvious fourth route and isn't: every wiki lays its mission pages out differently, and an importer that is right two games in six produces lists of enemy names you then have to unpick.",
+          "The second is pasting a list you found yourself, one mission per line. The third is typing chapter headings as you reach them, which sounds laborious but is about four words per session and produces the most accurate list of the three.",
         ],
         bullets: [
-          "Wiki imports are best-effort — always review before trusting one",
+          "A copied list is a private copy — edits never reach the original",
           "Group missions into chapters; numbering should stay continuous across them",
           "Sequential mode lets ticking mission 12 fill in 1–11 in one action",
           "Unticking should clear only that entry, so a skipped mission stays a visible gap",
@@ -251,8 +251,8 @@ export const GUIDES: Guide[] = [
       {
         heading: "Record format and completeness, because they are the collection",
         paragraphs: [
-          "For digital games, ownership is binary. For physical ones it is a spectrum, and the spectrum is most of what makes a physical collection interesting: cartridge only, boxed, boxed with manual, sealed. A shelf of forty loose cartridges and a shelf of forty complete-in-box copies are very different collections that a plain owned-list records identically.",
-          "Record this at entry time. Retrofitting completeness data across two hundred games later means handling every box again, and you will not do it.",
+          "For digital games, ownership is binary. For physical ones it is a spectrum — cartridge only, boxed, boxed with manual, sealed — and a shelf of forty loose cartridges is a very different collection from forty complete-in-box copies. Game Manager records the half of that which changes what you can do with a game: physical or digital, per platform. Grading beyond that is a note on the game, at least for now.",
+          "Whatever you record, record it at entry time. Retrofitting condition data across two hundred games later means handling every box again, and you will not do it.",
         ],
       },
       {
@@ -267,7 +267,7 @@ export const GUIDES: Guide[] = [
         heading: "One catalogue, both halves of the collection",
         paragraphs: [
           "The final step is not keeping the physical catalogue separate. The question you actually ask is 'do I own this game?', not 'do I own this game on a disc?', and a system that answers only half of it sends you to check two places.",
-          "File physical copies under the console they belong to, with the format recorded, in the same library as everything else. Then 'do I own Metroid Prime?' has one answer — yes, on GameCube, boxed, and also on Switch digitally — which is the answer you wanted both times.",
+          "File physical copies under the console they belong to, marked physical rather than digital, in the same library as everything else. Then 'do I own Metroid Prime?' has one answer — yes, a disc for the GameCube, and also digitally on Switch — which is the answer you wanted both times.",
         ],
       },
     ],

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { authClient } from "../../lib/auth.js";
+import { DemoButton } from "./DemoButton.js";
 
 /** In-page anchors, used on the landing page where the sections exist. */
 const SECTIONS = [
@@ -17,6 +18,9 @@ const primaryClass =
 
 const secondaryClass =
   "rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-zinc-800";
+
+const demoClass =
+  "rounded-lg border border-indigo-600 bg-indigo-950/40 px-4 py-2 text-sm font-semibold text-indigo-200 transition hover:bg-indigo-900/50";
 
 /**
  * Sticky top navigation for the public pages.
@@ -59,6 +63,7 @@ export function MarketingNav({ variant = "page" }: { variant?: "landing" | "page
     </Link>
   ) : (
     <>
+      <DemoButton className={demoClass} label="Demo" />
       <Link to="/login" className={secondaryClass} onClick={() => setOpen(false)}>
         Log in
       </Link>
