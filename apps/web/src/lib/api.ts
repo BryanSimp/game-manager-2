@@ -10,6 +10,8 @@ import { DEMO_WRITE_MESSAGE, demoHeaders, isDemo } from "./demo.js";
  * actual guarantee — but a 403 from the network is a worse thing to show
  * someone than a sentence explaining that the demo is a demo, and this way
  * every existing error path in the app already says the right thing.
+ *
+ * Admin *edit* mode is deliberately not blocked: it exists to write.
  */
 const demoAwareFetch: typeof fetch = (input, init) => {
   const method = (init?.method ?? "GET").toUpperCase();

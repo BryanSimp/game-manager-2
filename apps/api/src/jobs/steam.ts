@@ -12,7 +12,7 @@ import {
   getSchemaAchievements,
 } from "../services/steam.js";
 import { getBoss, STEAM_IMPORT_QUEUE, STEAM_SYNC_QUEUE } from "../services/queue.js";
-import { logEvent, logScrape } from "../services/analytics.js";
+import { logEvent } from "../services/analytics.js";
 
 /** Confidence needed to add a Steam game to the library without review. */
 const AUTO_ADD_THRESHOLD = 0.85;
@@ -337,17 +337,13 @@ export async function processSteamSync(userId: string): Promise<void> {
 
 export async function startSteamWorkers(): Promise<void> {
   const boss = await getBoss();
+  // a throw is how pg-boss learns a job failed, so these deliberately don't
+  // catch — the retry policy is the error handling
   await boss.work<{ userId: string }>(
     STEAM_IMPORT_QUEUE,
     async (jobs: Array<{ data: { userId: string } }>) => {
       for (const job of jobs) {
-        try {
-          await processSteamImport(job.data.userId);
-          logScrape("steam_import", true);
-        } catch (err) {
-          logScrape("steam_import", false, err instanceof Error ? err.message : "import failed");
-          throw err;
-        }
+        await processSteamImport(job.data.userId);
       }
     },
   );
@@ -355,13 +351,7 @@ export async function startSteamWorkers(): Promise<void> {
     STEAM_SYNC_QUEUE,
     async (jobs: Array<{ data: { userId: string } }>) => {
       for (const job of jobs) {
-        try {
-          await processSteamSync(job.data.userId);
-          logScrape("steam_sync", true);
-        } catch (err) {
-          logScrape("steam_sync", false, err instanceof Error ? err.message : "sync failed");
-          throw err;
-        }
+        await processSteamSync(job.data.userId);
       }
     },
   );

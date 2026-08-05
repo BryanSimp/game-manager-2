@@ -23,6 +23,26 @@ import { db, schema } from "../db/index.js";
 /** Opt-in header. A header, not a cookie: nothing about it should persist. */
 export const DEMO_HEADER = "x-gm-demo";
 
+/**
+ * Admin curation of the demo library.
+ *
+ * "Edit the demo" doesn't get a bespoke CRUD screen, because the app already
+ * has twenty of them. An admin sends this header instead and every route acts
+ * on the demo account's data through the ordinary Library, Collections and
+ * Progress UIs — the tour is curated with the same tools it's showing off.
+ *
+ * A **different header from the tour's** on purpose: the write block keys on
+ * `x-gm-demo`, so an edit session isn't refused, and no request can be both.
+ * It is honoured only for a signed-in admin (see `plugins/auth.ts`); from
+ * anyone else it's an inert string.
+ */
+export const DEMO_EDIT_HEADER = "x-gm-demo-edit";
+
+export function isDemoEditRequest(headers: Record<string, unknown>): boolean {
+  const value = headers[DEMO_EDIT_HEADER];
+  return value === "1" || value === "true";
+}
+
 /** Methods a demo visitor may use. Everything else is refused up front. */
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 

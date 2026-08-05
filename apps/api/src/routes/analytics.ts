@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { count, eq, sql } from "drizzle-orm";
-import type { AdminAnalyticsOverview, ScraperHealth } from "@gm/shared";
+import type { AdminAnalyticsOverview } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireAdmin } from "../plugins/auth.js";
 import { flushEvents } from "../services/analytics.js";
@@ -130,49 +130,4 @@ export function registerAnalyticsRoutes(app: FastifyInstance): void {
     return overview;
   });
 
-  app.get("/api/admin/analytics/scrapers", async (request, reply) => {
-    const user = await requireAdmin(request, reply);
-    if (!user) return;
-    await flushEvents();
-
-    const sourceRows = (
-      await db.execute(sql`
-        SELECT meta->>'source' AS source,
-               COUNT(*)::int AS total,
-               COUNT(*) FILTER (WHERE (meta->>'ok')::boolean)::int AS ok,
-               to_char(max(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_at
-        FROM analytics_events
-        WHERE type = 'scrape' AND created_at > now() - interval '7 days'
-        GROUP BY 1
-        ORDER BY 1
-      `)
-    ).rows as Array<{ source: string; total: number; ok: number; last_at: string | null }>;
-
-    const failureRows = (
-      await db.execute(sql`
-        SELECT meta->>'source' AS source,
-               meta->>'detail' AS detail,
-               to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at
-        FROM analytics_events
-        WHERE type = 'scrape'
-          AND NOT (meta->>'ok')::boolean
-          AND created_at > now() - interval '7 days'
-        ORDER BY created_at DESC
-        LIMIT 20
-      `)
-    ).rows as Array<{ source: string; detail: string | null; at: string }>;
-
-    const health: ScraperHealth = {
-      since: new Date(Date.now() - 7 * 86_400_000).toISOString(),
-      sources: sourceRows.map((r) => ({
-        source: r.source,
-        total: r.total,
-        ok: r.ok,
-        rate: r.total > 0 ? r.ok / r.total : 0,
-        lastAt: r.last_at,
-      })),
-      failures: failureRows,
-    };
-    return health;
-  });
 }

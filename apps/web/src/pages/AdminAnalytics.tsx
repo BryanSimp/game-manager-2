@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import * as Plot from "@observablehq/plot";
-import type { AdminAnalyticsOverview, ScraperHealth } from "@gm/shared";
+import type { AdminAnalyticsOverview } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { AdminFeedbackPanel } from "../components/AdminFeedbackPanel.js";
@@ -22,16 +22,6 @@ const SURFACE = "#18181b"; // zinc-900
 const GRID = "#27272a"; // zinc-800
 const AXIS_INK = "#a1a1aa"; // zinc-400
 const LABEL_INK = "#e4e4e7"; // zinc-200
-
-const SOURCE_LABELS: Record<string, string> = {
-  missions: "Wiki missions",
-  boxart: "Box art",
-  upc: "Barcode (UPC)",
-  console_art: "Console art",
-  steam_import: "Steam import",
-  steam_sync: "Steam sync",
-  ocr: "OCR import",
-};
 
 /** Renders an Observable Plot figure, rebuilt on data change and resize. */
 function PlotFigure({ render }: { render: (width: number) => SVGSVGElement | HTMLElement }) {
@@ -114,15 +104,6 @@ export function AdminAnalyticsPage() {
     queryKey: ["admin-analytics"],
     queryFn: () => api.getAdminAnalytics(),
     enabled: isAdmin && tab === "overview",
-    placeholderData: keepPreviousData,
-  });
-  // the "live" half: scraper outcomes re-poll while the page is open
-  const scrapers = useQuery({
-    queryKey: ["admin-scrapers"],
-    queryFn: () => api.getScraperHealth(),
-    // polling every 15s behind a tab nobody is looking at is pure noise
-    enabled: isAdmin && tab === "overview",
-    refetchInterval: 15_000,
     placeholderData: keepPreviousData,
   });
 
@@ -209,51 +190,6 @@ export function AdminAnalyticsPage() {
     [overview.data?.funnel],
   );
 
-  const renderScrapers = useCallback(
-    (width: number) => {
-      const sources = (scrapers.data?.sources ?? []).map((s) => ({
-        ...s,
-        label: SOURCE_LABELS[s.source] ?? s.source,
-        pct: s.rate * 100,
-      }));
-      const labels = sources.map((s) => s.label);
-      return Plot.plot({
-        width,
-        height: Math.max(90, sources.length * 44 + 40),
-        marginLeft: 120,
-        marginRight: 60,
-        style: { background: "transparent", color: AXIS_INK, fontSize: "11px" },
-        x: { domain: [0, 100], label: "success %", grid: true },
-        y: { domain: labels, label: null, tickSize: 0, padding: 0.4 },
-        marks: [
-          Plot.gridX({ stroke: GRID, strokeOpacity: 1 }),
-          // meter track: a recessive step of the same hue, full width
-          Plot.barX(sources, { y: "label", x: 100, fill: ACCENT, fillOpacity: 0.1, rx: 4 }),
-          Plot.barX(sources, {
-            y: "label",
-            x: "pct",
-            fill: ACCENT,
-            rx2: 4,
-            tip: true,
-            title: (d: { label: string; ok: number; total: number }) =>
-              `${d.label}\n${d.ok} of ${d.total} succeeded`,
-          }),
-          Plot.text(sources, {
-            y: "label",
-            x: "pct",
-            text: (d: { pct: number }) => `${Math.round(d.pct)}%`,
-            dx: 8,
-            textAnchor: "start",
-            fill: LABEL_INK,
-            fontWeight: 600,
-          }),
-          Plot.ruleX([0], { stroke: GRID }),
-        ],
-      });
-    },
-    [scrapers.data?.sources],
-  );
-
   if (me.data && !isAdmin) {
     return (
       <Shell>
@@ -263,8 +199,6 @@ export function AdminAnalyticsPage() {
   }
 
   const eng = overview.data?.engagement;
-  const failures = scrapers.data?.failures ?? [];
-  const hasScrapes = (scrapers.data?.sources.length ?? 0) > 0;
 
   return (
     <Shell>
@@ -344,61 +278,6 @@ export function AdminAnalyticsPage() {
           </details>
         </Card>
       </div>
-
-      <Card
-        title="Scraper health"
-        subtitle="External fetches over the last 7 days — wiki, box art, barcode, Steam, OCR"
-        aside={
-          <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-            </span>
-            Live · refreshes every 15s
-          </span>
-        }
-      >
-        {hasScrapes ? (
-          <PlotFigure render={renderScrapers} />
-        ) : (
-          <p className="py-4 text-sm text-zinc-500">
-            No scraper activity in the last 7 days. Outcomes appear here as imports, box-art
-            fetches, barcode lookups and wiki searches run.
-          </p>
-        )}
-
-        {failures.length > 0 ? (
-          <div className="mt-4">
-            <h3 className="mb-2 text-xs font-semibold text-zinc-300">Recent failures</h3>
-            <div className="max-h-56 overflow-y-auto rounded-lg border border-zinc-800">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-zinc-950/50 text-left text-zinc-500">
-                    <th className="px-3 py-2 font-medium">When</th>
-                    <th className="px-3 py-2 font-medium">Source</th>
-                    <th className="px-3 py-2 font-medium">Detail</th>
-                  </tr>
-                </thead>
-                <tbody className="text-zinc-400">
-                  {failures.map((f, i) => (
-                    <tr key={i} className="border-t border-zinc-800">
-                      <td className="px-3 py-2 whitespace-nowrap [font-variant-numeric:tabular-nums]">
-                        {new Date(f.at).toLocaleString()}
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {SOURCE_LABELS[f.source] ?? f.source}
-                      </td>
-                      <td className="px-3 py-2">{f.detail ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : hasScrapes ? (
-          <p className="mt-3 text-xs text-zinc-500">No failures in the last 7 days.</p>
-        ) : null}
-      </Card>
       </div>
     </Shell>
   );

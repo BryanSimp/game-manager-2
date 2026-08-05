@@ -3,7 +3,6 @@ import { db, schema } from "../db/index.js";
 import { getSetting, setSetting } from "./settings.js";
 import { saveUploadedImage } from "./images.js";
 import { similarity } from "./noise-filter.js";
-import { logScrape } from "./analytics.js";
 
 /**
  * Real retail box-front scans from the libretro-thumbnails archive
@@ -133,7 +132,6 @@ export async function ensureBoxArt(
 
     const files = await getIndex(repo);
     if (!files || files.length === 0) {
-      logScrape("boxart", false, `index unavailable: ${repo}`);
       return; // try again next time
     }
 
@@ -149,7 +147,6 @@ export async function ensureBoxArt(
     }
 
     if (!bestFile || bestScore < MATCH_THRESHOLD) {
-      logScrape("boxart", false, `no matching scan: ${title} (${platformName})`);
       await db
         .insert(schema.gameBoxArt)
         .values({ gameId, platformId, imageId: null, source: "miss" })
@@ -158,7 +155,6 @@ export async function ensureBoxArt(
     }
 
     const imageId = await downloadScan(repo, bestFile);
-    logScrape("boxart", imageId !== null, imageId ? undefined : `download failed: ${bestFile}`);
     await db
       .insert(schema.gameBoxArt)
       .values({ gameId, platformId, imageId, source: imageId ? "libretro" : "miss" })

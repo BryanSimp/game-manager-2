@@ -20,21 +20,11 @@ export type AnalyticsEventType =
   // average is built out of
   | "time_submitted"
   // a bug report, feature request or opinion filed from the Feedback page
-  | "feedback_submitted"
-  | "scrape";
+  | "feedback_submitted";
 
-/**
- * External sources the app fetches from — the system-health view groups by
- * this. 'missions' is gone (the Fandom scraper was removed in phase 16); the
- * admin chart groups by the stored value, so historical rows still render.
- */
-export type ScrapeSource =
-  | "boxart"
-  | "upc"
-  | "console_art"
-  | "steam_import"
-  | "steam_sync"
-  | "ocr";
+// 'scrape' events are gone as of phase 19 along with the scraper-health card
+// that was the only thing reading them. Historical rows stay in the table —
+// nothing writes the type any more, and no query looks for it.
 
 interface PendingEvent {
   userId: string | null;
@@ -65,11 +55,6 @@ export function logEvent(
     // never keep the process alive just to write telemetry
     timer.unref();
   }
-}
-
-/** Outcome of one external fetch (box art repo, UPC db, Steam API…). */
-export function logScrape(source: ScrapeSource, ok: boolean, detail?: string): void {
-  logEvent("scrape", null, { source, ok, ...(detail ? { detail: detail.slice(0, 300) } : {}) });
 }
 
 export async function flushEvents(): Promise<void> {

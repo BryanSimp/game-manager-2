@@ -63,12 +63,14 @@ export function MarketingNav({ variant = "page" }: { variant?: "landing" | "page
     </Link>
   ) : (
     <>
+      {/* Demo sits between the two, on every surface that shows all three:
+          it's the middle step between "who are you" and "let me in" */}
+      <Link to="/register" className={primaryClass} onClick={() => setOpen(false)}>
+        Get started
+      </Link>
       <DemoButton className={demoClass} label="Demo" />
       <Link to="/login" className={secondaryClass} onClick={() => setOpen(false)}>
         Log in
-      </Link>
-      <Link to="/register" className={primaryClass} onClick={() => setOpen(false)}>
-        Get started
       </Link>
     </>
   );

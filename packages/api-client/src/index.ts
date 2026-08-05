@@ -37,6 +37,7 @@ import type {
   CollectionLayoutInput,
   CollectionSummary,
   DashboardData,
+  DemoAdminView,
   Health,
   ImportJobDetail,
   ImportJobSummary,
@@ -47,7 +48,6 @@ import type {
   PublicCollection,
   PublicCollectionPage,
   PublicCollectionQuery,
-  ScraperHealth,
   SearchOptions,
   SearchResponse,
   Tag,
@@ -139,6 +139,26 @@ export class ApiClient {
    */
   demoStatus(): Promise<{ available: boolean; name: string | null }> {
     return this.request("/api/demo/status");
+  }
+
+  // ---- demo administration ----
+
+  /** What's in the demo library, and how the last rebuild went. */
+  getAdminDemo(): Promise<DemoAdminView> {
+    return this.request<DemoAdminView>("/api/admin/demo");
+  }
+
+  /**
+   * Start a rebuild. Returns as soon as the job is running — poll
+   * `getAdminDemo()` for progress; a minute of IGDB lookups is well past any
+   * sensible request timeout.
+   */
+  seedDemo(): Promise<{ started: true }> {
+    return this.request("/api/admin/demo/seed", { method: "POST" });
+  }
+
+  deleteDemo(): Promise<{ ok: true; removed: number }> {
+    return this.request("/api/admin/demo", { method: "DELETE" });
   }
 
   // ---- password recovery (anonymous) ----
@@ -771,11 +791,6 @@ export class ApiClient {
   /** Funnel, DAU and engagement aggregates for the admin analytics page. */
   getAdminAnalytics(): Promise<AdminAnalyticsOverview> {
     return this.request<AdminAnalyticsOverview>("/api/admin/analytics/overview");
-  }
-
-  /** Success rates for every external fetch source, last 7 days. */
-  getScraperHealth(): Promise<ScraperHealth> {
-    return this.request<ScraperHealth>("/api/admin/analytics/scrapers");
   }
 
   // ---- feedback ----

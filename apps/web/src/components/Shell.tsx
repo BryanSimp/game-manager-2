@@ -3,9 +3,9 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { authClient } from "../lib/auth.js";
 import { api } from "../lib/api.js";
-import { useDemoMode } from "../lib/demo.js";
+import { isDemoEdit, useDemoMode } from "../lib/demo.js";
 import { AdBanner } from "./ads/AdBanner.js";
-import { DemoBanner } from "./DemoBanner.js";
+import { DemoBanner, DemoEditBanner } from "./DemoBanner.js";
 import { Footer } from "./Footer.js";
 
 // stamped by CI via the APP_VERSION docker build-arg (short commit sha)
@@ -19,6 +19,8 @@ export function Shell({ children }: { children: ReactNode }) {
   // it has to survive every check that would otherwise send them to /login.
   // A real session ends it — see useDemoMode.
   const demo = useDemoMode();
+  // an admin curating the demo: signed in, writes allowed, different warning
+  const editingDemo = isDemoEdit();
 
   useEffect(() => {
     if (!demo && !isPending && !session) navigate({ to: "/login" });
@@ -54,6 +56,7 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
       {demo && <DemoBanner />}
+      {editingDemo && <DemoEditBanner />}
       <header className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3">
           <Link to="/" className="mr-2 shrink-0 text-base font-bold tracking-tight">
@@ -66,6 +69,14 @@ export function Shell({ children }: { children: ReactNode }) {
               className="mr-1 shrink-0 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase"
             >
               Demo
+            </span>
+          )}
+          {editingDemo && (
+            <span
+              title="You're editing the demo library, not your own."
+              className="mr-1 shrink-0 rounded-full bg-amber-600 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase"
+            >
+              Editing demo
             </span>
           )}
           <nav className="flex flex-1 items-center gap-0.5 overflow-x-auto">
@@ -106,6 +117,9 @@ export function Shell({ children }: { children: ReactNode }) {
                 </Link>
                 <Link to="/admin/analytics" className={link}>
                   Analytics
+                </Link>
+                <Link to="/admin/demo" className={link}>
+                  Demo
                 </Link>
               </>
             )}

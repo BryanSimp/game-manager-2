@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "../auth.js";
-import { demoUser, isDemoRequest } from "../services/demo.js";
+import { demoUser, isDemoEditRequest, isDemoRequest } from "../services/demo.js";
 
 export interface SessionUser {
   id: string;
@@ -15,6 +15,12 @@ export interface SessionUser {
    * doesn't land in the DAU chart as a user.
    */
   isDemo?: boolean;
+  /**
+   * True when an admin is curating the demo library through the normal UI:
+   * the id is the demo account's, the role is still theirs. Writes are
+   * allowed — the view-only hook keys on the tour's header, not this one.
+   */
+  demoEdit?: boolean;
 }
 
 declare module "fastify" {
@@ -43,11 +49,32 @@ export async function getSessionUser(request: FastifyRequest): Promise<SessionUs
     return null;
   }
   const { user } = session;
+  const role = (user as { role?: string }).role ?? "user";
+
+  /*
+   * Admin curating the demo: act as the demo account, keep the admin's own
+   * role. The id is what every route files data under, so the edits land on
+   * the demo library; the role is a fact about the person holding the
+   * session, so `requireAdmin` still passes and the admin pages stay
+   * reachable while editing.
+   *
+   * Gated on `role === "admin"` — from anyone else the header does nothing,
+   * which is the only thing standing between it and an account takeover.
+   */
+  if (role === "admin" && isDemoEditRequest(request.headers)) {
+    const demo = await demoUser();
+    if (demo) {
+      const editing: SessionUser = { ...demo, role, isDemo: true, demoEdit: true };
+      request.sessionUser = editing;
+      return editing;
+    }
+  }
+
   const sessionUser: SessionUser = {
     id: user.id,
     email: user.email,
     name: user.name,
-    role: (user as { role?: string }).role ?? "user",
+    role,
   };
   request.sessionUser = sessionUser;
   return sessionUser;

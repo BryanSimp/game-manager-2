@@ -245,18 +245,29 @@ export interface AdminAnalyticsOverview {
     sessions30d: number;
   };
 }
-export interface ScraperHealth {
-  /** window the rates cover (ISO timestamp of its start) */
-  since: string;
-  sources: Array<{
-    source: string;
-    total: number;
-    ok: number;
-    /** 0..1 */
-    rate: number;
-    lastAt: string | null;
-  }>;
-  failures: Array<{ source: string; detail: string | null; at: string }>;
+/** What the admin demo page reads: what's in the demo, and how the last build went. */
+export interface DemoAdminView {
+  stats: {
+    exists: boolean;
+    userId: string | null;
+    name: string | null;
+    games: number;
+    collections: number;
+    lists: number;
+    tags: number;
+    friends: number;
+    consoles: number;
+  };
+  seed: {
+    running: boolean;
+    startedAt: string | null;
+    finishedAt: string | null;
+    error: string | null;
+    /** the same lines the CLI prints, newest last */
+    log: string[];
+  };
+  /** without IGDB the seed still runs, it just produces games with no art */
+  igdbConfigured: boolean;
 }
 export interface TagInput {
   name: string;

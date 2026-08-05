@@ -1,73 +1,96 @@
+import { useEffect } from "react";
+import { authClient } from "./auth.js";
+
 /**
- * Read-only demo mode.
+ * Demo modes. There are two, and they are opposites.
  *
- * `/demo` turns this on and the whole app runs against a seeded showcase
- * account — the real pages, the real routes, real data that happens to be
- * invented. There is no second, fake version of the app to keep in step,
- * which is the only version of a demo that survives contact with a changelog.
- *
- * Writes are refused twice, on purpose. The server refuses any demo request
- * that isn't a read (`server.ts`), which is the guarantee; the client refuses
- * them too (`lib/api.ts`) so the message a visitor sees is a sentence about
+ * **tour** — `/demo`. The whole app runs against a seeded showcase account
+ * for a signed-out visitor. Reads only; every write is refused twice, by the
+ * server (`server.ts`) and again here so the message is a sentence about
  * signing up rather than a 403 from the network tab.
+ *
+ * **edit** — an admin curating that same account from `/admin/demo`. Writes
+ * are allowed, because the point is to change what visitors will see. The
+ * app is the editor: there's no bespoke demo-content CRUD, just the ordinary
+ * Library, Collections and Progress screens pointed at the demo's data.
+ *
+ * They use different headers so a request can never be both, and the
+ * view-only hook on the server keys on the tour's. Edit mode is additionally
+ * gated on the requester actually being an admin, server-side — the header
+ * alone does nothing.
  *
  * State lives in sessionStorage rather than a URL param or a cookie: it has
  * to survive in-app navigation, must not survive the tab closing, and must
  * never ride along on a request from a real signed-in session in another tab.
  */
 
-import { useEffect } from "react";
-import { authClient } from "./auth.js";
-
 const KEY = "gm_demo";
 
-/** Header the API reads to serve the demo account. */
 export const DEMO_HEADER = "x-gm-demo";
+export const DEMO_EDIT_HEADER = "x-gm-demo-edit";
 
 export const DEMO_WRITE_MESSAGE =
   "The demo is view-only — create a free account to build a library of your own.";
 
-let active = read();
+export type DemoMode = "tour" | "edit" | null;
 
-function read(): boolean {
+let mode: DemoMode = read();
+
+function read(): DemoMode {
   try {
-    return sessionStorage.getItem(KEY) === "1";
+    const value = sessionStorage.getItem(KEY);
+    return value === "tour" || value === "edit" ? value : null;
   } catch {
-    // private mode or a blocked storage partition: the tour still works for
+    // private mode or a blocked storage partition: the mode still works for
     // the life of the page, it just won't survive a reload
-    return false;
+    return null;
   }
 }
 
+function write(next: DemoMode): void {
+  mode = next;
+  try {
+    if (next) sessionStorage.setItem(KEY, next);
+    else sessionStorage.removeItem(KEY);
+  } catch {
+    /* see read() */
+  }
+}
+
+export function demoMode(): DemoMode {
+  return mode;
+}
+
+/** True only for the read-only visitor tour, which is what blocks writes. */
 export function isDemo(): boolean {
-  return active;
+  return mode === "tour";
+}
+
+export function isDemoEdit(): boolean {
+  return mode === "edit";
 }
 
 export function startDemo(): void {
-  active = true;
-  try {
-    sessionStorage.setItem(KEY, "1");
-  } catch {
-    /* see read() */
-  }
+  write("tour");
+}
+
+export function startDemoEdit(): void {
+  write("edit");
 }
 
 export function exitDemo(): void {
-  active = false;
-  try {
-    sessionStorage.removeItem(KEY);
-  } catch {
-    /* see read() */
-  }
+  write(null);
 }
 
-/** Headers every request carries while the tour is on. */
+/** Headers every request carries while a demo mode is on. */
 export function demoHeaders(): Record<string, string> {
-  return active ? { [DEMO_HEADER]: "1" } : {};
+  if (mode === "tour") return { [DEMO_HEADER]: "1" };
+  if (mode === "edit") return { [DEMO_EDIT_HEADER]: "1" };
+  return {};
 }
 
 /**
- * Demo mode as the UI should read it: **a real session always wins**.
+ * The visitor tour as the UI should read it: **a real session always wins**.
  *
  * Signing up is the point of the tour, and better-auth's own client doesn't
  * go through our api-client, so nothing about signing in clears the flag on
@@ -76,14 +99,17 @@ export function demoHeaders(): Record<string, string> {
  * refused — their account, apparently broken. The server already prefers a
  * real session over the demo header; this makes the client agree, and drops
  * the flag so the next reload is clean.
+ *
+ * Edit mode is exempt: it *requires* a session, and ending it is a deliberate
+ * click on the banner rather than something signing in should undo.
  */
 export function useDemoMode(): boolean {
   const { data: session } = authClient.useSession();
-  const demo = isDemo();
+  const tour = isDemo();
 
   useEffect(() => {
     if (session && isDemo()) exitDemo();
   }, [session]);
 
-  return demo && !session;
+  return tour && !session;
 }
