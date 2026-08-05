@@ -285,6 +285,11 @@ export interface Preferences {
   showRating: boolean;
   /** category-badge opacity in percent, applied wherever badges render */
   badgeOpacity: number;
+  /**
+   * Covers per row on the web library grid at full width, 1–8. Narrow
+   * breakpoints keep their own smaller counts — this is the widest step.
+   */
+  libraryColumns: number;
 }
 export type ImportSource = "screenshot" | "shelf_photo" | "text_paste" | "steam";
 export type ImportJobStatus = "pending" | "ocr" | "matching" | "review" | "done" | "failed";

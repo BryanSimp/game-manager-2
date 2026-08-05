@@ -44,163 +44,166 @@ export function PreferencesPage() {
     <Shell>
       <h1 className="mb-6 text-xl font-bold">Preferences</h1>
 
-      <SteamCard />
+      {/* two panels to a row on a wide screen — one below `lg` */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <SteamCard />
 
-      <section className="mb-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-        <h2 className="text-lg font-semibold">Categories</h2>
-        <p className="mt-1 text-sm text-zinc-400">
-          Built-in categories can be recoloured but not removed. Add your own for anything
-          else you want to track.
-        </p>
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h2 className="text-lg font-semibold">Categories</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Built-in categories can be recoloured but not removed. Add your own for anything
+            else you want to track.
+          </p>
 
-        <div className="mt-4 space-y-2">
-          {(categories ?? [])
-            .filter((c) => !c.builtIn)
-            .map((c) => (
-              <CustomCategoryRow key={c.key} id={c.key} name={c.label} count={c.count} />
-            ))}
-        </div>
+          <div className="mt-4 space-y-2">
+            {(categories ?? [])
+              .filter((c) => !c.builtIn)
+              .map((c) => (
+                <CustomCategoryRow key={c.key} id={c.key} name={c.label} count={c.count} />
+              ))}
+          </div>
 
-        <form
-          onSubmit={(ev) => {
-            ev.preventDefault();
-            if (newCategory.trim()) createCategory.mutate(newCategory.trim());
-          }}
-          className="mt-3 flex gap-2"
-        >
-          <input
-            value={newCategory}
-            onChange={(ev) => setNewCategory(ev.target.value)}
-            placeholder="+ new category (e.g. Replaying)"
-            className="min-w-0 flex-1 rounded-lg border border-dashed border-zinc-700 bg-transparent px-3 py-1.5 text-sm outline-none placeholder:text-zinc-600 focus:border-indigo-500"
-          />
-          {newCategory.trim() && (
-            <button
-              type="submit"
-              disabled={createCategory.isPending}
-              className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold hover:bg-indigo-500"
+          <form
+            onSubmit={(ev) => {
+              ev.preventDefault();
+              if (newCategory.trim()) createCategory.mutate(newCategory.trim());
+            }}
+            className="mt-3 flex gap-2"
+          >
+            <input
+              value={newCategory}
+              onChange={(ev) => setNewCategory(ev.target.value)}
+              placeholder="+ new category (e.g. Replaying)"
+              className="min-w-0 flex-1 rounded-lg border border-dashed border-zinc-700 bg-transparent px-3 py-1.5 text-sm outline-none placeholder:text-zinc-600 focus:border-indigo-500"
+            />
+            {newCategory.trim() && (
+              <button
+                type="submit"
+                disabled={createCategory.isPending}
+                className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold hover:bg-indigo-500"
+              >
+                Add
+              </button>
+            )}
+          </form>
+          {categoryError && <p className="mt-2 text-xs text-amber-400">{categoryError}</p>}
+        </section>
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h2 className="text-lg font-semibold">New game defaults</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Where a game lands when you add one without saying otherwise — including from
+            quick add, imports and barcode scans.
+          </p>
+
+          <label className="mt-4 flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+            Category
+            <select
+              value={p?.defaultStatus ?? "backlog"}
+              onChange={(e) => save.mutate({ defaultStatus: e.target.value })}
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
             >
-              Add
+              {(categories ?? []).map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+            Platform
+            <ConsoleSelect
+              value={p?.defaultPlatformId ?? null}
+              onChange={(platformId) => save.mutate({ defaultPlatformId: platformId })}
+              placeholder="Don't set one"
+            />
+            {p?.defaultPlatformId && (
+              <button
+                onClick={() =>
+                  save.mutate({
+                    defaultPlatformFormat:
+                      p.defaultPlatformFormat === "digital" ? "physical" : "digital",
+                  })
+                }
+                title="Toggle physical/digital"
+                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
+              >
+                {p.defaultPlatformFormat === "physical" ? "📦 Physical" : "💾 Digital"}
+              </button>
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h2 className="text-lg font-semibold">Category colors</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Pick your own color for each category — used on cards, badges, and the dashboard.
+          </p>
+          <div className="mt-4 space-y-3">
+            {(categories ?? []).map((cat) => {
+              const s = cat.key;
+              const current = p?.statusColors?.[s] ?? cat.color ?? DEFAULT_HEX[s] ?? "#71717a";
+              return (
+                <div key={s} className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={current}
+                    onChange={(e) => setStatusColor(s, e.target.value)}
+                    className="h-8 w-12 cursor-pointer rounded border border-zinc-700 bg-transparent"
+                  />
+                  <span
+                    className="rounded-full border px-2.5 py-0.5 text-xs font-medium"
+                    style={{
+                      backgroundColor: `${current}26`,
+                      color: current,
+                      borderColor: `${current}66`,
+                    }}
+                  >
+                    {cat.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {p?.statusColors && (
+            <button
+              onClick={() => save.mutate({ statusColors: null })}
+              className="mt-4 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
+            >
+              Reset to defaults
             </button>
           )}
-        </form>
-        {categoryError && <p className="mt-2 text-xs text-amber-400">{categoryError}</p>}
-      </section>
+        </section>
 
-      <section className="mb-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-        <h2 className="text-lg font-semibold">New game defaults</h2>
-        <p className="mt-1 text-sm text-zinc-400">
-          Where a game lands when you add one without saying otherwise — including from
-          quick add, imports and barcode scans.
-        </p>
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h2 className="text-lg font-semibold">Library cards</h2>
+          <div className="mt-4 space-y-3">
+            <Toggle
+              label="Show time-to-beat badge"
+              checked={p?.showTimeBadge ?? true}
+              onChange={(v) => save.mutate({ showTimeBadge: v })}
+            />
+            <Toggle
+              label="Show platform names"
+              checked={p?.showPlatformBadge ?? true}
+              onChange={(v) => save.mutate({ showPlatformBadge: v })}
+            />
+            <Toggle
+              label="Show your star rating"
+              checked={p?.showRating ?? true}
+              onChange={(v) => save.mutate({ showRating: v })}
+            />
+          </div>
 
-        <label className="mt-4 flex flex-wrap items-center gap-2 text-sm text-zinc-300">
-          Category
-          <select
-            value={p?.defaultStatus ?? "backlog"}
-            onChange={(e) => save.mutate({ defaultStatus: e.target.value })}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
-          >
-            {(categories ?? []).map((c) => (
-              <option key={c.key} value={c.key}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-300">
-          Platform
-          <ConsoleSelect
-            value={p?.defaultPlatformId ?? null}
-            onChange={(platformId) => save.mutate({ defaultPlatformId: platformId })}
-            placeholder="Don't set one"
+          <BadgeOpacity
+            value={p?.badgeOpacity ?? 100}
+            categories={categories ?? []}
+            prefs={p}
+            onChange={(badgeOpacity) => save.mutate({ badgeOpacity })}
           />
-          {p?.defaultPlatformId && (
-            <button
-              onClick={() =>
-                save.mutate({
-                  defaultPlatformFormat:
-                    p.defaultPlatformFormat === "digital" ? "physical" : "digital",
-                })
-              }
-              title="Toggle physical/digital"
-              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
-            >
-              {p.defaultPlatformFormat === "physical" ? "📦 Physical" : "💾 Digital"}
-            </button>
-          )}
-        </div>
-      </section>
-
-      <section className="mb-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-        <h2 className="text-lg font-semibold">Category colors</h2>
-        <p className="mt-1 text-sm text-zinc-400">
-          Pick your own color for each category — used on cards, badges, and the dashboard.
-        </p>
-        <div className="mt-4 space-y-3">
-          {(categories ?? []).map((cat) => {
-            const s = cat.key;
-            const current = p?.statusColors?.[s] ?? cat.color ?? DEFAULT_HEX[s] ?? "#71717a";
-            return (
-              <div key={s} className="flex items-center gap-3">
-                <input
-                  type="color"
-                  value={current}
-                  onChange={(e) => setStatusColor(s, e.target.value)}
-                  className="h-8 w-12 cursor-pointer rounded border border-zinc-700 bg-transparent"
-                />
-                <span
-                  className="rounded-full border px-2.5 py-0.5 text-xs font-medium"
-                  style={{
-                    backgroundColor: `${current}26`,
-                    color: current,
-                    borderColor: `${current}66`,
-                  }}
-                >
-                  {cat.label}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-        {p?.statusColors && (
-          <button
-            onClick={() => save.mutate({ statusColors: null })}
-            className="mt-4 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
-          >
-            Reset to defaults
-          </button>
-        )}
-      </section>
-
-      <section className="max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-        <h2 className="text-lg font-semibold">Library cards</h2>
-        <div className="mt-4 space-y-3">
-          <Toggle
-            label="Show time-to-beat badge"
-            checked={p?.showTimeBadge ?? true}
-            onChange={(v) => save.mutate({ showTimeBadge: v })}
-          />
-          <Toggle
-            label="Show platform names"
-            checked={p?.showPlatformBadge ?? true}
-            onChange={(v) => save.mutate({ showPlatformBadge: v })}
-          />
-          <Toggle
-            label="Show your star rating"
-            checked={p?.showRating ?? true}
-            onChange={(v) => save.mutate({ showRating: v })}
-          />
-        </div>
-
-        <BadgeOpacity
-          value={p?.badgeOpacity ?? 100}
-          categories={categories ?? []}
-          prefs={p}
-          onChange={(badgeOpacity) => save.mutate({ badgeOpacity })}
-        />
-      </section>
+        </section>
+      </div>
     </Shell>
   );
 }

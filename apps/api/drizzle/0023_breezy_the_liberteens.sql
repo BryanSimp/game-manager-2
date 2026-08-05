@@ -1,0 +1,1 @@
+ALTER TABLE "user_preferences" ADD COLUMN "library_columns" integer DEFAULT 5 NOT NULL;
