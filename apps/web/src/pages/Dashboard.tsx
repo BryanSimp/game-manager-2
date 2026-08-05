@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { GAME_STATUSES } from "@gm/shared";
@@ -224,7 +224,10 @@ export function DashboardPage() {
 
           {randomPick ? (
             <Link to="/game/$id" params={{ id: randomPick.id }} className="group flex gap-4">
-              <div className="aspect-[3/4] w-32 flex-none overflow-hidden rounded-lg bg-zinc-800 sm:w-36">
+              {/* self-start or the flex row stretches the box past 3:4 and the
+                  cover art gets cropped — happens as soon as the summary is
+                  taller than the cover, i.e. on any narrow screen */}
+              <div className="aspect-[3/4] w-32 flex-none self-start overflow-hidden rounded-lg bg-zinc-800 sm:w-36">
                 {randomPick.game.coverSrc && (
                   <img
                     src={randomPick.game.coverSrc}
@@ -313,7 +316,9 @@ function useFitCount(itemWidth: number, gap: number) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [count, setCount] = useState(1);
 
-  useEffect(() => {
+  // layout, not plain effect: the first measure has to land before the paint,
+  // or the row shows one cover for a frame and then snaps to five
+  useLayoutEffect(() => {
     if (!el) return;
     const measure = () => {
       setCount(Math.max(1, Math.floor((el.clientWidth + gap) / (itemWidth + gap))));
