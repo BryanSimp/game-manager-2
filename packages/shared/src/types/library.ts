@@ -35,10 +35,6 @@ export interface OwnedPlatform {
   parentPlatformId: string | null;
   parentName: string | null;
   format: OwnershipFormat;
-  /** real retail box scan for this platform, when found */
-  boxArtSrc?: string | null;
-  boxArtW?: number | null;
-  boxArtH?: number | null;
 }
 export interface Tag {
   id: string;

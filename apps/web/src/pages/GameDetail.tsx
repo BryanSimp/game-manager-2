@@ -13,7 +13,6 @@ import {
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { StarRating } from "../components/StarRating.js";
-import { BoxViewer3D } from "../components/BoxViewer3D.js";
 import { ProgressPanel } from "../components/ProgressPanel.js";
 import { AddConsoleControl, FAMILY_LABELS } from "../components/ConsolePicker.js";
 import { SteamMatchFixer } from "../components/SteamMatchFixer.js";
@@ -42,7 +41,6 @@ export function GameDetailPage() {
 
   const [notes, setNotes] = useState("");
   const [notesDirty, setNotesDirty] = useState(false);
-  const [boxPlatform, setBoxPlatform] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [browsingCovers, setBrowsingCovers] = useState(false);
   useEffect(() => {
@@ -159,22 +157,6 @@ export function GameDetailPage() {
               </div>
             )}
           </div>
-          {e.platforms.some((p) => p.format === "physical") && (
-            <div className="mt-3 flex flex-col gap-1.5">
-              {e.platforms
-                .filter((p) => p.format === "physical")
-                .map((p) => (
-                  <button
-                    key={p.platformId}
-                    onClick={() => setBoxPlatform(p.name)}
-                    className="rounded-lg bg-indigo-600/20 px-3 py-1.5 text-center text-xs font-semibold text-indigo-200 ring-1 ring-indigo-500/50 hover:bg-indigo-600/30"
-                  >
-                    🎁 View {p.abbreviation ?? p.name} box in 3D
-                  </button>
-                ))}
-            </div>
-          )}
-
           <div className="mt-3 flex flex-col gap-2">
             <button
               onClick={() => setBrowsingCovers(true)}
@@ -442,43 +424,6 @@ export function GameDetailPage() {
         />
       )}
 
-      {boxPlatform && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
-          onClick={() => setBoxPlatform(null)}
-        >
-          <div
-            className="rounded-2xl border border-zinc-800 bg-zinc-900 p-8"
-            onClick={(ev) => ev.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between gap-8">
-              <p className="text-sm text-zinc-400">
-                🖱 Drag to spin the box · {boxPlatform}
-              </p>
-              <button
-                onClick={() => setBoxPlatform(null)}
-                className="rounded-lg border border-zinc-700 px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-800"
-              >
-                ✕ Close
-              </button>
-            </div>
-            <div className="px-16 py-6">
-              <BoxViewer3D
-                title={e.game.title}
-                coverSrc={e.game.coverSrc}
-                boxArtSrc={e.platforms.find((p) => p.name === boxPlatform)?.boxArtSrc}
-                boxArtW={e.platforms.find((p) => p.name === boxPlatform)?.boxArtW}
-                boxArtH={e.platforms.find((p) => p.name === boxPlatform)?.boxArtH}
-                platformName={boxPlatform}
-                family={
-                  e.platforms.find((p) => p.name === boxPlatform)?.family ?? "other"
-                }
-                summary={e.game.summary}
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </Shell>
   );
 }
