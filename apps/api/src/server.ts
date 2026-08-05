@@ -26,6 +26,7 @@ import { registerCategoryRoutes } from "./routes/categories.js";
 import { registerAuthRecoveryRoutes } from "./routes/auth-recovery.js";
 import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerContactRoutes } from "./routes/contact.js";
+import { registerFeedbackRoutes } from "./routes/feedback.js";
 import { logEvent } from "./services/analytics.js";
 
 export async function buildServer() {
@@ -150,6 +151,7 @@ export async function buildServer() {
   registerAuthRecoveryRoutes(app);
   registerAnalyticsRoutes(app);
   registerContactRoutes(app);
+  registerFeedbackRoutes(app);
 
   return app;
 }

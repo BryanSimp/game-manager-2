@@ -106,11 +106,11 @@ export function CollectionDetailPage() {
 
   /**
    * Open a game from the graph: your copy when you own it, otherwise the
-   * add-game search seeded with its title. Same rule the list rows follow.
+   * game's own catalog page. Same rule the list rows follow.
    */
   function openGame(node: LocalNode) {
     if (node.userGameId) navigate({ to: "/game/$id", params: { id: node.userGameId } });
-    else navigate({ to: "/add", search: { q: node.title } });
+    else navigate({ to: "/catalog/$gameId", params: { gameId: node.gameId } });
   }
 
   function svgPoint(e: React.PointerEvent): { x: number; y: number } {
@@ -453,7 +453,7 @@ export function CollectionDetailPage() {
                 >
                   {node.title.length > 16 ? `${node.title.slice(0, 15)}…` : node.title}
                 </text>
-                {/* a game you don't own — clicking takes you to add it */}
+                {/* a game you don't own — clicking opens it anyway */}
                 {!node.userGameId && (
                   <circle cx={10} cy={10} r={5} fill="#3f3f46" style={{ pointerEvents: "none" }}>
                     <title>Not in your library</title>

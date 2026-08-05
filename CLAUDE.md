@@ -217,6 +217,8 @@ was dev-only). Never use `db push`.
 
 | 16 shared lists + community data | see git log | **One list surface per game** (migration 0020): `checklist_templates.position`, so a game has one main-story list plus unlimited extras in an order you set. `ChecklistPanel` is gone — the Progress tab's `ListCard` publishes, copies, votes, reorders and edits every list identically, which is what finally made *mission* lists shareable (the API always allowed it; only the `kind='completion'` filter stopped it). `completion` folded into `side_quests` and now backs nothing. One `missions` list per game, enforced with a 409, because it's what the time estimate divides. **Wiki scraping removed** — `services/missions.ts`, the suggest route, `scraperRateLimit` and `MissionReview` all gone; pasting a list is the create path now. **Votes** (`checklist_votes`, `collection_votes`, `services/votes.ts`): thumbs on published lists and collections, aggregated on read, public-only and never your own. **Community data** (`services/community.ts`): average rating (floor of 3 raters — a privacy floor, not a quality one) and average play time. `PUT /time-to-beat` stopped writing the shared catalog row and writes `user_time_to_beat`; `resolveTtb` (shared) picks catalog → yours → community per request, and the dashboard's backlog total goes through the same resolver. **Content filter** (`services/content-filter.ts`): hate terms + PII on every write to a collection or list, plus a whole-list re-scan at publish. **Collection discovery**: `GET /api/collections/public` takes `q`/`gameId`/`sort`/paging, `q` matches game titles inside a collection, `GET /:id` opens to owner-or-public, and the graph opens read-only with click-through to a game. List tab moved first |
 
+| 17 feedback + progress polish | see git log | **In-app feedback** (`feedback` table, migration 0021): `POST /api/feedback` (signed in, so it never asks who you are), `GET /api/feedback/mine` so filing isn't shouting into a void, and an admin queue at `GET /api/admin/feedback` with `q`/`kind`/`area`/`status`/`sort` plus PATCH triage, DELETE and `export.csv`. Deliberately **not** the marketing contact form (that one is anonymous and sends mail) and deliberately **not** run through `content-filter.ts` — a bug report often has to quote the thing that broke. Web: `/feedback` in the nav, and a **Feedback tab on `/admin/analytics`** with status tiles that double as filters, an expandable table with inline triage, CSV export (server-side, honours the filters, BOM'd for Excel) and PDF export (a printable window → the browser's own Save as PDF, so no PDF dependency). **Collections open the game** — `GET /api/games/:gameId` returns a catalog game plus your entry id, and `/catalog/$gameId` renders it with a one-button add; both the list rows and the graph nodes used to dump you in `/add?q=<title>`, i.e. searching for a game the app had already identified. Owning it redirects to your copy. **Progress tab**: publish moved off a footer checkbox onto a button beside the list's title (reachable while collapsed, so its content-filter errors moved out of the open body too), and both sections got a **Browse public lists** button — shown at zero as well, because a control that only appears once someone else has published can't teach you that sharing exists |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), backlog
 randomizer with filters, admin panel (users, password resets, registration
@@ -526,3 +528,32 @@ file to be provided for reference).
   there**, so data-backed screens sit empty. Auth works (better-auth's expo
   client defers to the browser cookie jar on web). Treat web as a layout
   harness only; real verification is Expo Go on a device.
+- **`/catalog/$gameId` is a game you don't own**, and it redirects to
+  `/game/$id` the moment you do — one game you own must not have two URLs.
+  It's deliberately thinner than the owned page: no rating, notes, tags,
+  platforms or lists, because all of those are per-user state that doesn't
+  exist yet. Adding uses your default category and platform unless you say
+  otherwise, then lands you on the real page.
+- Feedback is **web-only**. Mobile has no Feedback screen and no admin queue —
+  `POST /api/feedback` is there if it ever gets one.
+- **Feedback isn't content-filtered**, unlike lists and collections. It's a
+  private channel to the operator, and rejecting a bug report over its wording
+  loses the report. It is rate-limited (10 per 10 minutes) and attributable.
+- Deleting an account **keeps its feedback** (`user_id` is
+  `on delete set null`): the bug doesn't leave when the reporter does. The row
+  stops being attributable, which is the intended trade — the admin table then
+  shows "—" for who sent it.
+- The admin feedback table pages at 100 rows and says so; **CSV export takes
+  the whole matching set** (capped at 5000), **PDF export takes the page you're
+  looking at**. PDF is a printable window handed to the browser's print dialog
+  rather than a generated file — "Save as PDF" is a destination there, and it
+  keeps a PDF library out of the dependency tree. A blocked popup silently does
+  nothing; the CSV link next to it is the fallback.
+- Feedback `kind`, `area` and `status` are **text validated by zod**, not pg
+  enums — same reasoning as `user_games.status`. Adding a triage state is a
+  constant in `packages/shared/src/schemas/feedback.ts` and nothing else.
+- The Progress tab's **Browse public lists** panels filter the *same* fetched
+  set by kind: the main-story section only offers `kind='missions'`, the extras
+  section only offers everything else. Copying someone's main story into your
+  side-quest pile isn't a thing anyone means, and adopting a main story list
+  when you already have one is a 409 the panel surfaces.

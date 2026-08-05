@@ -226,8 +226,10 @@ export function CollectionList({
             );
           }
 
-          // not editing: the row is a link — to your copy if you own it, or to
-          // the add-game search if you don't
+          // not editing: the row is a link — to your copy if you own it, and
+          // otherwise straight to the game's own catalog page. It used to open
+          // the add-game search with the title pre-typed, which made you look
+          // up a game the app had already identified.
           return (
             <li key={game.gameId}>
               {game.userGameId ? (
@@ -241,13 +243,13 @@ export function CollectionList({
                 </Link>
               ) : (
                 <Link
-                  to="/add"
-                  search={{ q: game.title }}
-                  title="You don't own this yet — opens the add-game search"
+                  to="/catalog/$gameId"
+                  params={{ gameId: game.gameId }}
+                  title="You don't own this yet — opens the game, with one button to add it"
                   className="flex items-center gap-3 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/60 p-3 transition hover:border-indigo-600"
                 >
                   {body}
-                  <span className="flex-none text-xs font-semibold text-indigo-400">+ Add</span>
+                  <span className="flex-none text-sm text-zinc-600">›</span>
                 </Link>
               )}
             </li>

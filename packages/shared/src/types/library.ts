@@ -71,6 +71,22 @@ export interface LibraryEntry {
   platforms: OwnedPlatform[];
   tags: Tag[];
 }
+/**
+ * A game in the shared catalog, seen by someone who may not own it.
+ *
+ * The page behind this exists because a collection can list games you don't
+ * have. Following one used to drop you in the add-game search with the title
+ * pre-typed, which made you find a game the app had already identified. This
+ * is the game itself, with adding reduced to one button.
+ */
+export interface CatalogGame {
+  game: GameSummary;
+  /** your library entry for it, when you have one — the page redirects there */
+  userGameId: string | null;
+  /** everyone's average rating, subject to the same minimum as elsewhere */
+  communityRating: { average: number; count: number } | null;
+  minRatings: number;
+}
 export interface Platform {
   id: string;
   name: string;

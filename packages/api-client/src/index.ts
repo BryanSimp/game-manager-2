@@ -4,7 +4,10 @@ import type {
   AddCollectionToLibraryResult,
   AddGameInput,
   AdminAnalyticsOverview,
+  AdminFeedbackPage,
+  AdminFeedbackQuery,
   AdminSettings,
+  CatalogGame,
   BarcodeLookupResult,
   BulkAddItem,
   BulkAddResult,
@@ -16,6 +19,9 @@ import type {
   ConsoleArtCandidate,
   ConsoleSummary,
   ContactMessageInput,
+  FeedbackItem,
+  FeedbackSubmission,
+  FeedbackTriageInput,
   FriendLibrary,
   FriendsOverview,
   ChecklistKind,
@@ -158,6 +164,14 @@ export class ApiClient {
     const params = new URLSearchParams({ q });
     if (options.year) params.set("year", String(options.year));
     return this.request<SearchResponse>(`/api/games/search?${params}`);
+  }
+
+  /**
+   * One catalog game, whether or not it's in your library. `userGameId` is
+   * set when it is, so the caller can send you to your own copy instead.
+   */
+  getCatalogGame(gameId: string): Promise<CatalogGame> {
+    return this.request<CatalogGame>(`/api/games/${gameId}`);
   }
 
   /** Every platform, each flagged with whether it's on your consoles list. */
@@ -753,6 +767,59 @@ export class ApiClient {
   /** Success rates for every external fetch source, last 7 days. */
   getScraperHealth(): Promise<ScraperHealth> {
     return this.request<ScraperHealth>("/api/admin/analytics/scrapers");
+  }
+
+  // ---- feedback ----
+
+  /** File a bug report, feature request or opinion. */
+  submitFeedback(input: FeedbackSubmission): Promise<{ id: string }> {
+    return this.request("/api/feedback", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  /** Your own reports and where they've got to. Admin notes are withheld. */
+  getMyFeedback(): Promise<FeedbackItem[]> {
+    return this.request<FeedbackItem[]>("/api/feedback/mine");
+  }
+
+  /** Admin queue: filtered, sorted, with counts across everything. */
+  getAdminFeedback(query: AdminFeedbackQuery = {}): Promise<AdminFeedbackPage> {
+    return this.request<AdminFeedbackPage>(
+      `/api/admin/feedback${ApiClient.feedbackQuery(query)}`,
+    );
+  }
+
+  updateFeedback(id: string, input: FeedbackTriageInput): Promise<{ ok: true }> {
+    return this.request(`/api/admin/feedback/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+
+  deleteFeedback(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/admin/feedback/${id}`, { method: "DELETE" });
+  }
+
+  /**
+   * URL for the CSV export of a filtered queue.
+   *
+   * A URL rather than a fetch: the browser has to do the downloading for the
+   * file to land in Downloads with its filename intact, and the session
+   * cookie rides along on a same-origin link on its own.
+   */
+  feedbackExportUrl(query: AdminFeedbackQuery = {}): string {
+    return `${this.opts.baseUrl}/api/admin/feedback/export.csv${ApiClient.feedbackQuery(query)}`;
+  }
+
+  private static feedbackQuery(query: AdminFeedbackQuery): string {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
+    }
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
   }
 }
 

@@ -8,3 +8,4 @@ export * from "./checklists.js";
 export * from "./steam.js";
 export * from "./social.js";
 export * from "./analytics.js";
+export * from "./feedback.js";
