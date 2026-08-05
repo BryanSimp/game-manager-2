@@ -21,6 +21,36 @@ const SORTS: Array<{ key: SortKey; label: string }> = [
   { key: "estimated", label: "Estimated shortest" },
 ];
 
+/**
+ * Covers per row, keyed by the preference. Tailwind only ships the classes it
+ * can see in the source, so these are whole literal strings rather than
+ * `grid-cols-${n}` built at runtime. Narrow screens keep their own counts —
+ * eight covers on a phone is a wall of thumbnails — so the setting is the
+ * widest step, and 1 and 2 apply everywhere because that's the whole point of
+ * picking them.
+ */
+const COLUMN_CLASSES: Record<number, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-2 sm:grid-cols-3",
+  4: "grid-cols-2 sm:grid-cols-3 md:grid-cols-4",
+  5: "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5",
+  6: "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6",
+  7: "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7",
+  8: "grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-8",
+};
+
+const COLUMN_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8];
+
+/**
+ * Covers are 3:4, so a one-per-row grid across the whole page would draw a
+ * poster rather than a card. Below five, the grid is capped at what the cards
+ * would have been anyway and simply stops early; five and up it's wider than
+ * the page and does nothing.
+ */
+const MAX_CARD_PX = 260;
+const GRID_GAP_PX = 16;
+
 function sortEntries(entries: LibraryEntry[], sort: SortKey): LibraryEntry[] {
   const list = [...entries];
   switch (sort) {
@@ -61,8 +91,16 @@ export function LibraryPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPlatform, setBulkPlatform] = useState<string | null>(null);
   const [bulkFormat, setBulkFormat] = useState<OwnershipFormat>("digital");
+  // null until you change it, so the saved preference shows through once it loads
+  const [columnDraft, setColumnDraft] = useState<number | null>(null);
+  const columns = columnDraft ?? prefs?.libraryColumns ?? 5;
 
   const library = useQuery({ queryKey: ["library"], queryFn: () => api.getLibrary() });
+
+  const saveColumns = useMutation({
+    mutationFn: (libraryColumns: number) => api.savePreferences({ libraryColumns }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["preferences"] }),
+  });
 
   const bulkUpdate = useMutation({
     mutationFn: (patch: Omit<BulkUpdateInput, "ids">) =>
@@ -204,6 +242,22 @@ export function LibraryPage() {
           {SORTS.map((s) => (
             <option key={s.key} value={s.key}>
               {s.label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={columns}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setColumnDraft(next);
+            saveColumns.mutate(next);
+          }}
+          title="How many covers fit on a row"
+          className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+        >
+          {COLUMN_CHOICES.map((n) => (
+            <option key={n} value={n}>
+              {n} per row
             </option>
           ))}
         </select>
@@ -381,7 +435,10 @@ export function LibraryPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+      <div
+        className={`grid gap-4 ${COLUMN_CLASSES[columns] ?? COLUMN_CLASSES[5]}`}
+        style={{ maxWidth: columns * MAX_CARD_PX + (columns - 1) * GRID_GAP_PX }}
+      >
         {entries.map((entry) => (
           <GameCard
             key={entry.id}

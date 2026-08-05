@@ -69,7 +69,8 @@ export function SteamCard() {
   if (!s) return null;
 
   return (
-    <section className="mb-6 max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+    // width and spacing come from the preferences grid this sits in
+    <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
       <h2 className="text-lg font-semibold">Steam</h2>
 
       {!s.configured ? (

@@ -171,6 +171,8 @@ export const userPreferences = pgTable("user_preferences", {
   showRating: boolean("show_rating").notNull().default(true),
   // how solid category badges look, in percent — one setting for every badge
   badgeOpacity: integer("badge_opacity").notNull().default(100),
+  // covers per row on the library grid at full width, 1–8
+  libraryColumns: integer("library_columns").notNull().default(5),
   dashboardConfig: jsonb("dashboard_config"),
 });
 

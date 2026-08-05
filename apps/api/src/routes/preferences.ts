@@ -17,6 +17,7 @@ const DEFAULTS = {
   showTimeBadge: true,
   showRating: true,
   badgeOpacity: 100,
+  libraryColumns: 5,
 };
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
@@ -33,6 +34,8 @@ const prefsSchema = z.object({
   showRating: z.boolean().optional(),
   // floored at 20% — a badge you can't read is a badge that isn't there
   badgeOpacity: z.number().int().min(20).max(100).optional(),
+  // covers per row on the library grid: 1 for a reading-list feel, 8 to scan
+  libraryColumns: z.number().int().min(1).max(8).optional(),
 });
 
 export function registerPreferenceRoutes(app: FastifyInstance): void {
@@ -54,6 +57,7 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
       showTimeBadge: row.showTimeBadge,
       showRating: row.showRating,
       badgeOpacity: row.badgeOpacity,
+      libraryColumns: row.libraryColumns,
     };
   });
 
@@ -98,6 +102,9 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
       ...(parsed.data.showTimeBadge !== undefined && { showTimeBadge: parsed.data.showTimeBadge }),
       ...(parsed.data.showRating !== undefined && { showRating: parsed.data.showRating }),
       ...(parsed.data.badgeOpacity !== undefined && { badgeOpacity: parsed.data.badgeOpacity }),
+      ...(parsed.data.libraryColumns !== undefined && {
+        libraryColumns: parsed.data.libraryColumns,
+      }),
     };
     const { userId, ...updates } = values;
     await db
