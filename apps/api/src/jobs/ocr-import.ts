@@ -5,7 +5,6 @@ import { extractTitles } from "../services/noise-filter.js";
 import { matchTitle } from "../services/matcher.js";
 import { resolveProvider, runOcr } from "../services/ocr.js";
 import { getBoss, OCR_IMPORT_QUEUE } from "../services/queue.js";
-import { logScrape } from "../services/analytics.js";
 
 async function setStatus(
   jobId: string,
@@ -77,9 +76,7 @@ export async function processImportJob(jobId: string): Promise<void> {
     }
 
     await setStatus(jobId, "review");
-    logScrape("ocr", true, job.source);
   } catch (err) {
-    logScrape("ocr", false, err instanceof Error ? err.message : "Import failed");
     await setStatus(jobId, "failed", err instanceof Error ? err.message : "Import failed");
   }
 }

@@ -25,6 +25,7 @@ import { DemoPage } from "./pages/Demo.js";
 import { ImportPage } from "./pages/Import.js";
 import { SettingsPage } from "./pages/Settings.js";
 import { AdminAnalyticsPage } from "./pages/AdminAnalytics.js";
+import { AdminDemoPage } from "./pages/AdminDemo.js";
 import { FriendsPage } from "./pages/Friends.js";
 import { FriendLibraryPage } from "./pages/FriendLibrary.js";
 import { TagsPage } from "./pages/Tags.js";
@@ -72,6 +73,7 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/import", component: ImportPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/admin/analytics", component: AdminAnalyticsPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/demo", component: AdminDemoPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tags", component: TagsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/friends", component: FriendsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/friends/$userId", component: FriendLibraryPage }),

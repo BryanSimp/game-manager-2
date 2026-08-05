@@ -1,7 +1,6 @@
 import { db } from "../db/index.js";
 import { matchTitle, type MatchCandidate, type MatchResult } from "./matcher.js";
 import { cleanProductTitle } from "./product-title.js";
-import { logScrape } from "./analytics.js";
 
 /**
  * UPC barcode → game candidates.
@@ -62,15 +61,7 @@ export async function lookupUpc(code: string): Promise<UpcLookupResult> {
   const cached = cache.get(code);
   if (cached) return cached;
 
-  let product: UpcProduct | null;
-  try {
-    product = await fetchProduct(code);
-  } catch (err) {
-    logScrape("upc", false, err instanceof Error ? err.message : "lookup failed");
-    throw err;
-  }
-  // cache hits skip logging — the health view measures the external fetch
-  logScrape("upc", product !== null, product ? undefined : "unknown barcode");
+  const product = await fetchProduct(code);
   if (!product) {
     // don't cache misses forever — the DB may learn the code later
     return {

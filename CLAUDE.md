@@ -222,6 +222,8 @@ was dev-only). Never use `db push`.
 
 | 18 demo tour + honest landing page | see git log | **`/demo`** is the real app served from a seeded showcase account (`user.is_demo`, migration 0022) — not a second, fake build that rots the moment a screen changes. A request opts in with the `x-gm-demo` header; `getSessionUser` hands back the demo user as if it had signed in, and **one `onRequest` hook in `server.ts` refuses any demo request that isn't a read**. That hook is the entire view-only guarantee: no route knows the demo exists, and routes added later are covered without being told. The client refuses writes too (`lib/api.ts`) so visitors read a sentence about signing up rather than a 403. Demo accounts have **no `account` row**, so there are no credentials to sign in with, and `is_demo` keeps them out of the first-user-becomes-admin count, community rating/play-time averages, the DAU activity log and the analytics user total. `scripts/seed-demo.ts` (`pnpm db:seed-demo`) is idempotent and pulls games through `upsertGameFromIgdb` when IGDB is configured, so the tour has real covers — degrading to title-only rows when it isn't. `GET /api/demo/status` lets the button hide itself on instances that never seeded. **Landing page audited against the code**: removed wiki mission import (gone in phase 16), "cartridge/boxed/sealed" completeness (only physical/digital exists) and "export your data whenever you like" (not built); added backlog planning, the physical shelf + 3D box viewer, the mobile app, community averages and list publishing |
 
+| 19 admin demo control | see git log | **Scraper health is gone** — the card, `GET /api/admin/analytics/scrapers`, `getScraperHealth`, the `ScraperHealth` type, `logScrape` and all 15 call sites. The wiki scraper died in phase 16 and the rest (boxart/upc/steam/ocr) were writing `type='scrape'` rows nothing read. Historical rows stay; nothing queries them. **The demo is admin-managed**: the seed moved from `scripts/seed-demo.ts` into `services/demo-seed.ts` (the script is now a wrapper) and gained `seedDemo()`/`removeDemo()`/`demoStats()` plus in-memory progress, because two dozen throttled IGDB lookups can't sit in a request — `POST /api/admin/demo/seed` returns 202 and `/admin/demo` polls. **Editing the demo is the app itself**: `x-gm-demo-edit` makes every route act on the demo account while keeping the admin's own role, so the tour is curated with the Library, Collections and Progress screens it advertises. It's a *different* header from the tour's `x-gm-demo`, so the view-only hook doesn't fire, and it's honoured only when the session user is already an admin. Amber banner + header pill throughout, because every screen looks exactly like your own. **The Demo button is now unconditional** (it used to hide when unseeded, which left an admin with no button and no explanation); `/demo` handles an unbuilt demo with a page that says so and links admins to `/admin/demo`. Button order is Get started → Demo → Log in on all three surfaces |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), backlog
 randomizer with filters, admin panel (users, password resets, registration
@@ -532,11 +534,35 @@ file to be provided for reference).
   client defers to the browser cookie jar on web). Treat web as a layout
   harness only; real verification is Expo Go on a device.
 - **The demo is not seeded automatically.** Docker boot runs migrations and
-  the platform seed only; `pnpm db:seed-demo` is a deliberate manual step, so
-  a self-hosted instance doesn't get a stranger's fake library and an IGDB
-  fetch storm at first boot. Until it's run, `/api/demo/status` answers false
-  and every Demo button hides itself. Re-run it any time — it wipes the demo
-  accounts' rows and rebuilds them, and never touches a real account.
+  the platform seed only; building the demo is a deliberate step, so a
+  self-hosted instance doesn't get a stranger's fake library and an IGDB
+  fetch storm at first boot. Two ways to do it: `pnpm db:seed-demo`, or the
+  **Build the demo library** button on `/admin/demo`. Re-run either any time
+  — it wipes the demo accounts' rows and rebuilds them from the curated list
+  in `services/demo-seed.ts`, and never touches a real account.
+- **The Demo button is always shown**, even when nothing is seeded. It used
+  to hide itself, which read as careful and behaved as a trap: an admin who
+  hadn't built the demo saw no button, no explanation and nothing to click.
+  `/demo` explains an unbuilt demo instead, and points admins at
+  `/admin/demo`.
+- **There is no demo-content editor, on purpose.** `x-gm-demo-edit` makes
+  every route act on the demo account while keeping the admin's own role, so
+  curating the tour uses the real Library, Collections and Progress screens.
+  A bespoke editor would be a second copy of twenty screens and would be
+  wrong within a phase. Two consequences worth remembering: the header is
+  honoured **only for a session that is already an admin** (that check is the
+  only thing between it and an account takeover), and it is a *different*
+  header from the tour's, so the view-only hook never fires on it.
+- **Rebuilding the demo discards editing.** `seedDemo()` deletes and rebuilds
+  from the code, so a session of hand-curation is gone. `/admin/demo` warns
+  before it, and that's the whole undo story — curated changes are not
+  written back to `demo-seed.ts`.
+- The demo seed is **slow and runs in the background** (~2 dozen IGDB lookups
+  behind a ~3 req/s throttle). `POST /api/admin/demo/seed` returns 202 and
+  the page polls; a second click while one runs is a 409, not two racing
+  seeds. Progress lives in a module-level object, so it resets on restart —
+  a rebuild interrupted by a deploy leaves the data half-built and the
+  progress gone. Re-run it.
 - **Everything that makes the demo view-only is the `onRequest` hook in
   `server.ts`.** Routes deliberately know nothing about it: a demo visitor is
   the seeded account as far as every handler is concerned, and the only thing

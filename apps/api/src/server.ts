@@ -27,6 +27,7 @@ import { registerAuthRecoveryRoutes } from "./routes/auth-recovery.js";
 import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerContactRoutes } from "./routes/contact.js";
 import { registerFeedbackRoutes } from "./routes/feedback.js";
+import { registerDemoAdminRoutes } from "./routes/demo.js";
 import { logEvent } from "./services/analytics.js";
 import { demoUser, isDemoRequest, isReadMethod } from "./services/demo.js";
 import { requireUser } from "./plugins/auth.js";
@@ -191,6 +192,7 @@ export async function buildServer() {
   registerAnalyticsRoutes(app);
   registerContactRoutes(app);
   registerFeedbackRoutes(app);
+  registerDemoAdminRoutes(app);
 
   return app;
 }
