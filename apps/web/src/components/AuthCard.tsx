@@ -32,6 +32,13 @@ export function Field(props: {
   value: string;
   onChange: (v: string) => void;
   autoComplete?: string;
+  /** the two-factor prompt wants the caret in the box the moment it appears */
+  autoFocus?: boolean;
+  placeholder?: string;
+  /** `numeric` puts a phone's digit keypad up for a six-digit code */
+  inputMode?: "text" | "numeric";
+  maxLength?: number;
+  hint?: ReactNode;
 }) {
   return (
     <label className="mb-4 block">
@@ -40,10 +47,15 @@ export function Field(props: {
         type={props.type}
         value={props.value}
         autoComplete={props.autoComplete}
+        autoFocus={props.autoFocus}
+        placeholder={props.placeholder}
+        inputMode={props.inputMode}
+        maxLength={props.maxLength}
         onChange={(e) => props.onChange(e.target.value)}
         className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-zinc-100 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
         required
       />
+      {props.hint ? <span className="mt-1 block text-xs text-zinc-500">{props.hint}</span> : null}
     </label>
   );
 }

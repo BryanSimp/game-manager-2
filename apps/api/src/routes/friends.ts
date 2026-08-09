@@ -221,11 +221,18 @@ export function registerFriendRoutes(app: FastifyInstance): void {
         .where(eq(schema.user.id, friendId));
       if (!friend) return reply.status(404).send({ message: "User not found" });
 
+      // my entry id comes along so a card can link straight to my copy —
+      // without it the UI can only offer /catalog/:gameId, which would
+      // bounce through a redirect for every game we both own
       const mine = await db
-        .select({ gameId: schema.userGames.gameId, status: schema.userGames.status })
+        .select({
+          id: schema.userGames.id,
+          gameId: schema.userGames.gameId,
+          status: schema.userGames.status,
+        })
         .from(schema.userGames)
         .where(eq(schema.userGames.userId, user.id));
-      const myGames = new Map(mine.map((m) => [m.gameId, m.status]));
+      const myGames = new Map(mine.map((m) => [m.gameId, m]));
 
       const rows = await db
         .select({
@@ -246,18 +253,22 @@ export function registerFriendRoutes(app: FastifyInstance): void {
 
       const platforms = await platformNames(rows.map((r) => r.userGameId));
 
-      const entries = rows.map((r) => ({
-        gameId: r.gameId,
-        title: r.title,
-        coverSrc: r.coverImageId ? `/api/images/${r.coverImageId}` : r.coverUrl,
-        releaseDate: r.releaseDate,
-        status: r.status,
-        rating: r.rating ? Number(r.rating) : null,
-        completed100: r.completed100,
-        platforms: platforms.get(r.userGameId) ?? [],
-        inCommon: myGames.has(r.gameId),
-        myStatus: myGames.get(r.gameId) ?? null,
-      }));
+      const entries = rows.map((r) => {
+        const mineForGame = myGames.get(r.gameId) ?? null;
+        return {
+          gameId: r.gameId,
+          title: r.title,
+          coverSrc: r.coverImageId ? `/api/images/${r.coverImageId}` : r.coverUrl,
+          releaseDate: r.releaseDate,
+          status: r.status,
+          rating: r.rating ? Number(r.rating) : null,
+          completed100: r.completed100,
+          platforms: platforms.get(r.userGameId) ?? [],
+          inCommon: mineForGame !== null,
+          myStatus: mineForGame?.status ?? null,
+          myUserGameId: mineForGame?.id ?? null,
+        };
+      });
 
       return {
         friend: { userId: friend.id, name: friend.name },

@@ -226,9 +226,12 @@ was dev-only). Never use `db push`.
 
 | 21 roll with filters, rows you choose | see git log | **The backlog randomizer takes filters** (the Phase 6 item): "What should I play next?" rolls from a chosen category *and* console — storefronts roll into their platform, so picking PC includes Steam — and says how many games it's picking between. The card grew a cover twice the size, the release year, main-story and completionist times and the summary, clamped to six lines so the text ends about level with the cover. **Recently finished fits its box**: the row measures itself (`useFitCount`, a `ResizeObserver` on a container whose width doesn't depend on its contents, so trimming can't loop) and renders only the covers that fit, with `+N more` for the rest — it used to scroll sideways and slice a cover in half at the card's edge. **Preferences is two panels to a row** above `lg`; `SteamCard` stopped setting its own width and margin. **`preferences.library_columns`** (migration 0023, 1–8, default 5) drives the library grid, with a `per row` select in its toolbar. The classes are whole literal strings in `COLUMN_CLASSES` because Tailwind can't see `grid-cols-${n}`, narrow breakpoints keep their own counts, and below five the grid is capped at `MAX_CARD_PX` per card — a full-width 3:4 cover is a poster, not a card |
 
+| 22 identity, accounts, 2FA | see git log | **The app has a tab icon**: `apps/web/public/icon.svg` (an indigo tile with a gamepad knocked out of it via a `mask`, because the tile is a gradient and a flat-filled cut-out only lines up at one height), rasterised to `favicon.ico` (16/32/48), `icon-192/512.png` and `apple-touch-icon.png` by `apps/web/scripts/generate-icons.mjs` — run by hand, outputs committed, uses `@gm/api`'s hoisted `sharp` rather than a second copy. Plus a `site.webmanifest`. **Admin Users tab** on `/admin/analytics`: `GET /api/admin/users` (`routes/admin-users.ts`) with search, four filters, five sorts and paging. Per-user counts are **scalar subqueries, not joins** — four left joins over one-to-many tables multiply rows together and every count comes back plausibly wrong. Read-only on purpose; bans and role changes belong in the phase 6 admin panel. Demo accounts *are* listed (flagged and filterable) — this is the one place hiding them would be a lie. **A friend's games are links**: `FriendLibraryEntry.myUserGameId` (your `user_games.id`, not just `inCommon`) sends a card to your own copy, or to `/catalog/$gameId` when you haven't got it; mobile does the same, falling back to `/add?q=<title>` since it has no catalog screen. **Two-factor sign-in** (migration 0024): better-auth's `twoFactor` plugin, TOTP only — an emailed code would arm a lock whose key can't arrive on an instance with no verified Resend domain. `trustDeviceMaxAge` of 30 days is the thing that makes it "a new device" rather than every sign-in. Enabling is two steps and a code has to prove the secret before it's armed (`skipVerificationOnEnable` deliberately left off), backup codes are shown exactly once, and `TwoFactorCard` renders the QR with `qrcode-generator` behind a dynamic `import()` — zero transitive deps, and out of the main bundle. Both login screens grew an in-place challenge step; **the mobile client got `twoFactorClient()` too**, or turning 2FA on in the web app would have locked the phone out |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
-(users, password resets, registration toggle, settings).
+(password resets, registration toggle, account actions — the *list* landed in
+phase 22, read-only).
 **Deployment to Bryan's Ubuntu/Portainer server is the current focus** (v1's compose
 file to be provided for reference).
 
@@ -625,3 +628,47 @@ file to be provided for reference).
   section only offers everything else. Copying someone's main story into your
   side-quest pile isn't a thing anyone means, and adopting a main story list
   when you already have one is a 409 the panel surfaces.
+- **Icons are generated, not hand-drawn per size.** Edit
+  `apps/web/public/icon.svg`, then run `node apps/web/scripts/generate-icons.mjs`
+  — nothing in the build does it for you, and a stale `favicon.ico` next to a
+  fresh SVG is the failure mode. The script leans on `sharp` resolving from the
+  workspace root (`.npmrc` sets `node-linker=hoisted` for Expo), so it isn't a
+  web dependency and won't survive a switch to isolated linking.
+- **Two-factor is TOTP only, and setup is web-only.** Mobile can *answer* the
+  challenge (and must — `twoFactorClient()` is in `apps/mobile/src/lib/auth.ts`
+  for exactly that reason) but can't turn it on or regenerate backup codes.
+  There is no emailed-code fallback on purpose: `email_from` is optional on a
+  self-hosted instance, and a second factor that depends on unconfigured mail
+  is a lockout with extra steps.
+- A trusted device is a **cookie, not a device record**. Clearing site data,
+  a fresh browser profile or a private window all count as a new device, and
+  there is no "sign out everywhere / forget my devices" control — turning 2FA
+  off and back on is the blunt instrument. 30 days is `trustDeviceMaxAge` in
+  `auth.ts`; the Preferences copy quotes that number, so change both.
+- **Backup codes are shown once and never again.** better-auth can regenerate
+  them (`generateBackupCodes`) but nothing in the UI calls it — losing the
+  list and the phone together means an admin has to clear `two_factor` and
+  `user.two_factor_enabled` by hand. Worth building the regenerate button
+  before this has real users.
+- **2FA is untested end-to-end against a real authenticator app.** The flow,
+  the QR and the challenge screens were exercised in a browser; nobody has
+  scanned the code with a phone and signed in from a cold device. Do that
+  before relying on it, and keep a backup code to hand the first time.
+- The admin **Users tab is read-only**. It lists accounts and what each has
+  done; it can't ban, promote, reset a password or delete. Those need
+  confirmation flows and an audit trail, and they're the rest of the phase 6
+  admin panel. `GET /api/admin/users` has no write sibling, deliberately.
+- "Last active" on that tab reads `analytics_events`, which only started
+  logging in phase 14 and has **no retention job** — an account quiet since
+  before then shows a dash rather than a date, and if a prune ever lands it
+  must keep enough `activity` history for this column to mean anything.
+- A friend's game card links to **your** copy when you own it, using
+  `myUserGameId` from `GET /api/friends/:userId/library` — that field is the
+  reason the route selects `user_games.id` for the asking user and not just
+  the game ids. Games you don't own go to `/catalog/$gameId`, which is
+  owner-agnostic; nothing about the friend rides along, so adding from there
+  files it under *your* defaults, not theirs.
+- Mobile has **no catalog screen**, so a friend's game you don't own opens
+  `/add?q=<title>` — a search with the name pre-typed, one tap from the same
+  result. `add.tsx` reads `q` for this; the collections screen still pushes a
+  bare `/add` and could use the same treatment.

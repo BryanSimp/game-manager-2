@@ -7,6 +7,8 @@ import type {
   AdminFeedbackPage,
   AdminFeedbackQuery,
   AdminSettings,
+  AdminUserPage,
+  AdminUserQuery,
   CatalogGame,
   BarcodeLookupResult,
   BulkAddItem,
@@ -793,6 +795,11 @@ export class ApiClient {
     return this.request<AdminAnalyticsOverview>("/api/admin/analytics/overview");
   }
 
+  /** The account list behind the analytics page's Users tab. Read-only. */
+  getAdminUsers(query: AdminUserQuery = {}): Promise<AdminUserPage> {
+    return this.request<AdminUserPage>(`/api/admin/users${ApiClient.queryString(query)}`);
+  }
+
   // ---- feedback ----
 
   /** File a bug report, feature request or opinion. */
@@ -811,7 +818,7 @@ export class ApiClient {
   /** Admin queue: filtered, sorted, with counts across everything. */
   getAdminFeedback(query: AdminFeedbackQuery = {}): Promise<AdminFeedbackPage> {
     return this.request<AdminFeedbackPage>(
-      `/api/admin/feedback${ApiClient.feedbackQuery(query)}`,
+      `/api/admin/feedback${ApiClient.queryString(query)}`,
     );
   }
 
@@ -834,10 +841,15 @@ export class ApiClient {
    * cookie rides along on a same-origin link on its own.
    */
   feedbackExportUrl(query: AdminFeedbackQuery = {}): string {
-    return `${this.opts.baseUrl}/api/admin/feedback/export.csv${ApiClient.feedbackQuery(query)}`;
+    return `${this.opts.baseUrl}/api/admin/feedback/export.csv${ApiClient.queryString(query)}`;
   }
 
-  private static feedbackQuery(query: AdminFeedbackQuery): string {
+  /**
+   * Filter objects → query string, dropping empties. "" has to go as well as
+   * undefined: the admin filter selects use "" for "no filter", and sending
+   * `?status=` would fail the enum on the server rather than be ignored.
+   */
+  private static queryString(query: object): string {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== null && value !== "") params.set(key, String(value));

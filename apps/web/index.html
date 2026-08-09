@@ -6,6 +6,18 @@
     <meta name="theme-color" content="#09090b" />
 
     <!--
+      Tab icon. The SVG is what every current browser actually uses; the .ico
+      is the fallback for the ones that only look for /favicon.ico, and it
+      packs 16/32/48 so Windows shortcuts and the bookmarks bar each get a
+      size rendered for them rather than a downscaled 512. All of these are
+      generated from icon.svg by scripts/generate-icons.mjs.
+    -->
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!--
       Static defaults. Routes override these at runtime via lib/seo.ts, which
       Googlebot picks up because it renders JavaScript — but scrapers that
       don't (most social previews, some ad crawlers) only ever see what's

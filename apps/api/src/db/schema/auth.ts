@@ -1,4 +1,4 @@
-import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 // Tables owned by better-auth (email/password + admin + bearer plugins).
 // Property names must match better-auth's model fields; column names are snake_case.
@@ -27,6 +27,10 @@ export const user = pgTable("user", {
   // counted as a real one anywhere: it's excluded from the first-user-becomes
   // -admin check, from community averages, and from the analytics user total.
   isDemo: boolean("is_demo").notNull().default(false),
+  // two-factor plugin. Written only by better-auth's enable/disable flow —
+  // the column is the single question "does signing in need a code", and the
+  // secret itself lives in `two_factor` below
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -63,6 +67,36 @@ export const account = pgTable("account", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/*
+ * better-auth's two-factor plugin. One row per account that has ever set 2FA
+ * up: the TOTP secret an authenticator app shares, and the single-use backup
+ * codes (better-auth stores that column as its own encoded blob, hence one
+ * text column rather than a codes table).
+ *
+ * Property names are the plugin's model fields verbatim — the drizzle adapter
+ * looks them up by name, so renaming one here breaks sign-in rather than
+ * failing to compile. `failedVerificationCount`/`lockedUntil` are the
+ * plugin's own brute-force lock on the code prompt, which is why they're
+ * columns rather than something we track.
+ */
+export const twoFactor = pgTable(
+  "two_factor",
+  {
+    id: text("id").primaryKey(),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    verified: boolean("verified").notNull().default(true),
+    failedVerificationCount: integer("failed_verification_count").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  },
+  // every code prompt looks the row up by user, which is the one path that
+  // sits between a correct password and a session
+  (t) => [index("two_factor_user_idx").on(t.userId)],
+);
 
 // Ours, not better-auth's: its built-in reset flow stores tokens *raw* in
 // `verification`, so the recovery routes keep their own table holding only a
