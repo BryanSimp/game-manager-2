@@ -169,6 +169,13 @@
       "when": 1785929455705,
       "tag": "0023_breezy_the_liberteens",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786300967631,
+      "tag": "0024_confused_mandroid",
+      "breakpoints": true
     }
   ]
 }

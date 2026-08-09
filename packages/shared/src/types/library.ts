@@ -241,6 +241,76 @@ export interface AdminAnalyticsOverview {
     sessions30d: number;
   };
 }
+// ---- admin: the account list ----
+/**
+ * Sort orders for the admin user list. Text, validated by zod, for the same
+ * reason `user_games.status` is — adding one is a constant here and nothing
+ * else.
+ */
+export const ADMIN_USER_SORTS = ["newest", "oldest", "name", "games", "active"] as const;
+export type AdminUserSort = (typeof ADMIN_USER_SORTS)[number];
+
+export const ADMIN_USER_SORT_LABELS: Record<AdminUserSort, string> = {
+  newest: "Newest first",
+  oldest: "Oldest first",
+  name: "Name (A–Z)",
+  games: "Most games",
+  active: "Recently active",
+};
+
+/** Which slice of the account list to show. */
+export const ADMIN_USER_FILTERS = ["all", "admins", "banned", "demo"] as const;
+export type AdminUserFilter = (typeof ADMIN_USER_FILTERS)[number];
+
+export const ADMIN_USER_FILTER_LABELS: Record<AdminUserFilter, string> = {
+  all: "Everyone",
+  admins: "Admins",
+  banned: "Banned",
+  demo: "Demo accounts",
+};
+
+/** One row of the admin account list. */
+export interface AdminUserRow {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  emailVerified: boolean;
+  banned: boolean;
+  banReason: string | null;
+  /** seeded showcase account behind /demo, not a person */
+  isDemo: boolean;
+  isPremium: boolean;
+  /** whether they've turned on two-factor sign-in */
+  twoFactorEnabled: boolean;
+  /** whether they've linked a Steam account */
+  steamLinked: boolean;
+  games: number;
+  collections: number;
+  friends: number;
+  createdAt: string;
+  /** most recent analytics ping, or null if they've done nothing since it started logging */
+  lastActiveAt: string | null;
+  /** live (unexpired) sessions — a rough "signed in on N devices" */
+  sessions: number;
+}
+
+export interface AdminUserQuery {
+  q?: string;
+  filter?: AdminUserFilter;
+  sort?: AdminUserSort;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AdminUserPage {
+  users: AdminUserRow[];
+  /** rows matching the current filters, before paging */
+  total: number;
+  /** counts across everything, so the tiles don't move when a filter changes */
+  counts: { all: number; admins: number; banned: number; demo: number };
+}
+
 /** What the admin demo page reads: what's in the demo, and how the last build went. */
 export interface DemoAdminView {
   stats: {
@@ -635,6 +705,13 @@ export interface FriendLibraryEntry {
   inCommon: boolean;
   /** your status for it, when you have it */
   myStatus: string | null;
+  /**
+   * your `user_games.id` for it, when you have it — the card links straight to
+   * your own copy rather than bouncing through the catalog page's redirect.
+   * null means the card offers the catalog page instead, where one button
+   * adds it.
+   */
+  myUserGameId: string | null;
 }
 export interface FriendLibrary {
   friend: { userId: string; name: string };

@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { admin, bearer } from "better-auth/plugins";
+import { admin, bearer, twoFactor } from "better-auth/plugins";
 import { expo } from "@better-auth/expo";
 import { count, eq } from "drizzle-orm";
 import { db, schema } from "./db/index.js";
@@ -18,6 +18,8 @@ export const auth = betterAuth({
       session: schema.session,
       account: schema.account,
       verification: schema.verification,
+      // key must be the plugin's model name — the adapter resolves tables by it
+      twoFactor: schema.twoFactor,
     },
   }),
   emailAndPassword: {
@@ -48,7 +50,39 @@ export const auth = betterAuth({
       "/sign-up/email": { window: 3600, max: 5 },
     },
   },
-  plugins: [admin(), bearer(), expo()],
+  plugins: [
+    admin(),
+    bearer(),
+    /*
+     * Two-factor sign-in, TOTP only.
+     *
+     * TOTP rather than emailed codes on purpose: the reset flow already
+     * showed that email here is the weakest link — Resend's default sender
+     * only delivers to the account owner, so an instance with no verified
+     * domain would have 2FA that locks its own admin out. An authenticator
+     * app needs no configuration and no third party at sign-in time.
+     *
+     * `skipVerificationOnEnable` is left off: enabling asks for a code from
+     * the app first, so nobody can arm 2FA against a secret they mistyped
+     * into their authenticator and lock themselves out on the next sign-in.
+     *
+     * The 30-day trusted-device cookie is what makes this "only on a new
+     * device" rather than "every single sign-in".
+     */
+    twoFactor({
+      // shown as the account name in Google Authenticator / 1Password / Aegis
+      issuer: "Game Manager",
+      totpOptions: { digits: 6, period: 30 },
+      // 30 days, and the reason this feature reads as "a new device" rather
+      // than "every sign-in". Stated rather than left to the default because
+      // it's the number the Preferences copy promises the user.
+      trustDeviceMaxAge: 30 * 24 * 60 * 60,
+      // one prompt is one guess in a million; ten tries then a cool-off is
+      // generous to a fat-fingered code and useless to a script
+      accountLockout: { enabled: true, maxFailedAttempts: 10, durationSeconds: 15 * 60 },
+    }),
+    expo(),
+  ],
   databaseHooks: {
     user: {
       create: {

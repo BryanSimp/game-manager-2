@@ -5,11 +5,13 @@ import type { AdminAnalyticsOverview } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { AdminFeedbackPanel } from "../components/AdminFeedbackPanel.js";
+import { AdminUsersPanel } from "../components/AdminUsersPanel.js";
 
-type Tab = "overview" | "feedback";
+type Tab = "overview" | "users" | "feedback";
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
+  { key: "users", label: "Users" },
   { key: "feedback", label: "Feedback" },
 ];
 
@@ -205,8 +207,8 @@ export function AdminAnalyticsPage() {
       <div className="mb-4">
         <h1 className="text-xl font-bold text-zinc-100">Analytics</h1>
         <p className="text-sm text-zinc-500">
-          User behavior and system health, from the background event log — and what people have
-          told us directly.
+          User behavior from the background event log, who the accounts belong to, and what people
+          have told us directly.
         </p>
       </div>
 
@@ -226,6 +228,7 @@ export function AdminAnalyticsPage() {
         ))}
       </div>
 
+      {tab === "users" ? <AdminUsersPanel /> : null}
       {tab === "feedback" ? <AdminFeedbackPanel /> : null}
 
       <div className={tab === "overview" ? "" : "hidden"}>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,8 +13,12 @@ export default function AddGameScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
-  const [input, setInput] = useState("");
-  const [query, setQuery] = useState("");
+  // `?q=` pre-types a title the app already knows — a friend's game you don't
+  // own arrives here rather than at a game page, so the least it can do is
+  // not make you type the name back in
+  const { q } = useLocalSearchParams<{ q?: string }>();
+  const [input, setInput] = useState(q ?? "");
+  const [query, setQuery] = useState(q?.trim() ?? "");
   const [added, setAdded] = useState<Set<string>>(new Set());
 
   useEffect(() => {

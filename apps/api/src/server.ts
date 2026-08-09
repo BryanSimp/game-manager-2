@@ -25,6 +25,7 @@ import { registerFriendRoutes } from "./routes/friends.js";
 import { registerCategoryRoutes } from "./routes/categories.js";
 import { registerAuthRecoveryRoutes } from "./routes/auth-recovery.js";
 import { registerAnalyticsRoutes } from "./routes/analytics.js";
+import { registerAdminUserRoutes } from "./routes/admin-users.js";
 import { registerContactRoutes } from "./routes/contact.js";
 import { registerFeedbackRoutes } from "./routes/feedback.js";
 import { registerDemoAdminRoutes } from "./routes/demo.js";
@@ -150,6 +151,8 @@ export async function buildServer() {
         role: user.role,
         isPremium: false,
         isDemo: true,
+        // a demo visitor has no account row to attach a factor to
+        twoFactorEnabled: false,
         createdAt: new Date().toISOString(),
       };
     }
@@ -164,6 +167,8 @@ export async function buildServer() {
       role: (session.user as { role?: string }).role ?? "user",
       isPremium: (session.user as { isPremium?: boolean }).isPremium ?? false,
       isDemo: false,
+      twoFactorEnabled:
+        (session.user as { twoFactorEnabled?: boolean }).twoFactorEnabled ?? false,
       createdAt: session.user.createdAt,
     };
   });
@@ -190,6 +195,7 @@ export async function buildServer() {
   registerCategoryRoutes(app);
   registerAuthRecoveryRoutes(app);
   registerAnalyticsRoutes(app);
+  registerAdminUserRoutes(app);
   registerContactRoutes(app);
   registerFeedbackRoutes(app);
   registerDemoAdminRoutes(app);
