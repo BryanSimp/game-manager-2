@@ -1,5 +1,18 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  getTableName,
+  ilike,
+  or,
+  sql,
+  type AnyColumn,
+  type SQL,
+} from "drizzle-orm";
+import type { PgTable } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import {
   ADMIN_USER_FILTERS,
@@ -38,6 +51,29 @@ const querySchema = z.object({
 
 type Query = z.infer<typeof querySchema>;
 
+/**
+ * `"table"."column"`, always — never a bare column name.
+ *
+ * Drizzle emits an *unqualified* `"id"` for a column interpolated into a
+ * `sql` template when the outer query has no join, and Postgres resolves a
+ * bare name against the innermost scope first. So the obvious spelling of
+ * the subqueries below compiles to
+ * `… FROM "session" WHERE "user_id" = "id"`, where `"id"` binds to
+ * `session.id` rather than to the outer `user.id`. Against `user_games`
+ * that's a `text = uuid` error; against `session` and `collections`, whose
+ * ids are also text, it's a silent zero — which is the worse half of the
+ * bug, and the reason every reference here is qualified rather than only
+ * the ones that were failing.
+ *
+ * The name comes off the schema object, so a column rename still tracks.
+ */
+function qualified(table: PgTable, column: AnyColumn): SQL {
+  return sql`${sql.identifier(getTableName(table))}.${sql.identifier(column.name)}`;
+}
+
+/** The outer row every subquery below correlates against. */
+const USER_ID = qualified(schema.user, schema.user.id);
+
 /*
  * Per-user counts as scalar subqueries rather than joins.
  *
@@ -48,26 +84,28 @@ type Query = z.infer<typeof querySchema>;
  * over one page's worth of rows.
  */
 const gameCount = sql<number>`(
-  SELECT COUNT(*)::int FROM ${schema.userGames} WHERE ${schema.userGames.userId} = ${schema.user.id}
+  SELECT COUNT(*)::int FROM ${schema.userGames}
+  WHERE ${qualified(schema.userGames, schema.userGames.userId)} = ${USER_ID}
 )`;
 
 const collectionCount = sql<number>`(
   SELECT COUNT(*)::int FROM ${schema.collections}
-  WHERE ${schema.collections.userId} = ${schema.user.id}
+  WHERE ${qualified(schema.collections, schema.collections.userId)} = ${USER_ID}
 )`;
 
 /** Accepted friendships only, and the pair can be stored in either direction. */
 const friendCount = sql<number>`(
   SELECT COUNT(*)::int FROM ${schema.friendships}
-  WHERE ${schema.friendships.status} = 'accepted'
-    AND (${schema.friendships.requesterId} = ${schema.user.id}
-         OR ${schema.friendships.addresseeId} = ${schema.user.id})
+  WHERE ${qualified(schema.friendships, schema.friendships.status)} = 'accepted'
+    AND (${qualified(schema.friendships, schema.friendships.requesterId)} = ${USER_ID}
+         OR ${qualified(schema.friendships, schema.friendships.addresseeId)} = ${USER_ID})
 )`;
 
 /** Unexpired sessions — roughly "signed in on this many devices right now". */
 const sessionCount = sql<number>`(
   SELECT COUNT(*)::int FROM ${schema.session}
-  WHERE ${schema.session.userId} = ${schema.user.id} AND ${schema.session.expiresAt} > now()
+  WHERE ${qualified(schema.session, schema.session.userId)} = ${USER_ID}
+    AND ${qualified(schema.session, schema.session.expiresAt)} > now()
 )`;
 
 /**
@@ -76,12 +114,14 @@ const sessionCount = sql<number>`(
  * rather than as a date we'd be inventing.
  */
 const lastActiveAt = sql<Date | null>`(
-  SELECT MAX(${schema.analyticsEvents.createdAt}) FROM ${schema.analyticsEvents}
-  WHERE ${schema.analyticsEvents.userId} = ${schema.user.id}
+  SELECT MAX(${qualified(schema.analyticsEvents, schema.analyticsEvents.createdAt)})
+  FROM ${schema.analyticsEvents}
+  WHERE ${qualified(schema.analyticsEvents, schema.analyticsEvents.userId)} = ${USER_ID}
 )`;
 
 const steamLinked = sql<boolean>`EXISTS (
-  SELECT 1 FROM ${schema.steamAccounts} WHERE ${schema.steamAccounts.userId} = ${schema.user.id}
+  SELECT 1 FROM ${schema.steamAccounts}
+  WHERE ${qualified(schema.steamAccounts, schema.steamAccounts.userId)} = ${USER_ID}
 )`;
 
 function filtersFor(query: Query): SQL | undefined {

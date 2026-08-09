@@ -226,7 +226,7 @@ was dev-only). Never use `db push`.
 
 | 21 roll with filters, rows you choose | see git log | **The backlog randomizer takes filters** (the Phase 6 item): "What should I play next?" rolls from a chosen category *and* console — storefronts roll into their platform, so picking PC includes Steam — and says how many games it's picking between. The card grew a cover twice the size, the release year, main-story and completionist times and the summary, clamped to six lines so the text ends about level with the cover. **Recently finished fits its box**: the row measures itself (`useFitCount`, a `ResizeObserver` on a container whose width doesn't depend on its contents, so trimming can't loop) and renders only the covers that fit, with `+N more` for the rest — it used to scroll sideways and slice a cover in half at the card's edge. **Preferences is two panels to a row** above `lg`; `SteamCard` stopped setting its own width and margin. **`preferences.library_columns`** (migration 0023, 1–8, default 5) drives the library grid, with a `per row` select in its toolbar. The classes are whole literal strings in `COLUMN_CLASSES` because Tailwind can't see `grid-cols-${n}`, narrow breakpoints keep their own counts, and below five the grid is capped at `MAX_CARD_PX` per card — a full-width 3:4 cover is a poster, not a card |
 
-| 22 identity, accounts, 2FA | see git log | **The app has a tab icon**: `apps/web/public/icon.svg` (an indigo tile with a gamepad knocked out of it via a `mask`, because the tile is a gradient and a flat-filled cut-out only lines up at one height), rasterised to `favicon.ico` (16/32/48), `icon-192/512.png` and `apple-touch-icon.png` by `apps/web/scripts/generate-icons.mjs` — run by hand, outputs committed, uses `@gm/api`'s hoisted `sharp` rather than a second copy. Plus a `site.webmanifest`. **Admin Users tab** on `/admin/analytics`: `GET /api/admin/users` (`routes/admin-users.ts`) with search, four filters, five sorts and paging. Per-user counts are **scalar subqueries, not joins** — four left joins over one-to-many tables multiply rows together and every count comes back plausibly wrong. Read-only on purpose; bans and role changes belong in the phase 6 admin panel. Demo accounts *are* listed (flagged and filterable) — this is the one place hiding them would be a lie. **A friend's games are links**: `FriendLibraryEntry.myUserGameId` (your `user_games.id`, not just `inCommon`) sends a card to your own copy, or to `/catalog/$gameId` when you haven't got it; mobile does the same, falling back to `/add?q=<title>` since it has no catalog screen. **Two-factor sign-in** (migration 0024): better-auth's `twoFactor` plugin, TOTP only — an emailed code would arm a lock whose key can't arrive on an instance with no verified Resend domain. `trustDeviceMaxAge` of 30 days is the thing that makes it "a new device" rather than every sign-in. Enabling is two steps and a code has to prove the secret before it's armed (`skipVerificationOnEnable` deliberately left off), backup codes are shown exactly once, and `TwoFactorCard` renders the QR with `qrcode-generator` behind a dynamic `import()` — zero transitive deps, and out of the main bundle. Both login screens grew an in-place challenge step; **the mobile client got `twoFactorClient()` too**, or turning 2FA on in the web app would have locked the phone out |
+| 22 identity, accounts, 2FA | see git log | **The app has a tab icon**: `apps/web/public/icon.svg` (an indigo tile with a gamepad knocked out of it via a `mask`, because the tile is a gradient and a flat-filled cut-out only lines up at one height), rasterised to `favicon.ico` (16/32/48), `icon-192/512.png` and `apple-touch-icon.png` by `apps/web/scripts/generate-icons.mjs` — run by hand, outputs committed, uses `@gm/api`'s hoisted `sharp` rather than a second copy. Plus a `site.webmanifest`. **Admin Users tab** on `/admin/analytics`: `GET /api/admin/users` (`routes/admin-users.ts`) with search, four filters, five sorts and paging. Per-user counts are **scalar subqueries, not joins** — four left joins over one-to-many tables multiply rows together and every count comes back plausibly wrong. Read-only on purpose; bans and role changes belong in the phase 6 admin panel. Demo accounts *are* listed (flagged and filterable) — this is the one place hiding them would be a lie. **A friend's games are links**: `FriendLibraryEntry.myUserGameId` (your `user_games.id`, not just `inCommon`) sends a card to your own copy, or to `/catalog/$gameId` when you haven't got it; mobile does the same, falling back to `/add?q=<title>` since it has no catalog screen. **Two-factor sign-in** (migration 0024): better-auth's `twoFactor` plugin, TOTP only — an emailed code would arm a lock whose key can't arrive on an instance with no verified Resend domain. `trustDeviceMaxAge` of 30 days is the thing that makes it "a new device" rather than every sign-in. Enabling is two steps and a code has to prove the secret before it's armed (`skipVerificationOnEnable` deliberately left off), backup codes are shown exactly once, and `TwoFactorCard` renders the QR with `qrcode-generator` behind a dynamic `import()` — zero transitive deps, and out of the main bundle. Both login screens grew an in-place challenge step; **the mobile client got `twoFactorClient()` too**, or turning 2FA on in the web app would have locked the phone out. "New backup codes" regenerates a set without touching the secret. The correlated subqueries in `admin-users.ts` all go through a `qualified()` helper — Drizzle emits bare column names in `sql` templates, which Postgres binds to the *inner* table, and against `session`/`collections` (text ids, like `user.id`) that's a silent zero rather than an error |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
@@ -645,15 +645,33 @@ file to be provided for reference).
   there is no "sign out everywhere / forget my devices" control — turning 2FA
   off and back on is the blunt instrument. 30 days is `trustDeviceMaxAge` in
   `auth.ts`; the Preferences copy quotes that number, so change both.
-- **Backup codes are shown once and never again.** better-auth can regenerate
-  them (`generateBackupCodes`) but nothing in the UI calls it — losing the
-  list and the phone together means an admin has to clear `two_factor` and
-  `user.two_factor_enabled` by hand. Worth building the regenerate button
-  before this has real users.
-- **2FA is untested end-to-end against a real authenticator app.** The flow,
-  the QR and the challenge screens were exercised in a browser; nobody has
-  scanned the code with a phone and signed in from a cold device. Do that
-  before relying on it, and keep a backup code to hand the first time.
+- **Backup codes are shown once per set**, but "New backup codes" issues a
+  fresh set (`generateBackupCodes`) and voids the old one, so losing the list
+  isn't a lockout. It skips the scan step — the secret is untouched, only the
+  codes change. Losing the list *and* the phone still means clearing
+  `two_factor` and `user.two_factor_enabled` by hand.
+- **2FA is verified against the API but not against a real phone.** Enable →
+  scan → verify → sign in from a cold jar → backup code → regenerate → disable
+  were all exercised against Postgres, with TOTP codes computed from the
+  issued secret, and the QR's own secret round-tripped (a code derived from
+  what the QR encodes was accepted). What nobody has done is point Google
+  Authenticator at the picture. Keep a backup code to hand the first time.
+- **Sign-in rate limiting shares one bucket** in dev: better-auth logs
+  "could not determine a client IP and is falling back to a single shared
+  per-path bucket" on every sign-in, so the 5/min limit is global rather than
+  per-IP. Pre-existing, and it bites in testing (five curl sign-ins lock the
+  browser out for a minute). Behind Traefik it needs
+  `advanced.ipAddress.ipAddressHeaders` set for the limit to be per-client;
+  until then it's a self-DoS risk, not a bypass.
+- **Never interpolate a bare column into a correlated subquery.** Drizzle
+  emits an *unqualified* `"id"` for a column inside a `sql` template when the
+  outer query has no join, and Postgres binds a bare name to the innermost
+  scope — so `… FROM "session" WHERE "user_id" = "id"` compares two of
+  `session`'s own columns and returns zero, silently. `admin-users.ts` has a
+  `qualified(table, column)` helper for exactly this and uses it on every
+  reference. The scalar subquery in `routes/collections.ts` is currently safe
+  only because `collection_votes` happens to have no `id` column — adding one
+  would break it without any error.
 - The admin **Users tab is read-only**. It lists accounts and what each has
   done; it can't ban, promote, reset a password or delete. Those need
   confirmation flows and an audit trail, and they're the rest of the phase 6

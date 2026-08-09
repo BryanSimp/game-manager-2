@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "../lib/auth.js";
 
@@ -19,9 +19,11 @@ import { authClient } from "../lib/auth.js";
  *    unverified until the first correct code. Mistyping the key into your
  *    authenticator therefore fails here, in a form you can retry, rather than
  *    at the next sign-in when it's a lockout.
- *  - **Backup codes are shown once.** They're the recovery path for a lost
- *    phone, and the card refuses to move on until they've been copied or
- *    downloaded.
+ *  - **Backup codes are shown once per set.** They're the recovery path for a
+ *    lost phone, so a set that's been mislaid is no recovery path at all —
+ *    "New backup codes" issues a fresh set (and voids the old one) without
+ *    disturbing the authenticator app, which is why regenerating skips the
+ *    scan step entirely.
  *  - **The password is asked for on every change.** better-auth requires it,
  *    and it's what stops a borrowed unlocked laptop from silently adding or
  *    removing a factor.
@@ -108,10 +110,19 @@ const inputClass =
   "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500";
 
 type Step = "idle" | "password" | "scan" | "codes";
+/** What the one password field is being asked for. */
+type Intent = "enable" | "disable" | "regenerate";
+
+const PASSWORD_PROMPT: Record<Intent, { verb: string; danger: boolean }> = {
+  enable: { verb: "Continue", danger: false },
+  disable: { verb: "Turn it off", danger: true },
+  regenerate: { verb: "Replace my codes", danger: true },
+};
 
 export function TwoFactorCard({ enabled }: { enabled: boolean }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("idle");
+  const [intent, setIntent] = useState<Intent>("enable");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [totpUri, setTotpUri] = useState<string | null>(null);
@@ -119,26 +130,31 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
   const [showSecret, setShowSecret] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  /** set while disabling, so the one password field knows which flow it's in */
-  const disabling = useRef(false);
 
   function reset() {
     setStep("idle");
+    setIntent("enable");
     setPassword("");
     setCode("");
     setTotpUri(null);
     setBackupCodes([]);
     setShowSecret(false);
     setError(null);
-    disabling.current = false;
   }
 
-  /** Step 1 — password, in exchange for a secret and a set of backup codes. */
+  function begin(next: Intent) {
+    setIntent(next);
+    setError(null);
+    setStep("password");
+  }
+
+  /** Step 1 — the password, in exchange for whatever `intent` asked for. */
   async function onStart(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
-    if (disabling.current) {
+
+    if (intent === "disable") {
       const { error: err } = await authClient.twoFactor.disable({ password });
       setBusy(false);
       if (err) {
@@ -149,6 +165,22 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
       reset();
       return;
     }
+
+    if (intent === "regenerate") {
+      const { data, error: err } = await authClient.twoFactor.generateBackupCodes({ password });
+      setBusy(false);
+      if (err || !data) {
+        setError(err?.message ?? "Couldn't make new codes — is that the right password?");
+        return;
+      }
+      setBackupCodes(data.backupCodes);
+      setPassword("");
+      // straight to the codes: there's no secret to re-scan, the
+      // authenticator app is untouched
+      setStep("codes");
+      return;
+    }
+
     const { data, error: err } = await authClient.twoFactor.enable({ password });
     setBusy(false);
     if (err || !data) {
@@ -236,15 +268,24 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
                 A trusted device stays trusted for 30 days. Signing out doesn't clear that —
                 clearing the site's cookies does.
               </p>
-              <button
-                onClick={() => {
-                  disabling.current = true;
-                  setStep("password");
-                }}
-                className="mt-4 rounded-lg border border-red-900 px-4 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-950"
-              >
-                Turn off two-factor
-              </button>
+              <p className="mt-2 text-sm text-zinc-500">
+                Lost track of your backup codes? Make a new set. The old ones stop working the
+                moment you do.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  onClick={() => begin("regenerate")}
+                  className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-zinc-800"
+                >
+                  New backup codes
+                </button>
+                <button
+                  onClick={() => begin("disable")}
+                  className="rounded-lg border border-red-900 px-4 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-950"
+                >
+                  Turn off two-factor
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -253,10 +294,7 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
                 Auth and Bitwarden all work.
               </p>
               <button
-                onClick={() => {
-                  disabling.current = false;
-                  setStep("password");
-                }}
+                onClick={() => begin("enable")}
                 className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
               >
                 Set up two-factor
@@ -268,6 +306,12 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
 
       {step === "password" && (
         <form onSubmit={onStart} className="mt-4">
+          {intent === "regenerate" && (
+            <p className="mb-3 text-sm text-amber-400">
+              This replaces every code at once — anything you wrote down or saved before will stop
+              working. Your authenticator app is unaffected.
+            </p>
+          )}
           <label className="block text-sm font-medium text-zinc-300">
             Confirm your password
             <input
@@ -285,12 +329,12 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
               type="submit"
               disabled={busy}
               className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-50 ${
-                disabling.current
+                PASSWORD_PROMPT[intent].danger
                   ? "bg-red-700 hover:bg-red-600"
                   : "bg-indigo-600 hover:bg-indigo-500"
               }`}
             >
-              {busy ? "…" : disabling.current ? "Turn it off" : "Continue"}
+              {busy ? "…" : PASSWORD_PROMPT[intent].verb}
             </button>
             <button
               type="button"
@@ -368,7 +412,9 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
       {step === "codes" && (
         <div className="mt-4">
           <p className="rounded-lg border border-emerald-900 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-300">
-            Two-factor is on. Save these backup codes now — this is the only time they're shown.
+            {intent === "regenerate"
+              ? "New backup codes. The old set no longer works — replace anywhere you'd saved them."
+              : "Two-factor is on. Save these backup codes now — this is the only time they're shown."}
           </p>
           <p className="mt-3 text-sm text-zinc-400">
             Each one signs you in once if you lose your phone. Keep them somewhere that isn't your
