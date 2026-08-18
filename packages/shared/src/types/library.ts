@@ -290,6 +290,12 @@ export interface Preferences {
    * breakpoints keep their own smaller counts — this is the widest step.
    */
   libraryColumns: number;
+  /**
+   * Category the library opens filtered to — a built-in key, a custom
+   * category id, or `'all'`. It's the starting point, not a lock: picking a
+   * different chip overrides it for as long as you stay on the page.
+   */
+  defaultLibraryFilter: string;
 }
 export type ImportSource = "screenshot" | "shelf_photo" | "text_paste" | "steam";
 export type ImportJobStatus = "pending" | "ocr" | "matching" | "review" | "done" | "failed";

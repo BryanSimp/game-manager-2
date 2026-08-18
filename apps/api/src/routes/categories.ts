@@ -109,6 +109,17 @@ export function registerCategoryRoutes(app: FastifyInstance): void {
         ),
       );
 
+    // …or as the view the library opens on, which would filter to nothing
+    await db
+      .update(schema.userPreferences)
+      .set({ defaultLibraryFilter: "all" })
+      .where(
+        and(
+          eq(schema.userPreferences.userId, user.id),
+          eq(schema.userPreferences.defaultLibraryFilter, row.id),
+        ),
+      );
+
     await db.delete(schema.customCategories).where(eq(schema.customCategories.id, row.id));
     return { ok: true, movedToUncategorized: moved.length };
   });

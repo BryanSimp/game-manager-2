@@ -203,6 +203,30 @@ export function PreferencesPage() {
             onChange={(badgeOpacity) => save.mutate({ badgeOpacity })}
           />
         </section>
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h2 className="text-lg font-semibold">Library view</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            The category the Library opens on. It's a starting point, not a lock — picking a
+            different chip still works, and the library goes back to this next time you open it.
+          </p>
+
+          <label className="mt-4 flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+            Open on
+            <select
+              value={p?.defaultLibraryFilter ?? "all"}
+              onChange={(e) => save.mutate({ defaultLibraryFilter: e.target.value })}
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
+            >
+              <option value="all">All games</option>
+              {(categories ?? []).map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label} ({c.count})
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
       </div>
     </Shell>
   );
