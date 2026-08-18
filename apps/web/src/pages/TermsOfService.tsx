@@ -1,8 +1,16 @@
 import { LegalLayout, LegalSection } from "../components/LegalLayout.js";
+import { useSeo } from "../lib/seo.js";
 
 const li = "list-disc space-y-1 pl-5";
 
 export function TermsOfServicePage() {
+  useSeo({
+    title: "Terms of Service",
+    description:
+      "The terms you agree to when you create a Game Manager account: eligibility, acceptable use, content ownership and account termination.",
+    path: "/terms",
+  });
+
   return (
     <LegalLayout title="Terms of Service" updated="August 3, 2026">
       <LegalSection heading="1. Acceptance of terms">

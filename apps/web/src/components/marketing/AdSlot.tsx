@@ -51,6 +51,19 @@ export function AdSlot({ slotId, format = "auto", minHeight = 250, className = "
 
   if (hidden) return null;
 
+  // An unconfigured slot renders nothing outside dev. The placeholder below
+  // is a development aid, and prerendering turned it into a liability:
+  // `scripts/prerender.mjs` bakes these pages into static HTML, so "Reserved —
+  // awaiting an AdSense unit id" became crawlable text on every public URL. A
+  // reviewer reading a 700-word article framed by four captioned empty boxes
+  // is being shown a site built for ads rather than for readers, which is the
+  // judgement we're trying to reverse.
+  //
+  // SSR is checked as well as PROD because the prerenderer runs through Vite's
+  // dev-mode SSR runner, where PROD is false — the snapshot would otherwise
+  // contradict the bundle shipping beside it.
+  if (!canServe && (import.meta.env.PROD || import.meta.env.SSR)) return null;
+
   if (canServe) {
     return (
       <div className={className} aria-label="Advertisement" role="complementary">
