@@ -374,6 +374,308 @@ export const GUIDES: Guide[] = [
       },
     ],
   },
+  {
+    slug: "zelda-games-in-order",
+    title: "What order to play the Zelda games",
+    excerpt:
+      "Release order, Nintendo's official timeline, and the order that actually makes sense for someone starting now.",
+    category: "Play order",
+    readMinutes: 9,
+    updated: "2026-08-16",
+    intro: [
+      "Two different questions get asked as one here. 'What order did the Zelda games come out?' has a flat factual answer. 'What order does the story happen in?' has an official answer that Nintendo published in 2011 and has been quietly amending ever since. Neither is the order most people should actually play them in.",
+      "The reason is that Zelda is not a serial. Almost every game is a fresh Hyrule with a fresh Link, and the connective tissue between them is thematic — a sword, a name, a recurring villain — rather than narrative. You are not going to be lost. What you can be is bored, and that is the real risk when someone starts at the 1986 original out of a sense of duty.",
+    ],
+    sections: [
+      {
+        heading: "The short answer: start with a good one, not the first one",
+        paragraphs: [
+          "Pick an entry point that matches the kind of game you want, play it, and let it tell you whether you want more. Four of them work as a first Zelda, and they are very different from each other.",
+          "Breath of the Wild is the one to start with if you want the modern open-world version of the series and have never played any of them. Tears of the Kingdom is its direct sequel and is better in almost every measurable way, but it assumes you have spent eighty hours in that map already, so playing it first spends a lot of goodwill you have not banked yet.",
+          "A Link to the Past is the one to start with if you want the classic top-down formula at its tightest. It is thirty-odd years old and has aged remarkably well, largely because it was already the refined version of what the first two games were reaching for.",
+          "Ocarina of Time is the historically important one, and it is still good, but it is the entry most likely to feel its age in the moment-to-moment — the camera and the pacing of its opening hours are of their era. Play it because you want to see the hinge the whole series turns on, not because you feel you have to.",
+          "Link's Awakening is the smallest and strangest, and the 2019 remake makes it the easiest to recommend outright: about twelve hours, self-contained, and it has nothing to do with the timeline at all.",
+        ],
+        bullets: [
+          "Want a big open world → Breath of the Wild",
+          "Want a classic dungeon crawl → A Link to the Past",
+          "Want the historically important one → Ocarina of Time",
+          "Want something short → Link's Awakening",
+        ],
+      },
+      {
+        heading: "Why chronological order is a trap",
+        paragraphs: [
+          "Nintendo's official timeline splits into three branches after Ocarina of Time, on the basis that its time-travel ending produces more than one outcome. That is a fun piece of lore and a terrible instruction manual. Playing chronologically means starting with Skyward Sword, which is the earliest story but was released in 2011, has the most divisive controls in the series, and opens with several hours of tutorial.",
+          "It also means bouncing between hardware generations constantly. Chronological order will send you from a 2011 Wii game to a 2000 Nintendo 64 game to a 2006 GameCube game inside the first three entries. Every one of those transitions costs you a re-acclimatisation you did not need to pay for.",
+          "The deeper problem is that the timeline was assembled after the fact. These games were not written as a continuous story and it shows the moment you try to play them as one. Treat it as trivia you enjoy after the fact rather than a route.",
+        ],
+      },
+      {
+        heading: "The sequels that genuinely are sequels",
+        paragraphs: [
+          "There is a short list of games where order really does matter, because they are direct continuations with returning characters and a world that assumes you were there. These are worth respecting even if you ignore everything else.",
+          "Everything not on this list can be played in essentially any order without confusion.",
+        ],
+        bullets: [
+          "Majora's Mask follows Ocarina of Time — same Link, immediately after",
+          "Tears of the Kingdom follows Breath of the Wild — same map, same Link",
+          "Phantom Hourglass follows The Wind Waker, and Spirit Tracks follows Phantom Hourglass",
+          "Zelda II: The Adventure of Link follows the original, and is the odd one out in the whole series",
+        ],
+      },
+      {
+        heading: "Nintendo's timeline, briefly",
+        paragraphs: [
+          "If you want the lore version: Skyward Sword is first, followed by The Minish Cap and Four Swords, then Ocarina of Time. Ocarina then splits the series into three.",
+          "The Child Era continues with Majora's Mask and Twilight Princess. The Adult Era continues with The Wind Waker, Phantom Hourglass and Spirit Tracks. The third branch — the one where Link loses — runs A Link to the Past, the Oracle games, Link's Awakening, then the original Legend of Zelda and Zelda II.",
+          "Breath of the Wild and Tears of the Kingdom sit thousands of years after all of it, deliberately far enough out that the branch question stops mattering. Nintendo has been fairly explicit that pinning them precisely is not the point.",
+        ],
+      },
+      {
+        heading: "A route that actually works",
+        paragraphs: [
+          "If you want a single recommended run rather than a decision tree, this one front-loads the games most likely to keep you going and puts the historically interesting but rougher entries later, once you have enough affection for the series to meet them halfway.",
+          "Stop whenever you like. This is a series where finishing four entries and moving on is a perfectly good outcome, and treating it as a completionist obligation is how people end up resenting a hobby.",
+        ],
+        bullets: [
+          "1. Breath of the Wild — the modern entry point",
+          "2. Tears of the Kingdom — its direct sequel, once the map means something to you",
+          "3. A Link to the Past — the classic formula, still sharp",
+          "4. Link's Awakening — short, strange, self-contained",
+          "5. Ocarina of Time — the hinge the series turns on",
+          "6. Majora's Mask — only after Ocarina, and much better for it",
+          "7. The Wind Waker — the one whose art style outlived every argument about it",
+          "8. Twilight Princess, then anything left that appeals",
+        ],
+      },
+      {
+        heading: "Keeping track of a run this long",
+        paragraphs: [
+          "Nineteen mainline games across nine consoles is exactly the kind of list that gets lost in a notes app. The useful thing to record is not just which ones you have finished but which order you decided on and why, because that decision is the part you will forget by the third entry.",
+          "A play-order collection handles this better than a flat list: the run is an ordered sequence you set once, each game carries its own status, and the branch points — 'play Majora's only after Ocarina' — are visible as structure rather than as a comment you left yourself. It also survives the gap. Series runs this long are usually measured in years, not weeks, and the thing you actually need in month eight is a reminder of where you were.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "mass-effect-play-order",
+    title: "Mass Effect in order, and what carries over",
+    excerpt:
+      "The trilogy is one continuous save with decisions that persist across all three games. Here is what transfers, and where Andromeda fits.",
+    category: "Play order",
+    readMinutes: 7,
+    updated: "2026-08-14",
+    intro: [
+      "Mass Effect is the rare series where play order is not a matter of taste. The original trilogy is one story told across three games, with a save file that carries your decisions forward — including which characters are alive to appear in the next one. Playing it out of order does not just spoil things, it removes the entire mechanism the series is built around.",
+      "So the order is settled. What is worth knowing is what actually transfers, what happens if you skip an entry, and whether the two games outside the trilogy are worth your time.",
+    ],
+    sections: [
+      {
+        heading: "The order",
+        paragraphs: [
+          "Mass Effect, Mass Effect 2, Mass Effect 3, in that order, all three of them, ideally with the same imported save. The Legendary Edition packages the trilogy with its DLC and brings the first game's combat and interface close enough to the later two that the transition no longer feels like a punishment — which was, for years, the main reason people bounced off at the start.",
+          "Andromeda is a separate story in a different galaxy with a different cast. It is not a sequel in any meaningful sense and can be played whenever, or not at all. Play it after the trilogy if you play it, because a lot of what it does only reads as interesting against what came before.",
+        ],
+      },
+      {
+        heading: "What actually carries over",
+        paragraphs: [
+          "The save import is the point of the series, and it is more thorough than people expect. Decisions from your first playthrough surface in the second and third games as characters who appear or do not, as factions that help or refuse, and occasionally as a single line of dialogue acknowledging something you did forty hours earlier.",
+          "The most consequential piece is that squadmates can die permanently, and the game does not stop you. A character killed in the first game is simply absent from the rest of the trilogy, and their role gets filled by someone else or by nobody. Mass Effect 2's ending in particular can lose you most of the cast if you go into it unprepared, and those losses propagate straight into the third game.",
+          "Starting a later game fresh instead of importing gives you a generic default history — a set of decisions someone else made. Everything technically works, but the series stops being about your Shepard, which is the only thing it is really selling.",
+        ],
+        bullets: [
+          "Squadmate deaths are permanent and carry across every subsequent game",
+          "Major faction and character decisions resurface, sometimes many hours later",
+          "Your Shepard's appearance, class and background import too",
+          "A fresh start substitutes a default history, which is the one genuinely lossy option",
+        ],
+      },
+      {
+        heading: "If you only have time for one",
+        paragraphs: [
+          "Mass Effect 2 is the best individual game of the three and it is the usual answer to 'which one is the good one'. It is also the one that depends most heavily on you caring about people you met in the first game, and its ending is built to punish a player who has not been paying attention to relationships built across two games.",
+          "So the honest answer is that there is no good single entry point. If you genuinely only want one game, play the second and accept you are getting perhaps sixty per cent of it. If you want the series, start at the beginning — the Legendary Edition removed most of the reason not to.",
+        ],
+      },
+      {
+        heading: "Budgeting the run",
+        paragraphs: [
+          "The trilogy is roughly 30, 35 and 40 hours on a main-story run, and comfortably half again as much if you do the side content — which in this series is where most of the character writing lives, so skipping it to save time is a false economy.",
+          "That puts a full trilogy run somewhere between 100 and 160 hours. It is worth knowing that number before you start rather than discovering it in the middle of game two, because the most common failure mode is stalling out partway through the third game, which is exactly the point where the previous hundred hours were supposed to pay off.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "final-fantasy-where-to-start",
+    title: "Where to start with Final Fantasy",
+    excerpt:
+      "The numbered games are standalone, so the question is not order but which one suits you. A guide to picking an entry point.",
+    category: "Play order",
+    readMinutes: 8,
+    updated: "2026-08-12",
+    intro: [
+      "Final Fantasy is not a series in the way most series are. The numbered entries share a handful of recurring motifs — crystals, chocobos, a character called Cid — and essentially nothing else. Different worlds, different casts, different combat systems, sometimes radically different genres.",
+      "This means there is no play order, and asking for one is asking the wrong question. What you actually want is to pick the entry point that suits what you want out of a game, because the gap between two Final Fantasy games can be wider than the gap between two unrelated series.",
+    ],
+    sections: [
+      {
+        heading: "The exceptions to 'they are all standalone'",
+        paragraphs: [
+          "A short list of games are direct sequels and do assume the original. Everything else can be started cold.",
+          "The remake project is the one that catches people out. Final Fantasy VII Remake and Rebirth are a multi-part retelling of the 1997 game, and they are in continuity with each other — Rebirth expects you to have played Remake. They are also, deliberately, not a straight retelling, which is a much more interesting experience if you know the original but works fine if you do not.",
+        ],
+        bullets: [
+          "X-2 follows X directly",
+          "XIII-2 and Lightning Returns follow XIII",
+          "VII Rebirth follows VII Remake",
+          "Everything numbered otherwise is a clean start",
+        ],
+      },
+      {
+        heading: "Picking by what you want",
+        paragraphs: [
+          "The most reliable way to choose is by combat system and tone, because that is what actually differs. Turn-based and menu-driven is a fundamentally different hobby from real-time action, and the series contains both under the same name.",
+          "If you want classic turn-based, VI and IX are the two strongest recommendations. VI has the best ensemble cast in the series and a mid-game structural turn that still holds up. IX is the warmest and most deliberately traditional, and is the one people who grew up with the series tend to name when pushed.",
+          "If you want modern action combat, XVI is a full action game with light role-playing elements, and VII Remake sits in between with a hybrid that pauses for menu commands. XV is the open-road one, uneven but with a specific charm that nothing else in the series has.",
+          "If you want the one that everyone has an opinion about, that is VII — either the 1997 original or the remake project, and both are defensible starting points for different reasons.",
+          "If you want a game you will still be playing in two years, XIV is an MMO with a story that people finish and then talk about for a decade. It is also the single largest time commitment on this list by a wide margin.",
+        ],
+        bullets: [
+          "Classic turn-based → VI or IX",
+          "Modern action → XVI",
+          "The famous one → VII, original or Remake",
+          "Something with a road trip → XV",
+          "An ongoing world → XIV",
+        ],
+      },
+      {
+        heading: "The ones not to start with",
+        paragraphs: [
+          "The first three games are historically interesting and mechanically thin by modern standards; they are worth playing after you like the series, not before. II in particular has a stat progression system that is famously unintuitive and will teach you the wrong lessons about what these games are.",
+          "XIII is the other common trap. It is not a bad game, but it is linear for roughly its first twenty hours in a way that reads as broken if it is your first exposure, and its combat only opens up once it has stopped being restrictive. People who love XIII almost universally played something else first.",
+        ],
+      },
+      {
+        heading: "How long these actually take",
+        paragraphs: [
+          "Main-story runs cluster around 35 to 50 hours for most numbered entries, with completionist runs frequently doubling that. XII and XV go longer, and XIV is not measurable in the same units at all.",
+          "That figure is the one worth checking before you start rather than after. The most common way a Final Fantasy run dies is picking the entry with the most name recognition rather than the one that fits the time available, stalling at hour twenty-five, and concluding the series is not for you — when the actual problem was that a different entry would have suited better.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "metal-gear-solid-play-order",
+    title: "Metal Gear Solid in order: release or chronological",
+    excerpt:
+      "Chronological order spoils the twists the series is built on. Release order is the right answer, and here is the exception worth knowing.",
+    category: "Play order",
+    readMinutes: 7,
+    updated: "2026-08-10",
+    intro: [
+      "Metal Gear is the series where the chronological-versus-release argument has a clear winner, and it is not close. The games are built around revelations about who characters are and what happened before, and the prequels were written for an audience that already had the later games' information. Play them first and you are reading the punchline before the joke.",
+      "So: release order. The useful part of this guide is which games are actually mainline, where the prequels fit, and the one reasonable exception to the rule.",
+    ],
+    sections: [
+      {
+        heading: "Release order, with the mainline games only",
+        paragraphs: [
+          "The core sequence is Metal Gear Solid, Sons of Liberty, Snake Eater, Guns of the Patriots, then Peace Walker and The Phantom Pain. That is the spine, and playing it in that order is the default recommendation for anyone.",
+          "The two MSX games that precede Metal Gear Solid — the original Metal Gear and Metal Gear 2: Solid Snake — are genuinely worth playing and are included in the Master Collection, but they are optional in a way the rest are not. Metal Gear Solid was designed as an entry point and recaps what you need.",
+          "Ground Zeroes is a short prologue to The Phantom Pain rather than a game in its own right; play it immediately before, not as a separate thing.",
+        ],
+        bullets: [
+          "Metal Gear Solid (1998)",
+          "Metal Gear Solid 2: Sons of Liberty",
+          "Metal Gear Solid 3: Snake Eater",
+          "Metal Gear Solid 4: Guns of the Patriots",
+          "Peace Walker, then Ground Zeroes, then The Phantom Pain",
+        ],
+      },
+      {
+        heading: "Why chronological order breaks the series",
+        paragraphs: [
+          "Chronologically, Snake Eater is first — it is set in 1964 and is a prequel about a character whose significance depends entirely on games released before it. Its ending lands as one of the best in the medium if you have played the earlier-released games, and as a mildly confusing spy story if you have not.",
+          "The same problem repeats at every prequel. Peace Walker and The Phantom Pain are both built on the assumption that you know how this ends, and much of their tension comes from watching a character become someone you have already met. Reordering them removes the tension entirely and replaces it with nothing.",
+          "Sons of Liberty makes the point most sharply: its whole structure is a deliberate manipulation of an audience that has played the first game and expects a particular thing. There is no version of playing it out of order that preserves what it is doing.",
+        ],
+      },
+      {
+        heading: "The one reasonable exception",
+        paragraphs: [
+          "If you have tried Metal Gear Solid and bounced off the 1998 controls — which is a real and common outcome — starting with Snake Eater is defensible. It is the most approachable of the older games, its story is self-contained enough to work cold, and it is the entry most likely to convince you the series is worth the friction.",
+          "You will lose some of its ending. That is a genuine cost, and it is still better than not playing any of them. Go back to Metal Gear Solid afterwards; it reads differently in that direction, but it reads.",
+        ],
+      },
+      {
+        heading: "What counts as mainline",
+        paragraphs: [
+          "The series has a long tail of spin-offs — the Acid card games, Portable Ops, Rising, Survive — and none of them are required. Rising is a good action game with almost no bearing on the story. Portable Ops sits awkwardly between Snake Eater and Peace Walker and is the only one with a real argument for inclusion, though Peace Walker covers enough of its ground that skipping it costs little.",
+          "This matters more than it sounds, because 'play the Metal Gear series' can mean eight games or fifteen depending on who is counting, and starting a run without deciding which is a good way to stall out somewhere around the card game.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "assassins-creed-play-order",
+    title: "Assassin's Creed: which ones actually connect",
+    excerpt:
+      "Twelve-plus mainline games, one continuous framing story, and a hard split in the middle. What to play and what to skip.",
+    category: "Play order",
+    readMinutes: 8,
+    updated: "2026-08-11",
+    intro: [
+      "Assassin's Creed is two series wearing the same name. The first runs from 2007 to about 2012 and is a serialised story with a continuous modern-day frame. The second, starting with Origins in 2017, is a set of large open-world role-playing games that are essentially standalone.",
+      "Knowing where the split falls is most of what you need. It is the difference between a run that requires order and a run where you can pick whichever historical setting appeals and start there.",
+    ],
+    sections: [
+      {
+        heading: "The first arc genuinely is serialised",
+        paragraphs: [
+          "Assassin's Creed, II, Brotherhood, Revelations and III form one story with a single modern-day protagonist and a plot that continues directly between entries. Brotherhood and Revelations in particular are direct continuations of II with the same lead — they were not conceived as a trilogy but they function as one.",
+          "Play these in release order or not at all. Starting at Brotherhood means starting mid-sentence, and the modern-day framing that ties them together is the part that makes the least sense out of sequence.",
+          "The first game is the weakest and the most repetitive, and it is also the one that sets up everything. If you are going to play the arc, play it; if the repetition is going to stop you, start at II and accept some early confusion. II is where the series actually became good.",
+        ],
+        bullets: [
+          "Assassin's Creed (2007) — sets up the frame, mechanically thin",
+          "Assassin's Creed II — the one where it works",
+          "Brotherhood and Revelations — direct continuations of II",
+          "Assassin's Creed III — closes the modern-day arc",
+        ],
+      },
+      {
+        heading: "Black Flag is the exception everyone recommends",
+        paragraphs: [
+          "Black Flag is nominally the fourth in that line and is in practice a pirate game with an Assassin's Creed frame bolted on. It is the entry most often recommended to people who have never played any of them, and it works cold — the naval sailing that everyone remembers has nothing to do with the ongoing plot.",
+          "It is a good starting point precisely because it does not commit you to anything. Rogue, Unity and Syndicate follow in the same broad era of the series and are all optional; Unity in particular is worth knowing had a famously rough launch and is much better now than its reputation.",
+        ],
+      },
+      {
+        heading: "The modern trilogy is standalone",
+        paragraphs: [
+          "Origins, Odyssey and Valhalla are large open-world role-playing games sharing a systems framework rather than a plot. Origins is set in Ptolemaic Egypt, Odyssey in Peloponnesian War Greece, Valhalla in ninth-century England. Any of them is a valid first Assassin's Creed.",
+          "There is a loose chronological relationship — Odyssey is set earliest despite being released second — and a thin thread of connective lore, but none of it constrains order. Pick the setting you find most interesting and start there.",
+          "The one thing to know before starting any of them is scale. These are 40 to 60 hour games on a main-story run and well past 100 if you engage with the map, and they are structurally similar enough that playing them back to back is the fastest way to burn out on the series entirely. Space them.",
+        ],
+        bullets: [
+          "Origins — Egypt, the tightest of the three",
+          "Odyssey — Greece, the largest and most role-playing-forward",
+          "Valhalla — England, the longest by some distance",
+          "Play one, then play something else before the next",
+        ],
+      },
+      {
+        heading: "A workable route",
+        paragraphs: [
+          "For most people the honest recommendation is not to play all of them. Twelve mainline games across eighteen years, several of which are near-identical in structure, is a recipe for resenting a series you started out enjoying.",
+          "Play the II–Brotherhood–Revelations run for the serialised story at its best. Play Black Flag because it is the best individual game with the name on it. Play whichever of the modern trilogy has the setting you like most. That is five games, it covers everything the series is actually good at, and it leaves you the option of more rather than the obligation.",
+        ],
+      },
+    ],
+  },
 ];
 
 export function guideBySlug(slug: string): Guide | undefined {

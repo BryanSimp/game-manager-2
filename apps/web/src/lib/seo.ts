@@ -29,6 +29,58 @@ export interface SeoInput {
   noIndex?: boolean;
 }
 
+/**
+ * What the route being statically rendered asked for, if any.
+ *
+ * `useSeo` works by mutating `document` from an effect, and during a
+ * build-time render there is neither a document to mutate nor an effect to run
+ * — so under SSR the hook records its input here instead and
+ * `scripts/prerender.mjs` writes the tags into the emitted HTML. That is most
+ * of the point of prerendering: the per-page title, description and canonical
+ * that Googlebot only sees by executing JavaScript are exactly the ones an ad
+ * crawler never executes, which is why every URL used to serve the landing
+ * page's `<head>` and a canonical pointing at `/`.
+ *
+ * Recording during render rather than in an effect makes `useSeo` impure under
+ * SSR. That is confined to the build, where the prerenderer renders one route
+ * and calls `takeSeo()` before starting the next.
+ */
+let ssrSeo: SeoInput | null = null;
+
+/** Reads and clears the SEO recorded by the last static render. */
+export function takeSeo(): SeoInput | null {
+  const captured = ssrSeo;
+  ssrSeo = null;
+  return captured;
+}
+
+/** The final tag values for a route: title suffixed, path resolved to a URL. */
+export interface ResolvedSeo {
+  title: string;
+  description: string;
+  url: string;
+  robots: string;
+  jsonLd: Record<string, unknown> | Array<Record<string, unknown>> | null;
+}
+
+/**
+ * Turns a route's SEO input into the values that go on the page.
+ *
+ * Shared by the hook and by the prerenderer so the static HTML and the
+ * runtime-patched head can't drift — the failure that mattered here was
+ * precisely a `<head>` that said one thing before JavaScript ran and another
+ * after.
+ */
+export function resolveSeo(input: SeoInput): ResolvedSeo {
+  return {
+    title: input.title.includes(SITE_NAME) ? input.title : `${input.title} | ${SITE_NAME}`,
+    description: input.description,
+    url: `${SITE_URL}${input.path}`,
+    robots: input.noIndex ? "noindex, nofollow" : "index, follow",
+    jsonLd: input.jsonLd ?? null,
+  };
+}
+
 /** Finds a meta/link tag or creates it, remembering which ones we created. */
 function upsert(
   selector: string,
@@ -68,9 +120,13 @@ function property(prop: string, created: HTMLElement[]): HTMLMetaElement {
 }
 
 export function useSeo({ title, description, path, jsonLd, noIndex }: SeoInput): void {
+  // Build-time render: no document, no effects. Record and let the
+  // prerenderer emit these into the static HTML. Vite replaces this with
+  // `false` in the client build, so the branch is dead code in the browser.
+  if (import.meta.env.SSR) ssrSeo = { title, description, path, jsonLd, noIndex };
+
   useEffect(() => {
-    const fullTitle = title.includes(SITE_NAME) ? title : `${title} | ${SITE_NAME}`;
-    const url = `${SITE_URL}${path}`;
+    const { title: fullTitle, url, robots } = resolveSeo({ title, description, path, noIndex });
 
     // Snapshot what we're about to overwrite so unmount can put it back.
     const previousTitle = document.title;
@@ -89,7 +145,7 @@ export function useSeo({ title, description, path, jsonLd, noIndex }: SeoInput):
 
     document.title = fullTitle;
     set(meta("description", created), "content", description);
-    set(meta("robots", created), "content", noIndex ? "noindex, nofollow" : "index, follow");
+    set(meta("robots", created), "content", robots);
 
     const canonical = upsert(
       'link[rel="canonical"]',
@@ -110,6 +166,19 @@ export function useSeo({ title, description, path, jsonLd, noIndex }: SeoInput):
     set(meta("twitter:card", created), "content", "summary_large_image");
     set(meta("twitter:title", created), "content", fullTitle);
     set(meta("twitter:description", created), "content", description);
+
+    // Drop any structured data already in the head before adding ours.
+    //
+    // Every other tag here is upserted, so the prerendered value is simply
+    // overwritten — but JSON-LD is appended, and the prerendered block sits in
+    // <head> where `createRoot` never reaches. Left alone it survives every
+    // client-side navigation, so a visitor who landed on /guides and clicked
+    // through to an article would be carrying that article's schema *and* the
+    // hub's ItemList. Anything still marked `data-seo="route"` at mount is by
+    // definition stale: a route unmounting removes its own first.
+    for (const stale of document.head.querySelectorAll('script[data-seo="route"]')) {
+      stale.remove();
+    }
 
     // Structured data is always ours, so it's created and torn down whole
     // rather than patched — two pages must never merge their schemas.

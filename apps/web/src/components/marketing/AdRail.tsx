@@ -20,6 +20,12 @@ export function AdRail({
   side: "left" | "right";
   slotId?: string;
 }) {
+  // With no unit to serve, the column is dropped entirely rather than
+  // reserving 300px of empty gutter on each side — see the matching note in
+  // AdSlot for why both PROD and SSR are checked. Dev still renders the
+  // placeholder, so the reserved layout stays reviewable.
+  if (!slotId && (import.meta.env.PROD || import.meta.env.SSR)) return null;
+
   return (
     <aside
       className="hidden w-[300px] min-w-[300px] shrink-0 xl:block"

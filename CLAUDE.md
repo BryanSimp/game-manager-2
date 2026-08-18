@@ -151,6 +151,42 @@ Phase 0–8 roadmap — read it before making design decisions.
   feature now. The 3D box viewer, `services/boxart.ts` (libretro-thumbnails
   scans) and `packages/shared/src/case-colors.ts` were removed in phase 20;
   `game_box_art` survives as a parked table backing nothing.
+- **The public pages are prerendered to real HTML** (`apps/web/scripts/prerender.mjs`,
+  run by `pnpm --filter @gm/web build` after `vite build`). The app is a
+  client-rendered SPA, so every URL on gamesmanager.app used to serve
+  `<div id="root"></div>` — 53 bytes — plus the landing page's `<title>`,
+  its description and a `<link rel="canonical">` pointing at `/`. Googlebot
+  runs JavaScript and saw the real pages; **AdSense's review crawler does
+  not, and rejected the site as "low value content"** on the strength of
+  eleven URLs that each declared themselves a copy of the homepage and
+  contained nothing. The prerenderer renders each public route through
+  Vite's SSR module runner and writes `dist/<route>/index.html` with the
+  markup inside `#root` and that route's real head tags.
+  **Adding a public route means adding it to `src/prerender/entry.tsx`** —
+  it keeps its own marketing-only route tree, because importing `main.tsx`
+  would pull in every signed-in page and run its `createRoot` at module
+  scope. Three things make it work: `useSeo` records its input under
+  `import.meta.env.SSR` instead of touching a `document` that isn't there
+  (`takeSeo`/`resolveSeo` in `lib/seo.ts`, shared with the hook so the two
+  can't drift); `better-auth/react` is aliased to a permanently signed-out
+  stub (`src/prerender/stub-auth.ts`), signed-out being the only view a
+  crawler can have; and it is **prerendering, not SSR** — `main.tsx` still
+  mounts with `createRoot`, which replaces the container outright, so there
+  is no hydration and no mismatch to keep in step.
+- **`dist/app.html` is the SPA fallback, not `index.html`.** nginx does
+  `try_files $uri $uri/ /app.html`, so `$uri/` picks up the prerendered
+  directories and everything else — the signed-in routes, which are not
+  prerendered — gets the empty shell. Falling back to `index.html` would
+  flash the prerendered landing page before the app mounted. `app.html` is
+  byte-for-byte what `index.html` used to be. `scripts/serve-dist.mjs`
+  serves `dist/` under those exact rules for checking a build locally;
+  `vite preview` can't, because it falls back to `index.html`.
+- **Ad placeholders are a dev-only affordance.** `AdSlot`/`AdRail` render
+  nothing when `AD_SLOTS` has no unit id and `import.meta.env.PROD || SSR`
+  — prerendering had baked "Reserved — awaiting an AdSense unit id" into
+  every public page as crawlable text, framing a 700-word article with four
+  captioned empty boxes. SSR is checked as well as PROD because the
+  prerenderer runs through Vite's *dev-mode* SSR runner, where PROD is false.
 
 ## Commands
 

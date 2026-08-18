@@ -1,6 +1,7 @@
 # Game Manager — https://gamesmanager.app
 #
-# The public pages (landing, guides, legal, contact) are open to crawlers.
+# The public pages (landing, guides, legal, contact) are prerendered to real
+# HTML by apps/web/scripts/prerender.mjs and are open to crawlers.
 # Everything behind sign-in is disallowed: those routes render a redirect to
 # /login for an anonymous fetch, so indexing them would put a pile of
 # identical empty pages in the index.
@@ -24,6 +25,7 @@ Disallow: /console/
 Disallow: /collections
 Disallow: /collection/
 Disallow: /game/
+Disallow: /catalog/
 Disallow: /add
 Disallow: /import
 Disallow: /friends
@@ -32,6 +34,16 @@ Disallow: /preferences
 Disallow: /settings
 Disallow: /admin/
 Disallow: /api/
+Disallow: /feedback
+
+# The read-only tour. It's the real app rendered from a seeded account, so it
+# has nothing to index that /guides and the landing page don't already say.
+Disallow: /demo
+
+# The SPA fallback shell that nginx serves for client-only routes — deliberately
+# an empty <div id="root">, and the exact thing every URL used to serve before
+# scripts/prerender.mjs existed.
+Disallow: /app.html
 
 # AdSense needs to fetch pages to decide what to serve on them.
 User-agent: Mediapartners-Google

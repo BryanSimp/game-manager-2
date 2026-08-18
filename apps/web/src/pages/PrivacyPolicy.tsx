@@ -1,8 +1,16 @@
 import { LegalLayout, LegalSection } from "../components/LegalLayout.js";
+import { useSeo } from "../lib/seo.js";
 
 const li = "list-disc space-y-1 pl-5";
 
 export function PrivacyPolicyPage() {
+  useSeo({
+    title: "Privacy Policy",
+    description:
+      "How Game Manager handles your account data, your game library, cookies and the third-party services it talks to on your behalf.",
+    path: "/privacy",
+  });
+
   return (
     <LegalLayout title="Privacy Policy" updated="August 4, 2026">
       <LegalSection heading="1. Overview">
