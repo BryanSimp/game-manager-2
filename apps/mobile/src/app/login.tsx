@@ -14,6 +14,13 @@ export default function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Second factor. Only reached by accounts that turned two-factor on in the
+  // web app — setup is web-only, but signing in has to work everywhere or
+  // enabling it would lock the phone out.
+  const [needsCode, setNeedsCode] = useState(false);
+  const [code, setCode] = useState("");
+  const [useBackupCode, setUseBackupCode] = useState(false);
+
   async function onSubmit() {
     setError(null);
     const parsed = loginSchema.safeParse({ email, password });
@@ -22,13 +29,87 @@ export default function LoginScreen() {
       return;
     }
     setBusy(true);
-    const { error: authError } = await authClient.signIn.email(parsed.data);
+    const { data, error: authError } = await authClient.signIn.email(parsed.data);
     setBusy(false);
     if (authError) {
       setError(authError.message ?? "Sign in failed");
       return;
     }
+    // Password accepted, but no session yet — the verify call below issues it.
+    if (data && "twoFactorRedirect" in data && data.twoFactorRedirect) {
+      setNeedsCode(true);
+      return;
+    }
     router.replace("/");
+  }
+
+  async function onVerify() {
+    const entered = code.trim();
+    if (!entered) {
+      setError("Enter the code from your authenticator app");
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    // trustDevice: a phone is a personal device, and being asked every time
+    // you open the app would be the kind of friction that gets 2FA turned off
+    const { error: verifyError } = useBackupCode
+      ? await authClient.twoFactor.verifyBackupCode({ code: entered, trustDevice: true })
+      : await authClient.twoFactor.verifyTotp({ code: entered, trustDevice: true });
+    setBusy(false);
+    if (verifyError) {
+      setError(verifyError.message ?? "That code didn't work");
+      setCode("");
+      return;
+    }
+    router.replace("/");
+  }
+
+  if (needsCode) {
+    return (
+      <AuthScreen subtitle="One more step">
+        <AuthError message={error} />
+        <Text style={[type.caption, styles.blurb]}>
+          {useBackupCode
+            ? "Enter one of the backup codes you saved. Each one works once."
+            : "This device hasn't signed in before, so we need the six-digit code from your authenticator app."}
+        </Text>
+        <AuthInput
+          label={useBackupCode ? "Backup code" : "Authentication code"}
+          value={code}
+          onChangeText={setCode}
+          keyboardType={useBackupCode ? "default" : "number-pad"}
+          autoComplete={useBackupCode ? "off" : "one-time-code"}
+          placeholder={useBackupCode ? "xxxxx-xxxxx" : "123456"}
+          autoFocus
+          maxLength={useBackupCode ? 24 : 8}
+        />
+        <AuthButton label="Verify" onPress={onVerify} busy={busy} />
+        <TouchableOpacity
+          onPress={() => {
+            setUseBackupCode(!useBackupCode);
+            setCode("");
+            setError(null);
+          }}
+          style={styles.linkRow}
+        >
+          <Text style={[type.label, styles.link]}>
+            {useBackupCode ? "Use my authenticator app instead" : "Lost your phone? Use a backup code"}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => {
+            setNeedsCode(false);
+            setCode("");
+            setPassword("");
+            setError(null);
+          }}
+          style={styles.linkRow}
+        >
+          <Text style={[type.label, styles.linkMuted]}>Sign in as someone else</Text>
+        </TouchableOpacity>
+      </AuthScreen>
+    );
   }
 
   // No separate screen: uses the email already typed above, and the emailed
@@ -81,4 +162,6 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   linkRow: { minHeight: 40, justifyContent: "center", marginTop: space.sm },
   link: { color: colors.accentBorder, textAlign: "center" },
+  linkMuted: { color: colors.textFaint, textAlign: "center" },
+  blurb: { marginBottom: space.md },
 });

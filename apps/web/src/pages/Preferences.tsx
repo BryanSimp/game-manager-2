@@ -4,6 +4,7 @@ import { BUILTIN_CATEGORIES, type CategoryView, type Preferences } from "@gm/sha
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { SteamCard } from "../components/SteamCard.js";
+import { TwoFactorCard } from "../components/TwoFactorCard.js";
 import { ConsoleSelect } from "../components/ConsolePicker.js";
 import { useCategories } from "../lib/categories.js";
 import { statusChip } from "../lib/format.js";
@@ -15,6 +16,7 @@ const DEFAULT_HEX: Record<string, string> = Object.fromEntries(
 export function PreferencesPage() {
   const queryClient = useQueryClient();
   const prefs = useQuery({ queryKey: ["preferences"], queryFn: () => api.getPreferences() });
+  const me = useQuery({ queryKey: ["me"], queryFn: () => api.me() });
   const categories = useCategories();
   const [newCategory, setNewCategory] = useState("");
   const [categoryError, setCategoryError] = useState<string | null>(null);
@@ -47,6 +49,12 @@ export function PreferencesPage() {
       {/* two panels to a row on a wide screen — one below `lg` */}
       <div className="grid gap-6 lg:grid-cols-2">
         <SteamCard />
+
+        {/* hidden on the demo tour: it has no credentials to add a factor to,
+            and every write there is refused anyway */}
+        {me.data && !me.data.isDemo ? (
+          <TwoFactorCard enabled={me.data.twoFactorEnabled} />
+        ) : null}
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
           <h2 className="text-lg font-semibold">Categories</h2>

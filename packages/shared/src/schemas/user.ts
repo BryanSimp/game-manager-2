@@ -11,6 +11,12 @@ export const userSchema = z.object({
   isPremium: z.boolean().default(false),
   /** the seeded showcase account behind /demo, not a person */
   isDemo: z.boolean().default(false),
+  /**
+   * Whether signing in on an untrusted device asks for an authenticator code.
+   * Defaulted like the flags above, so a payload from an API that predates
+   * the column still parses.
+   */
+  twoFactorEnabled: z.boolean().default(false),
   createdAt: z.coerce.date(),
 });
 export type User = z.infer<typeof userSchema>;

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Stack, useLocalSearchParams } from "expo-router";
-import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import type { FriendLibraryEntry } from "@gm/shared";
@@ -31,6 +31,7 @@ const VIEWS: Array<{ key: ViewMode; label: string }> = [
 /** A friend's library, with the overlap with yours called out. Notes are never sent. */
 export default function FriendLibraryScreen() {
   const { userId } = useLocalSearchParams<{ userId: string }>();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const badgeOpacity = useBadgeOpacity();
   const [view, setView] = useState<ViewMode>("all");
@@ -116,7 +117,20 @@ export default function FriendLibraryScreen() {
         ListEmptyComponent={
           <EmptyState icon="filter-outline" title="Nothing matches that filter" />
         }
-        renderItem={({ item }) => <FriendGameRow entry={item} badgeOpacity={badgeOpacity} />}
+        renderItem={({ item }) => (
+          <FriendGameRow
+            entry={item}
+            badgeOpacity={badgeOpacity}
+            onOpen={() => {
+              // yours → your copy, with your rating, notes and lists on it.
+              // Theirs alone → the add search with the title already typed;
+              // mobile has no catalog screen, and this is the same route
+              // collections use for a game you haven't got.
+              if (item.myUserGameId) router.push(`/game/${item.myUserGameId}`);
+              else router.push(`/add?q=${encodeURIComponent(item.title)}`);
+            }}
+          />
+        )}
       />
     </Screen>
   );
@@ -125,15 +139,24 @@ export default function FriendLibraryScreen() {
 function FriendGameRow({
   entry,
   badgeOpacity,
+  onOpen,
 }: {
   entry: FriendLibraryEntry;
   badgeOpacity: number;
+  onOpen: () => void;
 }) {
   const status = statusStyle(entry.status, badgeOpacity);
   const mine = entry.myStatus ? statusStyle(entry.myStatus, badgeOpacity) : null;
 
   return (
-    <View style={styles.row}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={
+        entry.myUserGameId ? `Open your copy of ${entry.title}` : `Add ${entry.title}`
+      }
+      onPress={onOpen}
+      style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
+    >
       <Cover src={resolveImage(entry.coverSrc)} width={46} height={62} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={type.bodyStrong} numberOfLines={2}>
@@ -165,7 +188,12 @@ function FriendGameRow({
           </Text>
         )}
       </View>
-    </View>
+      {entry.myUserGameId ? (
+        <Icon name="chevron-forward" size={18} color={colors.textFaint} />
+      ) : (
+        <Icon name="add-circle-outline" size={20} color={colors.accentBorder} />
+      )}
+    </Pressable>
   );
 }
 

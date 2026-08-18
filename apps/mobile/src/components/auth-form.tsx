@@ -40,8 +40,12 @@ export function AuthInput(props: {
   value: string;
   onChangeText: (v: string) => void;
   secureTextEntry?: boolean;
-  keyboardType?: "default" | "email-address";
-  autoComplete?: "email" | "password" | "new-password" | "name";
+  keyboardType?: "default" | "email-address" | "number-pad";
+  // "one-time-code" lets iOS offer the code from the keyboard bar
+  autoComplete?: "email" | "password" | "new-password" | "name" | "one-time-code" | "off";
+  placeholder?: string;
+  autoFocus?: boolean;
+  maxLength?: number;
 }) {
   return (
     <View style={styles.field}>
@@ -53,6 +57,9 @@ export function AuthInput(props: {
         secureTextEntry={props.secureTextEntry}
         keyboardType={props.keyboardType ?? "default"}
         autoComplete={props.autoComplete}
+        placeholder={props.placeholder}
+        autoFocus={props.autoFocus}
+        maxLength={props.maxLength}
         autoCapitalize="none"
         placeholderTextColor={colors.textFaint}
       />

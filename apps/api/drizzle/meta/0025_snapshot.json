@@ -1,6 +1,6 @@
 {
-  "id": "92098e33-95a7-45f7-a085-9cdaa5beed5b",
-  "prevId": "fc8149a2-766d-4f3d-a19c-639148e841ed",
+  "id": "629aae55-8daa-4f23-b1c3-d50ace9d633d",
+  "prevId": "92098e33-95a7-45f7-a085-9cdaa5beed5b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1780,6 +1780,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": 5
+        },
+        "default_library_filter": {
+          "name": "default_library_filter",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'all'"
         },
         "dashboard_config": {
           "name": "dashboard_config",

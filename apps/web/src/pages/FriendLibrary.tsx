@@ -71,6 +71,9 @@ export function FriendLibraryPage() {
       <p className="mt-1 text-sm text-zinc-500">
         {data.total} games · <span className="text-indigo-400">{data.inCommon}</span> you both have
       </p>
+      <p className="mt-0.5 text-xs text-zinc-600">
+        Click a game to open your copy, or to add one you haven't got.
+      </p>
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
         {VIEWS.map((v) => (
@@ -114,10 +117,23 @@ export function FriendLibraryPage() {
         <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
           {entries.map((e) => {
             const chip = statusChip(e.status, prefs);
+            // Owned games go to your own copy; the rest go to the catalog
+            // page, which is the same game with one Add button. That page
+            // redirects to /game/$id the moment you own it, so a card can
+            // never leave you on the wrong URL.
+            const linkProps = e.myUserGameId
+              ? ({ to: "/game/$id", params: { id: e.myUserGameId } } as const)
+              : ({ to: "/catalog/$gameId", params: { gameId: e.gameId } } as const);
             return (
-              <div
+              <Link
                 key={e.gameId}
-                className={`overflow-hidden rounded-xl border bg-zinc-900 ${
+                {...linkProps}
+                title={
+                  e.myUserGameId
+                    ? `Open your copy of ${e.title}`
+                    : `${e.title} — not in your library yet`
+                }
+                className={`group block overflow-hidden rounded-xl border bg-zinc-900 transition hover:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                   e.inCommon ? "border-indigo-700/60" : "border-zinc-800"
                 }`}
               >
@@ -140,7 +156,7 @@ export function FriendLibraryPage() {
                   >
                     {statusLabel(e.status)}
                   </span>
-                  {e.inCommon && (
+                  {e.inCommon ? (
                     <span
                       title={
                         e.myStatus
@@ -151,10 +167,18 @@ export function FriendLibraryPage() {
                     >
                       ✓ both
                     </span>
+                  ) : (
+                    // only on hover: at rest the grid should read as their
+                    // library, not as a wall of buttons
+                    <span className="absolute inset-x-2 bottom-2 rounded-full bg-zinc-950/85 px-2 py-1 text-center text-xs font-semibold text-indigo-300 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                      + Add to library
+                    </span>
                   )}
                 </div>
                 <div className="p-2.5">
-                  <p className="truncate text-sm font-semibold">{e.title}</p>
+                  <p className="truncate text-sm font-semibold group-hover:text-indigo-300">
+                    {e.title}
+                  </p>
                   <div className="mt-1 flex items-center justify-between gap-2">
                     <span className="text-xs text-amber-400">
                       {e.rating != null ? `★ ${e.rating}` : ""}
@@ -167,7 +191,7 @@ export function FriendLibraryPage() {
                     )}
                   </div>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
