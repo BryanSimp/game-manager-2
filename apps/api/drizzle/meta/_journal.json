@@ -176,6 +176,13 @@
       "when": 1786300967631,
       "tag": "0024_confused_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787023408344,
+      "tag": "0025_lumpy_king_cobra",
+      "breakpoints": true
     }
   ]
 }

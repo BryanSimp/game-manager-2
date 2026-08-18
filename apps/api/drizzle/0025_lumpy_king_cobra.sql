@@ -1,0 +1,1 @@
+ALTER TABLE "user_preferences" ADD COLUMN "default_library_filter" text DEFAULT 'all' NOT NULL;

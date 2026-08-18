@@ -399,6 +399,25 @@ file to be provided for reference).
   filtering by stays, so you can always click back out). The bulk-edit "Set
   status" row still lists them all — you need to be able to move games *into*
   an empty category.
+- **`preferences.default_library_filter`** (migration 0025) is the category the
+  library opens on — a built-in key, a custom category id, or the string
+  `'all'`. `'all'` is a sentinel, not a category, so the preferences route
+  short-circuits it before `isValidCategory`; everything else is validated the
+  same way `defaultStatus` is, which is what scopes a custom id to its owner.
+  The library holds it as `filterDraft ?? prefs.defaultLibraryFilter`, the same
+  null-until-you-touch-it trick `libraryColumns` uses: picking a chip overrides
+  the default for that visit only, and clicking **All** is a real choice rather
+  than a reset, so it can't be confused with "follow the preference". Leaving
+  the page drops the draft, which is what makes it a *default* rather than
+  sticky state. Deleting a custom category resets it to `'all'` alongside
+  `defaultStatus` (`routes/categories.ts`) — a filter pointing at a category
+  that no longer exists would open to nothing with no chip to click out of.
+  Pointing it at an *empty* category is allowed and isn't a dead end: the chip
+  row keeps the category you're filtering by even at zero.
+- The default library filter is **web-only**. Mobile's library types its filter
+  as `GameStatus | "all"` and renders built-in chips only (same reason custom
+  categories are web-only there), so it ignores the preference rather than
+  half-applying it.
 - Wikimedia Commons results are a plain text search: the odd unrelated file
   turns up, and the picker says so rather than pretending otherwise.
 - Steam import rules are per user and keyed by appid. Blocking doesn't remove

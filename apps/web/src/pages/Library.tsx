@@ -81,7 +81,10 @@ export function LibraryPage() {
   const prefs = usePreferences();
   const categories = useCategories();
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  // null until you pick a chip, so the saved default shows through once
+  // preferences load — and clicking "All" is a real choice, not a reset
+  const [filterDraft, setFilterDraft] = useState<string | null>(null);
+  const statusFilter = filterDraft ?? prefs?.defaultLibraryFilter ?? "all";
   const [only100, setOnly100] = useState(false);
   const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [tagFilter, setTagFilter] = useState<string>("all");
@@ -280,7 +283,7 @@ export function LibraryPage() {
         <FilterChip
           label={`All (${library.data?.length ?? 0})`}
           active={statusFilter === "all"}
-          onClick={() => setStatusFilter("all")}
+          onClick={() => setFilterDraft("all")}
         />
         {(categories ?? [])
           // an empty category is nothing to filter by — but keep the one
@@ -293,7 +296,7 @@ export function LibraryPage() {
             <span key={s} className="inline-flex items-center gap-1">
               <button
                 onClick={() => {
-                  setStatusFilter(statusFilter === s ? "all" : s);
+                  setFilterDraft(statusFilter === s ? "all" : s);
                   setOnly100(false);
                 }}
                 className={`rounded-full border px-3 py-1 text-sm font-medium transition ${

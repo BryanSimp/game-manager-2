@@ -18,6 +18,7 @@ const DEFAULTS = {
   showRating: true,
   badgeOpacity: 100,
   libraryColumns: 5,
+  defaultLibraryFilter: "all",
 };
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
@@ -36,6 +37,8 @@ const prefsSchema = z.object({
   badgeOpacity: z.number().int().min(20).max(100).optional(),
   // covers per row on the library grid: 1 for a reading-list feel, 8 to scan
   libraryColumns: z.number().int().min(1).max(8).optional(),
+  // a category key/id, or 'all' — validated below, since 'all' isn't one
+  defaultLibraryFilter: z.string().min(1).max(64).optional(),
 });
 
 export function registerPreferenceRoutes(app: FastifyInstance): void {
@@ -58,6 +61,7 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
       showRating: row.showRating,
       badgeOpacity: row.badgeOpacity,
       libraryColumns: row.libraryColumns,
+      defaultLibraryFilter: row.defaultLibraryFilter,
     };
   });
 
@@ -71,6 +75,14 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
     if (
       parsed.data.defaultStatus !== undefined &&
       !(await isValidCategory(user.id, parsed.data.defaultStatus))
+    ) {
+      return reply.status(400).send({ message: "Unknown category" });
+    }
+    // 'all' is the no-filter case, so it passes without being a category
+    if (
+      parsed.data.defaultLibraryFilter !== undefined &&
+      parsed.data.defaultLibraryFilter !== "all" &&
+      !(await isValidCategory(user.id, parsed.data.defaultLibraryFilter))
     ) {
       return reply.status(400).send({ message: "Unknown category" });
     }
@@ -104,6 +116,9 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
       ...(parsed.data.badgeOpacity !== undefined && { badgeOpacity: parsed.data.badgeOpacity }),
       ...(parsed.data.libraryColumns !== undefined && {
         libraryColumns: parsed.data.libraryColumns,
+      }),
+      ...(parsed.data.defaultLibraryFilter !== undefined && {
+        defaultLibraryFilter: parsed.data.defaultLibraryFilter,
       }),
     };
     const { userId, ...updates } = values;

@@ -173,6 +173,8 @@ export const userPreferences = pgTable("user_preferences", {
   badgeOpacity: integer("badge_opacity").notNull().default(100),
   // covers per row on the library grid at full width, 1–8
   libraryColumns: integer("library_columns").notNull().default(5),
+  // category the library opens on: a category key/id, or 'all' for no filter
+  defaultLibraryFilter: text("default_library_filter").notNull().default("all"),
   dashboardConfig: jsonb("dashboard_config"),
 });
 
