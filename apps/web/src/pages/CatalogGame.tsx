@@ -7,6 +7,7 @@ import { Shell } from "../components/Shell.js";
 import { StarRating } from "../components/StarRating.js";
 import { ConsoleSelect } from "../components/ConsolePicker.js";
 import { AddCollectionToLibrary } from "../components/AddCollectionToLibrary.js";
+import { CollectionPicker } from "../components/CollectionPicker.js";
 import { formatHours } from "../lib/format.js";
 import { useCategories } from "../lib/categories.js";
 
@@ -184,6 +185,16 @@ export function CatalogGamePage() {
           {g.summary && (
             <p className="mt-5 max-w-2xl text-sm leading-relaxed text-zinc-400">{g.summary}</p>
           )}
+
+          <div className="mt-6">
+            <p className="mb-2 text-sm font-semibold text-zinc-300">
+              Collections{" "}
+              <span className="font-normal text-zinc-500">
+                (a collection is a reading list — you needn't own the game)
+              </span>
+            </p>
+            <CollectionPicker gameId={gameId} />
+          </div>
 
           <PublicLists gameId={gameId} />
           <InPublicCollections gameId={gameId} />

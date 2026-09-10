@@ -17,6 +17,7 @@ import { ProgressPanel } from "../components/ProgressPanel.js";
 import { AddConsoleControl, FAMILY_LABELS } from "../components/ConsolePicker.js";
 import { SteamMatchFixer } from "../components/SteamMatchFixer.js";
 import { CoverBrowser } from "../components/CoverBrowser.js";
+import { CollectionPicker } from "../components/CollectionPicker.js";
 import { AddCollectionToLibrary } from "../components/AddCollectionToLibrary.js";
 import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
@@ -370,6 +371,16 @@ export function GameDetailPage() {
                 />
               </form>
             </div>
+          </div>
+
+          <div className="mt-6">
+            <p className="mb-2 text-sm font-semibold text-zinc-300">
+              Collections{" "}
+              <span className="font-normal text-zinc-500">
+                (file it from here · ✕ takes it back out)
+              </span>
+            </p>
+            <CollectionPicker gameId={e.game.id} />
           </div>
 
           <SteamMatchFixer entry={e} />

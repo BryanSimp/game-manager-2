@@ -264,6 +264,8 @@ was dev-only). Never use `db push`.
 
 | 22 identity, accounts, 2FA | see git log | **The app has a tab icon**: `apps/web/public/icon.svg` (an indigo tile with a gamepad knocked out of it via a `mask`, because the tile is a gradient and a flat-filled cut-out only lines up at one height), rasterised to `favicon.ico` (16/32/48), `icon-192/512.png` and `apple-touch-icon.png` by `apps/web/scripts/generate-icons.mjs` — run by hand, outputs committed, uses `@gm/api`'s hoisted `sharp` rather than a second copy. Plus a `site.webmanifest`. **Admin Users tab** on `/admin/analytics`: `GET /api/admin/users` (`routes/admin-users.ts`) with search, four filters, five sorts and paging. Per-user counts are **scalar subqueries, not joins** — four left joins over one-to-many tables multiply rows together and every count comes back plausibly wrong. Read-only on purpose; bans and role changes belong in the phase 6 admin panel. Demo accounts *are* listed (flagged and filterable) — this is the one place hiding them would be a lie. **A friend's games are links**: `FriendLibraryEntry.myUserGameId` (your `user_games.id`, not just `inCommon`) sends a card to your own copy, or to `/catalog/$gameId` when you haven't got it; mobile does the same, falling back to `/add?q=<title>` since it has no catalog screen. **Two-factor sign-in** (migration 0024): better-auth's `twoFactor` plugin, TOTP only — an emailed code would arm a lock whose key can't arrive on an instance with no verified Resend domain. `trustDeviceMaxAge` of 30 days is the thing that makes it "a new device" rather than every sign-in. Enabling is two steps and a code has to prove the secret before it's armed (`skipVerificationOnEnable` deliberately left off), backup codes are shown exactly once, and `TwoFactorCard` renders the QR with `qrcode-generator` behind a dynamic `import()` — zero transitive deps, and out of the main bundle. Both login screens grew an in-place challenge step; **the mobile client got `twoFactorClient()` too**, or turning 2FA on in the web app would have locked the phone out. "New backup codes" regenerates a set without touching the secret. The correlated subqueries in `admin-users.ts` all go through a `qualified()` helper — Drizzle emits bare column names in `sql` templates, which Postgres binds to the *inner* table, and against `session`/`collections` (text ids, like `user.id`) that's a silent zero rather than an error |
 
+| 23 quick actions + filing from the game | see git log | **A ⋯ button on every library cover** opens `QuickActions.tsx`: category (with the 100% chip), rating, tags, consoles (including the physical/digital toggle) and collections — the whole reason you used to open a game and come back. Nothing in it navigates. The panel is `position: fixed` and placed against its button by `useAnchoredStyle`, which opens it *outward* so the card you're editing stays visible beside it, flips it above when the bottom of the window is nearer than the panel is tall, and re-places it with a `ResizeObserver` as sections inside it expand. **The grid holds still while you edit**: `heldOrder` snapshots the rendered order the moment a panel opens, and until you press *↻ Re-sort* — or touch a filter, the sort or the search box — held cards keep their slot *and* stay on screen once an edit takes them out of the current filter. Marking a backlog game beaten while filtered to Backlog used to make the card vanish mid-edit; now it gets a dashed border and the toolbar says how many are being held. **Filing a game into a collection from the game itself** (`CollectionPicker.tsx`): `GET /api/collections` takes a `?gameId=` and flags each collection with `containsGame`, so the control is chips for the collections it's already in (✕ takes it out), a list of the rest, and a name field that creates one and files the game in a single click. It's on the card panel, the game page and `/catalog/$gameId` — a collection is a reading list, so it works on a game you don't own. |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
 (password resets, registration toggle, account actions — the *list* landed in
@@ -745,3 +747,32 @@ file to be provided for reference).
   `/add?q=<title>` — a search with the name pre-typed, one tap from the same
   result. `add.tsx` reads `q` for this; the collections screen still pushes a
   bare `/add` and could use the same treatment.
+- **The library grid holds its order while you quick-edit, and only then.**
+  `heldOrder` is a snapshot of the ids on screen, taken when a quick-actions
+  panel opens; while it's set, those cards keep their slot and stay visible
+  even once an edit stops them matching the filter. It clears when you press
+  *↻ Re-sort* or change anything about the view (filter chip, platform, tag,
+  sort, search, select mode) — a held order that survived a filter change
+  would be showing you the last view's answer.
+- **Quick actions did not touch the default-library-filter draft.** Leaving
+  the page still drops it, deliberately (see `preferences.default_library_filter`
+  above) — the fix for "I lost my place" is that filing a game no longer
+  requires leaving the page, not that the page remembers where you were.
+- Quick actions are **web-only**. Mobile's library card opens the game, and
+  its detail screen is where category, rating and tags are edited; there's no
+  equivalent panel and no `offFilter` hold.
+- **The quick panel is `position: fixed`, not absolute.** A card sets
+  `overflow-hidden` to keep its cover's corners rounded, so a popover inside
+  one would be sliced; fixed positioning escapes that (no ancestor uses a
+  transform, which would make it a containing block again). `useAnchoredStyle`
+  owns the placement and re-runs on scroll, resize and its own resize.
+- **`GET /api/collections` takes an optional `?gameId=`** and adds
+  `containsGame` to each row. Membership is asked for on the collection list
+  rather than through a route of its own so the picker gets names, counts and
+  membership in one request; the field is *absent* without the parameter, so
+  `false` always means "asked, and no". It's scoped to your own collections
+  before the membership query runs, so it can't be used to probe anyone else's.
+- Filing a game into a collection is offered on your library card, the game
+  page and `/catalog/$gameId`, but **not from a friend's library** — that page
+  deliberately exposes as little as it can, and the game's own page is one
+  click away.

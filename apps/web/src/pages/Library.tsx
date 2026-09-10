@@ -92,6 +92,19 @@ export function LibraryPage() {
   const [search, setSearch] = useState("");
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /**
+   * The order the grid is drawing, frozen from the moment a quick-action
+   * panel opens.
+   *
+   * Editing a game from its card is only half the fix for "I lost my place":
+   * the other half is that the edit itself moves the card. Mark a backlog
+   * game beaten while filtered to Backlog and it vanishes mid-edit; rate one
+   * while sorted by rating and it leaps up the grid. So while quick edits are
+   * outstanding the grid holds this order and keeps showing everything in it,
+   * and the toolbar offers to let it settle when you're done.
+   */
+  const [heldOrder, setHeldOrder] = useState<string[] | null>(null);
+  const [edited, setEdited] = useState<Set<string>>(new Set());
   const [bulkPlatform, setBulkPlatform] = useState<string | null>(null);
   const [bulkFormat, setBulkFormat] = useState<OwnershipFormat>("digital");
   // null until you change it, so the saved preference shows through once it loads
@@ -116,6 +129,13 @@ export function LibraryPage() {
       queryClient.invalidateQueries({ queryKey: ["platforms"] });
     },
   });
+
+  /** Let the grid settle: re-sort, re-filter, forget what was edited. */
+  function releaseHold() {
+    if (heldOrder === null) return;
+    setHeldOrder(null);
+    setEdited(new Set());
+  }
 
   function toggleSelected(id: string) {
     setSelected((prev) => {
@@ -168,8 +188,8 @@ export function LibraryPage() {
     };
   }, [library.data]);
 
-  const entries = useMemo(() => {
-    const filtered = (library.data ?? []).filter((e) => {
+  const { entries, offFilter } = useMemo(() => {
+    const matches = (e: LibraryEntry) => {
       if (statusFilter !== "all" && e.status !== statusFilter) return false;
       if (statusFilter === "finished" && only100 && !e.completed100) return false;
       // a parent platform matches its storefronts as well as itself
@@ -183,9 +203,25 @@ export function LibraryPage() {
       if (tagFilter !== "all" && !e.tags.some((t) => t.id === tagFilter)) return false;
       if (search && !e.game.title.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
-    });
-    return sortEntries(filtered, sort);
-  }, [library.data, statusFilter, only100, platformFilter, tagFilter, search, sort]);
+    };
+
+    const held = heldOrder ? new Set(heldOrder) : null;
+    // anything the hold is carrying stays on screen even once it stops
+    // matching — a card can't vanish out from under the panel you're using
+    const filtered = (library.data ?? []).filter((e) => matches(e) || held?.has(e.id));
+    const sorted = sortEntries(filtered, sort);
+
+    if (!heldOrder) return { entries: sorted, offFilter: new Set<string>() };
+
+    // held cards keep the slot they had; anything new since goes to the end,
+    // where a stable sort leaves it in the order it would have had anyway
+    const rank = new Map(heldOrder.map((id, index) => [id, index]));
+    const last = heldOrder.length;
+    return {
+      entries: sorted.sort((a, b) => (rank.get(a.id) ?? last) - (rank.get(b.id) ?? last)),
+      offFilter: new Set(sorted.filter((e) => !matches(e)).map((e) => e.id)),
+    };
+  }, [library.data, statusFilter, only100, platformFilter, tagFilter, search, sort, heldOrder]);
 
   const counts = new Map<string, number>();
   for (const e of library.data ?? []) {
@@ -205,14 +241,20 @@ export function LibraryPage() {
         </h1>
         <input
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            releaseHold();
+            setSearch(e.target.value);
+          }}
           placeholder="Filter by title…"
           className="w-44 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
         />
         {platformOptions.length > 0 && (
           <select
             value={platformFilter}
-            onChange={(e) => setPlatformFilter(e.target.value)}
+            onChange={(e) => {
+              releaseHold();
+              setPlatformFilter(e.target.value);
+            }}
             className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
           >
             <option value="all">All platforms</option>
@@ -226,7 +268,10 @@ export function LibraryPage() {
         {tagOptions.length > 0 && (
           <select
             value={tagFilter}
-            onChange={(e) => setTagFilter(e.target.value)}
+            onChange={(e) => {
+              releaseHold();
+              setTagFilter(e.target.value);
+            }}
             className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
           >
             <option value="all">All tags</option>
@@ -239,7 +284,10 @@ export function LibraryPage() {
         )}
         <select
           value={sort}
-          onChange={(e) => setSort(e.target.value as SortKey)}
+          onChange={(e) => {
+            releaseHold();
+            setSort(e.target.value as SortKey);
+          }}
           className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
         >
           {SORTS.map((s) => (
@@ -266,6 +314,7 @@ export function LibraryPage() {
         </select>
         <button
           onClick={() => {
+            releaseHold();
             setSelectMode(!selectMode);
             setSelected(new Set());
           }}
@@ -279,11 +328,32 @@ export function LibraryPage() {
         </button>
       </div>
 
+      {heldOrder && !selectMode && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-indigo-900 bg-indigo-950/40 px-4 py-2 text-sm">
+          <span className="text-indigo-200">
+            Holding your place
+            {edited.size > 0 && ` · ${edited.size} game${edited.size === 1 ? "" : "s"} edited`}
+            {offFilter.size > 0 &&
+              ` · ${offFilter.size} no longer match${offFilter.size === 1 ? "es" : ""} this filter`}
+          </span>
+          <button
+            onClick={releaseHold}
+            title="Re-sort and re-filter now that you're done editing"
+            className="rounded-lg border border-indigo-700 px-2.5 py-1 text-xs font-medium text-indigo-200 hover:bg-indigo-900/60"
+          >
+            ↻ Re-sort
+          </button>
+        </div>
+      )}
+
       <div className="mb-6 flex flex-wrap gap-2">
         <FilterChip
           label={`All (${library.data?.length ?? 0})`}
           active={statusFilter === "all"}
-          onClick={() => setFilterDraft("all")}
+          onClick={() => {
+            releaseHold();
+            setFilterDraft("all");
+          }}
         />
         {(categories ?? [])
           // an empty category is nothing to filter by — but keep the one
@@ -296,6 +366,7 @@ export function LibraryPage() {
             <span key={s} className="inline-flex items-center gap-1">
               <button
                 onClick={() => {
+                  releaseHold();
                   setFilterDraft(statusFilter === s ? "all" : s);
                   setOnly100(false);
                 }}
@@ -310,7 +381,10 @@ export function LibraryPage() {
               </button>
               {s === "finished" && statusFilter === "finished" && (
                 <button
-                  onClick={() => setOnly100(!only100)}
+                  onClick={() => {
+                    releaseHold();
+                    setOnly100(!only100);
+                  }}
                   title="Only games marked 100% completed"
                   className={`rounded-full border px-2.5 py-1 text-sm font-medium transition ${
                     only100
@@ -449,6 +523,11 @@ export function LibraryPage() {
             selectable={selectMode}
             selected={selected.has(entry.id)}
             onToggleSelect={() => toggleSelected(entry.id)}
+            quickActions
+            offFilter={offFilter.has(entry.id)}
+            // opening the panel is the promise that this card stays put
+            onQuickOpen={() => setHeldOrder((prev) => prev ?? entries.map((e) => e.id))}
+            onQuickChange={() => setEdited((prev) => new Set(prev).add(entry.id))}
           />
         ))}
       </div>

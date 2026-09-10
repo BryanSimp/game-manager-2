@@ -420,6 +420,12 @@ export interface CollectionSummary {
   adoptedFromId: string | null;
   /** a few covers for the card, in play order */
   preview: Array<{ gameId: string; title: string; coverSrc: string | null }>;
+  /**
+   * Whether this collection already holds the game you asked about — only
+   * present when the list was fetched with a `gameId`, so `false` always
+   * means "asked, and no" rather than "never checked".
+   */
+  containsGame?: boolean;
 }
 /**
  * A public collection as it appears in the browse list. Deliberately narrower
