@@ -370,8 +370,15 @@ export class ApiClient {
 
   // ---- collections ----
 
-  getCollections(): Promise<CollectionSummary[]> {
-    return this.request<CollectionSummary[]>("/api/collections");
+  /**
+   * Your collections. Pass a `gameId` and each one comes back flagged with
+   * whether it already holds that game — what the add-to-collection control
+   * on a game card needs to render a list of toggles rather than a list of
+   * guesses.
+   */
+  getCollections(options: { gameId?: string } = {}): Promise<CollectionSummary[]> {
+    const qs = options.gameId ? `?gameId=${encodeURIComponent(options.gameId)}` : "";
+    return this.request<CollectionSummary[]>(`/api/collections${qs}`);
   }
 
   createCollection(input: { name: string; description?: string | null; accentColor?: string | null }): Promise<CollectionSummary> {

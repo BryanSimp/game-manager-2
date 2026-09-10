@@ -1,24 +1,42 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import type { LibraryEntry } from "@gm/shared";
 import { formatHours, statusChip, statusLabel } from "../lib/format.js";
 import { useCategories } from "../lib/categories.js";
 import { usePreferences } from "../lib/prefs.js";
 import { StarRating } from "./StarRating.js";
+import { QuickActionsPanel } from "./QuickActions.js";
 
 export function GameCard({
   entry,
   selectable = false,
   selected = false,
   onToggleSelect,
+  quickActions = false,
+  offFilter = false,
+  onQuickOpen,
+  onQuickChange,
 }: {
   entry: LibraryEntry;
   /** selection mode: clicking toggles instead of navigating */
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
+  /** offer the corner button that edits the game without opening it */
+  quickActions?: boolean;
+  /** an edit took it out of the current filter and the grid is holding it
+      on screen anyway — say so, quietly */
+  offFilter?: boolean;
+  /** the panel opened: the grid freezes its order from here */
+  onQuickOpen?: () => void;
+  /** something was saved from the panel */
+  onQuickChange?: () => void;
 }) {
   const prefs = usePreferences();
   const categories = useCategories();
+  const [quickOpen, setQuickOpen] = useState(false);
+  // the panel hangs off the button, so it needs the element itself, not a ref
+  const [button, setButton] = useState<HTMLButtonElement | null>(null);
   const chip = statusChip(entry.status, prefs, categories);
   // once a game has a mission list, the badge counts down rather than showing
   // the same full length whatever your progress
@@ -117,22 +135,63 @@ export function GameCard({
     </>
   );
 
-  const frame = `group overflow-hidden rounded-xl border bg-zinc-900 transition ${
+  const frame = `block overflow-hidden rounded-xl border bg-zinc-900 transition ${
     selected
       ? "border-indigo-500 ring-2 ring-indigo-500/60"
-      : "border-zinc-800 hover:border-zinc-600"
+      : offFilter
+        ? "border-dashed border-indigo-700"
+        : "border-zinc-800 hover:border-zinc-600"
   }`;
 
-  if (selectable) {
-    return (
-      <button type="button" onClick={onToggleSelect} className={`${frame} text-left`}>
-        {body}
-      </button>
-    );
-  }
   return (
-    <Link to="/game/$id" params={{ id: entry.id }} className={frame}>
-      {body}
-    </Link>
+    <div className="group relative">
+      {selectable ? (
+        <button type="button" onClick={onToggleSelect} className={`${frame} w-full text-left`}>
+          {body}
+        </button>
+      ) : (
+        <Link to="/game/$id" params={{ id: entry.id }} className={frame}>
+          {body}
+        </Link>
+      )}
+
+      {/* The button sits on the cover, and the cover's box is the card's own
+          width at 3:4 — so an overlay of the same shape puts it in the corner
+          without the button having to live inside the link. */}
+      {quickActions && !selectable && (
+        <div className="pointer-events-none absolute inset-0">
+          <div className="relative aspect-[3/4] w-full">
+            <button
+              ref={setButton}
+              type="button"
+              aria-label={`Quick actions for ${entry.game.title}`}
+              aria-haspopup="dialog"
+              aria-expanded={quickOpen}
+              title="Quick actions — category, rating, tags, consoles, collections"
+              onClick={() => {
+                if (!quickOpen) onQuickOpen?.();
+                setQuickOpen(!quickOpen);
+              }}
+              className={`pointer-events-auto absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-lg border text-base leading-none transition ${
+                quickOpen
+                  ? "border-indigo-400 bg-indigo-600 text-white"
+                  : "border-white/10 bg-black/70 text-zinc-300 hover:border-indigo-400 hover:bg-black/90 hover:text-white"
+              }`}
+            >
+              ⋯
+            </button>
+          </div>
+        </div>
+      )}
+
+      {quickOpen && (
+        <QuickActionsPanel
+          entry={entry}
+          anchor={button}
+          onClose={() => setQuickOpen(false)}
+          onChanged={() => onQuickChange?.()}
+        />
+      )}
+    </div>
   );
 }

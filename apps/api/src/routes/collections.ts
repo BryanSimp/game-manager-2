@@ -125,9 +125,17 @@ async function previewsFor(
 }
 
 export function registerCollectionRoutes(app: FastifyInstance): void {
-  app.get("/api/collections", async (request, reply) => {
+  app.get<{ Querystring: { gameId?: string } }>("/api/collections", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
+    // `gameId` is the "which of my collections is this game already in?"
+    // form the game card's add-to-collection control uses. Asked for here
+    // rather than as its own route so the picker gets names and counts in the
+    // same payload it would have fetched anyway.
+    const asked = z.object({ gameId: z.string().uuid().optional() }).safeParse(request.query);
+    if (!asked.success) return reply.status(400).send({ message: "Invalid gameId" });
+    const gameId = asked.data.gameId;
+
     const rows = await db
       .select()
       .from(schema.collections)
@@ -153,6 +161,25 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     const statMap = new Map(stats.map((s) => [s.collectionId, s]));
     const previews = await previewsFor(rows.map((c) => c.id));
 
+    // membership, when one was asked about: one query for every collection
+    // rather than one per row
+    let holding = new Set<string>();
+    if (gameId && rows.length > 0) {
+      const found = await db
+        .select({ collectionId: schema.collectionGames.collectionId })
+        .from(schema.collectionGames)
+        .where(
+          and(
+            eq(schema.collectionGames.gameId, gameId),
+            inArray(
+              schema.collectionGames.collectionId,
+              rows.map((c) => c.id),
+            ),
+          ),
+        );
+      holding = new Set(found.map((f) => f.collectionId));
+    }
+
     return rows.map((c) => ({
       id: c.id,
       name: c.name,
@@ -163,6 +190,8 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       total: statMap.get(c.id)?.total ?? 0,
       finished: Number(statMap.get(c.id)?.finished ?? 0),
       preview: previews.get(c.id) ?? [],
+      // absent unless a game was named, so "false" always means "asked, and no"
+      ...(gameId ? { containsGame: holding.has(c.id) } : {}),
     }));
   });
 
