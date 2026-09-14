@@ -14,7 +14,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AddCollectionGameInput, CollectionNode } from "@gm/shared";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, statusStyle } from "@/lib/ui";
-import { useBadgeOpacity } from "@/lib/prefs";
+import { useBadgeOpacity, usePreferences } from "@/lib/prefs";
 import { colors, radius, space, type } from "@/lib/theme";
 import {
   Badge,
@@ -124,6 +124,9 @@ export default function CollectionDetailScreen() {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CollectionNode[] | null>(null);
   const badgeOpacity = useBadgeOpacity();
+  // unknown means the preferences are still loading — show the control rather
+  // than flicker it away and back
+  const canPublish = (usePreferences()?.publishMode ?? "manual") !== "never";
 
   const collection = useQuery({
     queryKey: ["collection", id],
@@ -195,14 +198,19 @@ export default function CollectionDetailScreen() {
             <CollectionTimeLine time={detail.time} />
 
             <View style={styles.headerRow}>
-              <Button
-                label={detail.isPublic ? "Published" : "Publish"}
-                icon={detail.isPublic ? "star" : "star-outline"}
-                tone={detail.isPublic ? "primary" : "ghost"}
-                busy={setPublic.isPending}
-                onPress={() => setPublic.mutate(!detail.isPublic)}
-                style={styles.headerBtn}
-              />
+              {/* "Never publish" hides this, same as the web app — the API
+                  refuses a publish under that mode anyway. An already-published
+                  collection keeps its button so unpublishing stays reachable. */}
+              {(canPublish || detail.isPublic) && (
+                <Button
+                  label={detail.isPublic ? "Published" : "Publish"}
+                  icon={detail.isPublic ? "star" : "star-outline"}
+                  tone={detail.isPublic ? "primary" : "ghost"}
+                  busy={setPublic.isPending}
+                  onPress={() => setPublic.mutate(!detail.isPublic)}
+                  style={styles.headerBtn}
+                />
+              )}
               {detail.adoptedFromId && (
                 <View style={styles.copiedTag}>
                   <Icon name="copy-outline" size={12} color={colors.textFaint} />

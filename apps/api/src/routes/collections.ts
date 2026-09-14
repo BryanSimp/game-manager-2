@@ -12,6 +12,7 @@ import { rememberConsoles } from "../services/consoles.js";
 import { inspectAll } from "../services/content-filter.js";
 import { matchTitle } from "../services/matcher.js";
 import { extractTitles } from "../services/noise-filter.js";
+import { publishModeFor } from "../services/preferences.js";
 import {
   addGameTime,
   emptyCollectionTime,
@@ -481,7 +482,9 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         name,
         description: source.description,
         accentColor: source.accentColor,
-        // a copy starts private — publishing someone else's list is their call
+        // A copy starts private — publishing someone else's list is their
+        // call. "Publish automatically" does not reach this: it governs what
+        // you make, and a copy is not something you made.
         isPublic: false,
         adoptedFromId: source.id,
       })
@@ -536,6 +539,14 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       logEvent("content_blocked", user.id, { surface: "collection", kind: issue.kind });
       return reply.status(400).send({ message: issue.message });
     }
+    // Name and description are everything a new collection has, and both just
+    // passed the filter, so "publish automatically" has nothing unscanned to
+    // expose. An explicit isPublic in the request still wins — the preference
+    // decides the default, not the ceiling. Except under 'never', where it is
+    // the ceiling: see the PATCH below.
+    const mode = await publishModeFor(user.id);
+    const isPublic =
+      mode === "never" ? false : (parsed.data.isPublic ?? mode === "always");
     const [created] = await db
       .insert(schema.collections)
       .values({
@@ -543,6 +554,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         name: parsed.data.name.trim(),
         description: parsed.data.description ?? null,
         accentColor: parsed.data.accentColor ?? null,
+        isPublic,
       })
       .onConflictDoNothing()
       .returning();
@@ -563,6 +575,13 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     }
     const existing = await ownedCollection(user.id, request.params.id);
     if (!existing) return reply.status(404).send({ message: "Collection not found" });
+
+    // "Never publish" is a guarantee rather than a default: both apps hide the
+    // control, and the API refuses anything that asks anyway. Unpublishing is
+    // never refused — the setting governs what goes out, not what comes back.
+    if (parsed.data.isPublic === true && (await publishModeFor(user.id)) === "never") {
+      return reply.status(403).send({ message: "Publishing is turned off in your preferences" });
+    }
 
     // Publishing re-checks the whole collection, not just the fields in this
     // request: a collection written before the filter existed would otherwise

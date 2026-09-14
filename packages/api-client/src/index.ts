@@ -1,5 +1,6 @@
 import type {
   AddCollectionGameInput,
+  AddGameLinkInput,
   AddCollectionToLibraryInput,
   AddCollectionToLibraryResult,
   AddGameInput,
@@ -39,6 +40,7 @@ import type {
   CollectionLayoutInput,
   CollectionListImport,
   CollectionSummary,
+  GameLinks,
   DashboardData,
   DemoAdminView,
   Health,
@@ -367,6 +369,32 @@ export class ApiClient {
 
   deleteTag(id: string): Promise<{ ok: true }> {
     return this.request(`/api/tags/${id}`, { method: "DELETE" });
+  }
+
+  // ---- game links (DLC, remasters, remakes) ----
+
+  /**
+   * Both ends of a game's links in one request: what hangs off it, and what
+   * it hangs off. The game page draws both from this.
+   */
+  getGameLinks(gameId: string): Promise<GameLinks> {
+    return this.request<GameLinks>(`/api/games/${gameId}/links`);
+  }
+
+  /**
+   * Link another game to this one. `direction: "parent"` flips which end is
+   * the base, so the same control works from the DLC's page as from the base
+   * game's.
+   */
+  addGameLink(gameId: string, input: AddGameLinkInput): Promise<{ ok: true; id: string | null }> {
+    return this.request(`/api/games/${gameId}/links`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  removeGameLink(gameId: string, linkId: string): Promise<{ ok: true }> {
+    return this.request(`/api/games/${gameId}/links/${linkId}`, { method: "DELETE" });
   }
 
   // ---- collections ----

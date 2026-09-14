@@ -7,6 +7,7 @@ import { Shell } from "../components/Shell.js";
 import { AddCollectionGame } from "../components/AddCollectionGame.js";
 import { CollectionList } from "../components/CollectionList.js";
 import { CollectionTimePanel } from "../components/CollectionTime.js";
+import { usePreferences } from "../lib/prefs.js";
 
 const NODE_W = 92;
 const NODE_H = 122;
@@ -27,6 +28,12 @@ export function CollectionDetailPage() {
   const queryClient = useQueryClient();
 
   const collection = useQuery({ queryKey: ["collection", id], queryFn: () => api.getCollection(id) });
+  const prefs = usePreferences();
+  // "Never publish" hides the control rather than grey it out; the API
+  // refuses a publish under that mode too, so this isn't the only guard. An
+  // already-published collection keeps its button, so unpublishing is always
+  // reachable.
+  const canPublish = (prefs?.publishMode ?? "manual") !== "never";
 
   // the list answers "what's 1, 2, 3", which is what people open a collection
   // for; the graph answers "what branches into what" and is the specialist view
@@ -233,22 +240,24 @@ export function CollectionDetailPage() {
         {isOwner ? (
           <>
             <AddCollectionGame collectionId={id} excludeGameIds={inCollection} />
-            <button
-              onClick={() => setPublic.mutate(!collection.data!.isPublic)}
-              disabled={setPublic.isPending}
-              title={
-                collection.data.isPublic
-                  ? "Unpublish — existing copies people made stay theirs"
-                  : "Publish so anyone can browse and copy it"
-              }
-              className={`rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
-                collection.data.isPublic
-                  ? "border-amber-500/60 bg-amber-500/10 text-amber-300"
-                  : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-              }`}
-            >
-              {collection.data.isPublic ? "★ Published" : "☆ Publish"}
-            </button>
+            {(canPublish || collection.data.isPublic) && (
+              <button
+                onClick={() => setPublic.mutate(!collection.data!.isPublic)}
+                disabled={setPublic.isPending}
+                title={
+                  collection.data.isPublic
+                    ? "Unpublish — existing copies people made stay theirs"
+                    : "Publish so anyone can browse and copy it"
+                }
+                className={`rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                  collection.data.isPublic
+                    ? "border-amber-500/60 bg-amber-500/10 text-amber-300"
+                    : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                }`}
+              >
+                {collection.data.isPublic ? "★ Published" : "☆ Publish"}
+              </button>
+            )}
             {view === "graph" && (
               <button
                 onClick={() => {

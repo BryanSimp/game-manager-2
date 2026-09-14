@@ -97,3 +97,60 @@ export type ProgressBasis = (typeof PROGRESS_BASES)[number];
  * constant rather than a URL typed out on each page that mentions it.
  */
 export const GITHUB_REPO_URL = "https://github.com/BryanSimp/game-manager-2";
+
+/**
+ * What happens to a list or collection the moment you create it.
+ *
+ *  - `manual`  — private until you press Publish. The original behaviour.
+ *  - `never`   — private, and the publish control is gone: the API refuses to
+ *                publish at all. For people who never intend to share.
+ *  - `always`  — published on creation, so sharing isn't a second step.
+ *
+ * It governs what *you* create and nothing else. An adopted copy of someone
+ * else's work starts private under every mode, because publishing their work
+ * is their call — and switching modes never reaches back and republishes or
+ * unpublishes what already exists.
+ */
+export const PUBLISH_MODES = ["manual", "never", "always"] as const;
+export type PublishMode = (typeof PUBLISH_MODES)[number];
+
+export const PUBLISH_MODE_LABELS: Record<PublishMode, { label: string; blurb: string }> = {
+  manual: {
+    label: "Ask me",
+    blurb: "New lists and collections start private. Publish them one at a time.",
+  },
+  never: {
+    label: "Never publish",
+    blurb: "Nothing you make is ever shared, and the publish button is hidden.",
+  },
+  always: {
+    label: "Publish automatically",
+    blurb: "Everything you create is shared as soon as it exists.",
+  },
+};
+
+/**
+ * How one game relates to another in your library.
+ *
+ * Deliberately three kinds and not a taxonomy. "Expansion" is DLC, "GOTY
+ * edition" is the same game, and every extra kind is another decision to make
+ * every time you link something. The split that earns its place is
+ * *add-on content* versus *another version of the same game*, and remakes and
+ * remasters are worth telling apart because one is a rebuild and the other a
+ * polish.
+ */
+export const GAME_LINK_KINDS = ["dlc", "remaster", "remake"] as const;
+export type GameLinkKind = (typeof GAME_LINK_KINDS)[number];
+
+/**
+ * Both halves of each kind, because a link reads differently from each end:
+ * Blood and Wine is *DLC for* The Witcher 3, and The Witcher 3 *has DLC*.
+ */
+export const GAME_LINK_LABELS: Record<
+  GameLinkKind,
+  { section: string; forward: string; back: string }
+> = {
+  dlc: { section: "DLC & add-ons", forward: "DLC", back: "DLC for" },
+  remaster: { section: "Remasters", forward: "Remaster", back: "Remaster of" },
+  remake: { section: "Remakes", forward: "Remake", back: "Remake of" },
+};
