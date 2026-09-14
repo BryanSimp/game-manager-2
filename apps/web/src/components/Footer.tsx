@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { GITHUB_REPO_URL } from "@gm/shared";
 
 const ext = "text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-zinc-200";
 
@@ -8,8 +9,12 @@ const ext = "text-zinc-400 underline decoration-zinc-700 underline-offset-2 hove
  * (API terms), and the Steam Web API ("Powered by Steam", no implied
  * endorsement by Valve). Rendered by the Shell, by the public legal pages and
  * by the marketing layout, so the credits are visible wherever provider data
- * is shown — and so every public page carries the Privacy/Terms/Contact links
- * an ad network expects to find.
+ * is shown — and so every page carries the Privacy/Terms/Contact links.
+ *
+ * The source link belongs here for the same reason: the site says in several
+ * places that you can run your own copy, and the repo is public, so the thing
+ * you'd clone should be one click from every page rather than only from the
+ * FAQ answer that mentions it.
  */
 export function Footer() {
   return (
@@ -28,6 +33,14 @@ export function Footer() {
           <Link to="/terms" className="font-medium text-zinc-400 hover:text-zinc-200">
             Terms of Service
           </Link>
+          <a
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-zinc-400 hover:text-zinc-200"
+          >
+            Source on GitHub
+          </a>
           <span className="ml-auto">
             Powered by{" "}
             <a href="https://store.steampowered.com" target="_blank" rel="noopener noreferrer" className={ext}>

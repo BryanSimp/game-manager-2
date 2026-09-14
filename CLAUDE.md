@@ -181,12 +181,33 @@ Phase 0–8 roadmap — read it before making design decisions.
   byte-for-byte what `index.html` used to be. `scripts/serve-dist.mjs`
   serves `dist/` under those exact rules for checking a build locally;
   `vite preview` can't, because it falls back to `index.html`.
-- **Ad placeholders are a dev-only affordance.** `AdSlot`/`AdRail` render
-  nothing when `AD_SLOTS` has no unit id and `import.meta.env.PROD || SSR`
-  — prerendering had baked "Reserved — awaiting an AdSense unit id" into
-  every public page as crawlable text, framing a 700-word article with four
-  captioned empty boxes. SSR is checked as well as PROD because the
-  prerenderer runs through Vite's *dev-mode* SSR runner, where PROD is false.
+- **The site carries no ads at all** (phase 24). Both systems are gone: the
+  in-app house ads (`lib/ads.ts`'s `MockAdService`, `AdBanner`,
+  `AdInterstitial`) and the AdSense placements (`AdSlot`, `AdRail`,
+  `lib/adsense.ts`, the site tag in `index.html`, `public/ads.txt`). Every
+  `AD_SLOTS` id had always been empty, so the only thing that ever rendered
+  was a placeholder — "Your ad could be here", on every signed-in page.
+  `MarketingLayout` is a single centred column now rather than a content
+  column flanked by two 300px rails, and `lib/premium.ts` went with them
+  (`user.is_premium` stays — the admin Users tab reads it). **The legal
+  copy is part of the feature**: the privacy policy's Advertising section
+  and its third-party-cookie paragraph, and the terms' "the free tier is
+  supported by advertising", all described something that no longer
+  happens. If ads ever come back, they come back with those paragraphs.
+
+- **The repo is public, and the site says so.** `GITHUB_REPO_URL`
+  (`packages/shared/src/constants.ts`) is the single copy of the URL; the
+  footer links it on every page, the FAQ's self-host answer links it, and the
+  privacy policy points at it as the thing you can check the policy against.
+  A FAQ item's `link` is rendered *beside* its answer rather than inside it,
+  because `FAQ_ITEMS` also feeds the FAQPage structured data and that wants
+  plain text. `deploy/docker-compose.selfhost.yml` + `deploy/nginx.selfhost.conf`
+  are the stack a stranger can actually run: both images built from the repo,
+  no GHCR login, no Traefik, no Watchtower, and nginx proxying `/api` to the
+  API container — that proxy is **required**, not a convenience, because
+  sessions are same-origin HTTP-only cookies and a second origin for the API
+  would mean they were never sent. `docker-compose.prod.yml` stays what it
+  was: the gamesmanager.app deployment, pulling private images.
 
 ## Commands
 
@@ -266,6 +287,8 @@ was dev-only). Never use `db push`.
 
 | 23 quick actions + filing from the game | see git log | **A ⋯ button on every library cover** opens `QuickActions.tsx`: category (with the 100% chip), rating, tags, consoles (including the physical/digital toggle) and collections — the whole reason you used to open a game and come back. Nothing in it navigates. The panel is `position: fixed` and placed against its button by `useAnchoredStyle`, which opens it *outward* so the card you're editing stays visible beside it, flips it above when the bottom of the window is nearer than the panel is tall, and re-places it with a `ResizeObserver` as sections inside it expand. **The grid holds still while you edit**: `heldOrder` snapshots the rendered order the moment a panel opens, and until you press *↻ Re-sort* — or touch a filter, the sort or the search box — held cards keep their slot *and* stay on screen once an edit takes them out of the current filter. Marking a backlog game beaten while filtered to Backlog used to make the card vanish mid-edit; now it gets a dashed border and the toolbar says how many are being held. **Filing a game into a collection from the game itself** (`CollectionPicker.tsx`): `GET /api/collections` takes a `?gameId=` and flags each collection with `containsGame`, so the control is chips for the collections it's already in (✕ takes it out), a list of the rest, and a name field that creates one and files the game in a single click. It's on the card panel, the game page and `/catalog/$gameId` — a collection is a reading list, so it works on a game you don't own. |
 
+| 24 no ads, public repo, collections that know their length | see git log | **Every ad placeholder is gone** — the house-ad `MockAdService` (`AdBanner` was rendering "Your ad could be here" on every signed-in page) and the AdSense rails/slots/site tag/`ads.txt`, plus the privacy and terms paragraphs that described ads the site no longer serves. **The repo is public and linked**: `GITHUB_REPO_URL` in shared constants, a footer link on every page, the FAQ's self-host answer, and a README that is an actual self-hosting guide — backed by `deploy/docker-compose.selfhost.yml`, a stack built from source with no registry login and no Traefik, whose nginx proxies `/api` so sessions stay same-origin. **A collection can be built from a pasted list**: `POST /api/collections/:id/games/from-list` matches up to 50 titles through the existing matcher (`ocrVariants: false` — a typed list has no OCR damage to repair) and files them in pasted order; there is no review step because every line comes back with what it matched and its score, and a wrong row is one click to remove. Offered on the create form and inside an existing collection's add panel. **Collections show how long they take and how much is left**: `services/progress.ts` now owns `missionCountsByGame` (moved out of `routes/library.ts`, so the library card and the collection total can't drift) plus `gameTime`/`addGameTime`; a finished game contributes nothing to remaining, a part-ticked mission list is pro-rated by the same `estimateProgress` the Progress tab uses, and endless games leave both totals. Surfaced on the detail page, your cards, the public browse cards, and mobile |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
 (password resets, registration toggle, account actions — the *list* landed in
@@ -274,6 +297,33 @@ phase 22, read-only).
 file to be provided for reference).
 
 ## Deferred / known gaps
+
+- **A pasted collection list is only as good as the matcher.** With IGDB
+  configured, each unmatched line is one IGDB search; without it, `matchOnce`
+  falls back to `ilike '%<whole title>%'` against the local catalog, which
+  needs the stored title to *contain* the typed one — "Majoras Mask" will not
+  find "Majora's Mask". That is pre-existing behaviour shared with the OCR
+  import, not something the list import added, and it only bites on an
+  instance with no IGDB credentials (where nothing else can search either).
+- **The list import holds the request open.** 50 titles is the cap for that
+  reason: each one IGDB has to be asked about is a ~330ms throttled round
+  trip, so a full list is a few seconds of spinner. It is deliberately not a
+  pg-boss job — there is no OCR stage to wait on, and a collection has to
+  exist with games in it before the page it opens is worth looking at. If the
+  cap ever needs raising past ~50, that is the point where it should become a
+  job with a review step, like the library import.
+- **A collection's remaining time is yours, not the author's.** Every figure
+  on `GET /api/collections/:id` resolves against whoever is asking — the same
+  rule `userGameId`/`status` already followed — so browsing someone's
+  published marathon tells you how much of *it* you have left. The total is
+  the other way round: it's a fact about the list, so finished games stay in
+  it.
+- **Collection totals honour `ttb_enabled`.** A game marked endless leaves
+  both figures and is counted in `time.endless` instead, matching the
+  dashboard's backlog total; one Rocket League would otherwise make a
+  marathon's number meaningless. Games with no known length are counted in
+  `time.unknown` rather than folded in at zero, and both are named under the
+  bar rather than hidden.
 
 - Light theme (preference stored, no light stylesheet) — Phase 6.
 - Email verification — Phase 6 (better-auth config flip; `services/email.ts` can send it).

@@ -22,6 +22,7 @@ import {
   Chevron,
   Chip,
   ChipBar,
+  CollectionTimeLine,
   Cover,
   EmptyState,
   Field,
@@ -104,8 +105,8 @@ function sortNodes(games: CollectionNode[], sort: ListSort): CollectionNode[] {
       return a.releaseDate.localeCompare(b.releaseDate) || byTitle(a, b);
     }
     if (sort === "ttb") {
-      const av = a.ttbMain ?? Number.MAX_SAFE_INTEGER;
-      const bv = b.ttbMain ?? Number.MAX_SAFE_INTEGER;
+      const av = a.ttbSeconds ?? a.ttbMain ?? Number.MAX_SAFE_INTEGER;
+      const bv = b.ttbSeconds ?? b.ttbMain ?? Number.MAX_SAFE_INTEGER;
       return av - bv || byTitle(a, b);
     }
     return a.sortOrder - b.sortOrder || byTitle(a, b);
@@ -190,6 +191,8 @@ export default function CollectionDetailScreen() {
         ListHeaderComponent={
           <View style={{ marginBottom: space.sm, gap: space.sm }}>
             {detail.description ? <Text style={type.prose}>{detail.description}</Text> : null}
+
+            <CollectionTimeLine time={detail.time} />
 
             <View style={styles.headerRow}>
               <Button
@@ -398,7 +401,17 @@ function CollectionRow({
 }) {
   const status = game.status ? statusStyle(game.status, badgeOpacity) : null;
   const year = game.releaseDate ? game.releaseDate.slice(0, 4) : null;
-  const ttb = formatHours(game.ttbMain);
+  // what this game still costs you, not just what it costs: a beaten game is
+  // no longer time you owe, and a part-ticked mission list is pro-rated
+  const full = formatHours(game.ttbSeconds ?? game.ttbMain);
+  const left = formatHours(game.remainingSeconds);
+  const ttb = game.finished
+    ? full && `✓ ${full}`
+    : game.endless
+      ? "∞ endless"
+      : left && game.remainingSeconds !== game.ttbSeconds
+        ? `${left} left of ${full}`
+        : full;
 
   const body = (
     <>

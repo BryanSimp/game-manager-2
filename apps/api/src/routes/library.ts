@@ -25,6 +25,7 @@ import {
 } from "../services/community.js";
 import { rememberConsoles } from "../services/consoles.js";
 import { defaultPlatformFor, defaultStatusFor } from "../services/preferences.js";
+import { missionCountsByGame, type MissionCounts } from "../services/progress.js";
 import { logEvent } from "../services/analytics.js";
 
 /** A category key: a built-in, or the id of one of the user's custom ones. */
@@ -192,58 +193,6 @@ async function entryTags(userGameIds: string[]) {
     const { userGameId, ...rest } = row;
     if (!map.has(userGameId)) map.set(userGameId, []);
     map.get(userGameId)!.push(rest);
-  }
-  return map;
-}
-
-export interface MissionCounts {
-  total: number;
-  done: number;
-}
-
-/**
- * Mission-list counts for every game the user tracks, keyed by game id.
- * Computed in one query so the library list doesn't fan out per entry.
- * Where a game has several mission lists the oldest wins, matching
- * GET /api/library/:id/progress.
- */
-async function missionCountsByGame(userId: string): Promise<Map<string, MissionCounts>> {
-  const rows = await db
-    .select({
-      gameId: schema.checklistTemplates.gameId,
-      createdAt: schema.checklistTemplates.createdAt,
-      total: sql<number>`count(${schema.checklistItems.id})::int`,
-      done: sql<number>`count(${schema.userChecklistItems.userId})::int`,
-    })
-    .from(schema.checklistTemplates)
-    .leftJoin(
-      schema.checklistItems,
-      eq(schema.checklistItems.templateId, schema.checklistTemplates.id),
-    )
-    .leftJoin(
-      schema.userChecklistItems,
-      and(
-        eq(schema.userChecklistItems.itemId, schema.checklistItems.id),
-        eq(schema.userChecklistItems.userId, userId),
-      ),
-    )
-    .where(
-      and(
-        eq(schema.checklistTemplates.authorUserId, userId),
-        eq(schema.checklistTemplates.kind, "missions"),
-      ),
-    )
-    .groupBy(
-      schema.checklistTemplates.id,
-      schema.checklistTemplates.gameId,
-      schema.checklistTemplates.createdAt,
-    )
-    .orderBy(asc(schema.checklistTemplates.createdAt));
-
-  const map = new Map<string, MissionCounts>();
-  for (const row of rows) {
-    // oldest first, so the first one seen for a game is the one that counts
-    if (!map.has(row.gameId)) map.set(row.gameId, { total: row.total, done: row.done });
   }
   return map;
 }

@@ -1,15 +1,24 @@
+import { GITHUB_REPO_URL } from "@gm/shared";
 import { SectionHeading } from "./MarketingLayout.js";
 
 /**
  * Shared by the rendered FAQ and by the FAQPage structured data on the
  * landing page — one source, so the schema can never describe questions the
  * page doesn't actually answer (which Google treats as a violation).
+ *
+ * `link` is rendered after the answer but deliberately kept *out* of it: the
+ * FAQPage schema wants a plain-text answer, so an anchor is page furniture
+ * rather than part of the answer Google is shown.
  */
-export const FAQ_ITEMS: Array<{ question: string; answer: string }> = [
+export const FAQ_ITEMS: Array<{
+  question: string;
+  answer: string;
+  link?: { href: string; label: string };
+}> = [
   {
     question: "Is Game Manager free?",
     answer:
-      "Yes. Every feature is free — creating an account, importing your library, tracking progress, building collections and sharing them. The site is supported by ads. There is no trial period, no card required to sign up, and nothing is held back behind a paid tier.",
+      "Yes. Every feature is free — creating an account, importing your library, tracking progress, building collections and sharing them. There are no ads, no trial period, no card required to sign up, and nothing is held back behind a paid tier.",
   },
   {
     question: "Can I try it without signing up?",
@@ -54,7 +63,8 @@ export const FAQ_ITEMS: Array<{ question: string; answer: string }> = [
   {
     question: "Can I self-host it?",
     answer:
-      "Yes. Game Manager runs as a small set of Docker containers — an API, the web app and a PostgreSQL database — behind whatever reverse proxy you already use. Your library data stays on your own server.",
+      "Yes, and the source is public. Game Manager runs as a small set of Docker containers — an API, the web app and a PostgreSQL database — behind whatever reverse proxy you already use. Clone the repository, copy the example env file, and bring the stack up with Docker Compose; the README walks through it. Your library data stays on your own server.",
+    link: { href: GITHUB_REPO_URL, label: "View the source and setup guide on GitHub" },
   },
 ];
 
@@ -72,7 +82,19 @@ export function Faq() {
         {FAQ_ITEMS.map((item) => (
           <div key={item.question} className="py-5">
             <dt className="text-sm font-semibold text-zinc-100">{item.question}</dt>
-            <dd className="mt-2 text-sm leading-6 text-zinc-400">{item.answer}</dd>
+            <dd className="mt-2 text-sm leading-6 text-zinc-400">
+              {item.answer}
+              {item.link && (
+                <a
+                  href={item.link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 block font-medium text-indigo-400 underline decoration-indigo-700 underline-offset-2 hover:text-indigo-300"
+                >
+                  {item.link.label} ↗
+                </a>
+              )}
+            </dd>
           </div>
         ))}
       </dl>

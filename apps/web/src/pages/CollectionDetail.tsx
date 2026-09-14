@@ -6,6 +6,7 @@ import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { AddCollectionGame } from "../components/AddCollectionGame.js";
 import { CollectionList } from "../components/CollectionList.js";
+import { CollectionTimePanel } from "../components/CollectionTime.js";
 
 const NODE_W = 92;
 const NODE_H = 122;
@@ -330,6 +331,10 @@ export function CollectionDetailPage() {
           </button>
         ))}
       </div>
+
+      {/* how long the run is, above both views — it's a fact about the
+          collection, not about the way you're looking at it */}
+      {nodes.length > 0 && <CollectionTimePanel time={collection.data.time} />}
 
       {nodes.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-zinc-700 p-12 text-center">

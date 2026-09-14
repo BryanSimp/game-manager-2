@@ -15,8 +15,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import type { VoteCounts } from "@gm/shared";
+import type { CollectionTime, VoteCounts } from "@gm/shared";
 import { colors, radius, space, TOUCH, type } from "@/lib/theme";
+import { formatHours } from "@/lib/ui";
 
 /**
  * The shared look of the app. Every screen used to hand-roll its own
@@ -310,6 +311,75 @@ export function ProgressBar({ percent, color = colors.success, width }: { percen
   );
 }
 
+/**
+ * How long a collection takes, and how much of it is left — the phone's
+ * version of the web app's `CollectionTimePanel`.
+ *
+ * Two figures rather than one: the total is a fact about the list and doesn't
+ * move as you play, while what's left is about you — finished games drop out
+ * of it, and part-ticked mission lists are pro-rated. Lengths nobody knows are
+ * named rather than folded in at zero.
+ */
+export function CollectionTimeLine({
+  time,
+  compact = false,
+}: {
+  time: CollectionTime;
+  compact?: boolean;
+}) {
+  if (time.counted === 0) return null;
+  const total = formatHours(time.totalSeconds);
+  const left = formatHours(time.remainingSeconds);
+  const done = time.remainingSeconds <= 0;
+  const played =
+    time.totalSeconds > 0
+      ? ((time.totalSeconds - time.remainingSeconds) / time.totalSeconds) * 100
+      : 0;
+
+  if (compact) {
+    return (
+      <View style={styles.timeRow}>
+        <Icon name="time-outline" size={11} color={colors.textFaint} />
+        <Text style={type.micro}>{total}</Text>
+        {done ? (
+          <Text style={[type.micro, { color: colors.success }]}>· beaten</Text>
+        ) : (
+          left !== total && (
+            <Text style={[type.micro, { color: colors.accentText }]}>· {left} left</Text>
+          )
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.timeCard}>
+      <View style={styles.timeRow}>
+        <Icon name="time-outline" size={13} color={colors.textFaint} />
+        <Text style={type.caption}>
+          <Text style={type.bodyStrong}>{total}</Text> to beat in full
+        </Text>
+        {done ? (
+          <Text style={[type.caption, { color: colors.success }]}>· all beaten</Text>
+        ) : (
+          <Text style={[type.caption, { color: colors.accentText }]}>· {left} left</Text>
+        )}
+      </View>
+      <ProgressBar percent={played} />
+      {(time.unknown > 0 || time.endless > 0) && (
+        <Text style={type.micro}>
+          {[
+            time.unknown > 0 && `${time.unknown} with no known length`,
+            time.endless > 0 && `${time.endless} endless excluded`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </Text>
+      )}
+    </View>
+  );
+}
+
 /** The disclosure arrow on a tappable row. */
 export function Chevron() {
   return <Icon name="chevron-forward" size={18} color={colors.textGhost} />;
@@ -564,6 +634,16 @@ export function SheetButton({
 }
 
 const styles = StyleSheet.create({
+  timeCard: {
+    gap: space.xs,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+  },
+  timeRow: { flexDirection: "row", alignItems: "center", gap: space.xs, flexWrap: "wrap" },
   screen: { flex: 1, backgroundColor: colors.bg },
   centered: { alignItems: "center", justifyContent: "center", padding: space.xxl },
   pressed: { opacity: 0.7 },

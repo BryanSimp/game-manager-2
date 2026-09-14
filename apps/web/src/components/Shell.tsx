@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import { authClient } from "../lib/auth.js";
 import { api } from "../lib/api.js";
 import { isDemoEdit, useDemoMode } from "../lib/demo.js";
-import { AdBanner } from "./ads/AdBanner.js";
 import { DemoBanner, DemoEditBanner } from "./DemoBanner.js";
 import { Footer } from "./Footer.js";
 
@@ -144,7 +143,6 @@ export function Shell({ children }: { children: ReactNode }) {
       </header>
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
         {children}
-        <AdBanner slot="shell-bottom" className="mt-8" />
       </main>
       <Footer />
       <span
