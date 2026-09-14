@@ -7,15 +7,51 @@ import { requireUser } from "../plugins/auth.js";
 import { upsertGameFromIgdb } from "../services/catalog.js";
 import { logEvent } from "../services/analytics.js";
 import { isValidCategory } from "../services/categories.js";
+import { resolveTtbFor } from "../services/community.js";
 import { rememberConsoles } from "../services/consoles.js";
 import { inspectAll } from "../services/content-filter.js";
+import { matchTitle } from "../services/matcher.js";
+import { extractTitles } from "../services/noise-filter.js";
+import {
+  addGameTime,
+  emptyCollectionTime,
+  gameTime,
+  missionCountsByGame,
+  type CollectionTime,
+  type GameTime,
+} from "../services/progress.js";
 import {
   NO_VOTES,
   castCollectionVote,
   collectionVoteCounts,
   voteSchema,
 } from "../services/votes.js";
-import { voteRateLimit } from "../plugins/rate-limits.js";
+import { importRateLimit, voteRateLimit } from "../plugins/rate-limits.js";
+
+/**
+ * How many lines one pasted list may add. Well under the import page's 200:
+ * every line that isn't already in the catalog is a throttled IGDB search
+ * (~3/s) inside a request nobody is watching a spinner for beyond a few
+ * seconds.
+ */
+const LIST_IMPORT_MAX = 50;
+
+/**
+ * How close a title has to be before it's filed without asking. Lower than
+ * the Steam importer's 0.85 because a pasted list is typed by a person rather
+ * than read off a screenshot, and because a wrong row in a collection is one
+ * click to remove rather than a wrong game in a library. Every line's score
+ * comes back in the response either way, so a marginal match is visible
+ * rather than silent.
+ */
+const LIST_IMPORT_MIN_CONFIDENCE = 0.55;
+
+type ListImportResult = {
+  input: string;
+  matched: { gameId: string; title: string; coverSrc: string | null } | null;
+  confidence: number;
+  status: "added" | "duplicate" | "unmatched" | "failed";
+};
 
 const collectionSchema = z.object({
   name: z.string().min(1).max(100),
@@ -90,6 +126,72 @@ function gameCover(game: {
   return game.coverImageId ? `/api/images/${game.coverImageId}` : game.coverUrl;
 }
 
+/**
+ * Play times for a set of collections: how long the whole run is, and how
+ * much of it is left.
+ *
+ * Everything here goes through `resolveTtbFor`, not `games.ttb_main` — play
+ * times have been per-user since phase 16, and a collection total that read
+ * the catalog column directly would quietly disagree with the figure shown on
+ * each of the games it was adding up.
+ *
+ * Remaining follows the same three rules `gameTime` documents: a finished game
+ * drops out entirely, a part-ticked mission list is pro-rated, and everything
+ * else counts in full. Games you don't own count in full too — a collection is
+ * a reading list, and "how long to play all of this" includes the ones you
+ * haven't bought yet.
+ */
+async function collectionTimes(
+  userId: string,
+  collectionIds: string[],
+): Promise<Map<string, CollectionTime>> {
+  const totals = new Map<string, CollectionTime>();
+  if (collectionIds.length === 0) return totals;
+  for (const id of collectionIds) totals.set(id, emptyCollectionTime());
+
+  const rows = await db
+    .select({
+      collectionId: schema.collectionGames.collectionId,
+      game: schema.games,
+      status: schema.userGames.status,
+      completed100: schema.userGames.completed100,
+      progressBasis: schema.userGames.progressBasis,
+      ttbEnabled: schema.userGames.ttbEnabled,
+    })
+    .from(schema.collectionGames)
+    .innerJoin(schema.games, eq(schema.games.id, schema.collectionGames.gameId))
+    .leftJoin(
+      schema.userGames,
+      and(
+        eq(schema.userGames.gameId, schema.collectionGames.gameId),
+        eq(schema.userGames.userId, userId),
+      ),
+    )
+    .where(inArray(schema.collectionGames.collectionId, collectionIds));
+  if (rows.length === 0) return totals;
+
+  // one resolve and one mission-count query for every collection at once,
+  // rather than a pair per collection
+  const distinct = new Map(rows.map((r) => [r.game.id, r.game]));
+  const [ttb, missions] = await Promise.all([
+    resolveTtbFor(userId, [...distinct.values()]),
+    missionCountsByGame(userId),
+  ]);
+
+  for (const row of rows) {
+    const time = gameTime({
+      ttb: ttb.get(row.game.id) ?? row.game,
+      basis: row.progressBasis ?? "main",
+      status: row.status,
+      completed100: row.completed100 ?? false,
+      ttbEnabled: row.ttbEnabled ?? true,
+      missions: missions.get(row.game.id),
+    });
+    addGameTime(totals.get(row.collectionId)!, time);
+  }
+  return totals;
+}
+
 /** Cover previews for a set of collections, keyed by collection id. */
 async function previewsFor(
   collectionIds: string[],
@@ -160,6 +262,10 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       .groupBy(schema.collectionGames.collectionId);
     const statMap = new Map(stats.map((s) => [s.collectionId, s]));
     const previews = await previewsFor(rows.map((c) => c.id));
+    const times = await collectionTimes(
+      user.id,
+      rows.map((c) => c.id),
+    );
 
     // membership, when one was asked about: one query for every collection
     // rather than one per row
@@ -189,6 +295,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       adoptedFromId: c.adoptedFromId,
       total: statMap.get(c.id)?.total ?? 0,
       finished: Number(statMap.get(c.id)?.finished ?? 0),
+      time: times.get(c.id) ?? emptyCollectionTime(),
       preview: previews.get(c.id) ?? [],
       // absent unless a game was named, so "false" always means "asked, and no"
       ...(gameId ? { containsGame: holding.has(c.id) } : {}),
@@ -286,6 +393,13 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       rows.map((r) => r.id),
       user.id,
     );
+    // how long someone else's marathon actually is, which is most of what
+    // anyone wants to know before copying it. Resolved against *your* times
+    // and progress, like everything else on this route.
+    const times = await collectionTimes(
+      user.id,
+      rows.map((r) => r.id),
+    );
 
     return {
       items: rows.map((r) => ({
@@ -298,6 +412,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         adopted: adopted.has(r.id),
         mine: r.userId === user.id,
         votes: votes.get(r.id) ?? NO_VOTES,
+        time: times.get(r.id) ?? emptyCollectionTime(),
         preview: previews.get(r.id) ?? [],
       })),
       hasMore,
@@ -522,17 +637,15 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
 
     const nodes = await db
       .select({
-        gameId: schema.collectionGames.gameId,
+        game: schema.games,
         x: schema.collectionGames.positionX,
         y: schema.collectionGames.positionY,
         sortOrder: schema.collectionGames.sortOrder,
-        title: schema.games.title,
-        releaseDate: schema.games.releaseDate,
-        ttbMain: schema.games.ttbMain,
-        coverImageId: schema.games.coverImageId,
-        coverUrl: schema.games.coverUrl,
         userGameId: schema.userGames.id,
         status: schema.userGames.status,
+        completed100: schema.userGames.completed100,
+        progressBasis: schema.userGames.progressBasis,
+        ttbEnabled: schema.userGames.ttbEnabled,
       })
       .from(schema.collectionGames)
       .innerJoin(schema.games, eq(schema.collectionGames.gameId, schema.games.id))
@@ -544,6 +657,33 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         ),
       )
       .where(eq(schema.collectionGames.collectionId, collection.id));
+
+    /*
+     * Per-game play times, resolved for whoever is asking — so a visitor
+     * browsing someone else's published collection sees their own progress
+     * against it, the same rule `userGameId`/`status` already follow. The
+     * roll-up is summed from these rather than fetched separately, so the
+     * header total can never disagree with the rows under it.
+     */
+    const ttb = await resolveTtbFor(
+      user.id,
+      nodes.map((n) => n.game),
+    );
+    const missions = await missionCountsByGame(user.id);
+    const time = emptyCollectionTime();
+    const nodeTimes = new Map<string, GameTime>();
+    for (const n of nodes) {
+      const t = gameTime({
+        ttb: ttb.get(n.game.id) ?? n.game,
+        basis: n.progressBasis ?? "main",
+        status: n.status,
+        completed100: n.completed100 ?? false,
+        ttbEnabled: n.ttbEnabled ?? true,
+        missions: missions.get(n.game.id),
+      });
+      nodeTimes.set(n.game.id, t);
+      addGameTime(time, t);
+    }
 
     const links = await db
       .select()
@@ -562,15 +702,21 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       isOwner,
       authorName: author?.name ?? null,
       votes: votes.get(collection.id) ?? NO_VOTES,
+      time,
       games: nodes.map((n) => ({
-        gameId: n.gameId,
-        title: n.title,
-        coverSrc: gameCover(n),
+        gameId: n.game.id,
+        title: n.game.title,
+        coverSrc: gameCover(n.game),
         x: n.x,
         y: n.y,
         sortOrder: n.sortOrder,
-        releaseDate: n.releaseDate,
-        ttbMain: n.ttbMain,
+        releaseDate: n.game.releaseDate,
+        // the resolved figure, not games.ttb_main — see collectionTimes
+        ttbMain: ttb.get(n.game.id)?.ttbMain ?? n.game.ttbMain,
+        ttbSeconds: nodeTimes.get(n.game.id)?.totalSeconds ?? null,
+        remainingSeconds: nodeTimes.get(n.game.id)?.remainingSeconds ?? null,
+        finished: nodeTimes.get(n.game.id)?.finished ?? false,
+        endless: nodeTimes.get(n.game.id)?.endless ?? false,
         userGameId: n.userGameId,
         status: n.status,
       })),
@@ -634,6 +780,133 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       .onConflictDoNothing();
     return { ok: true, gameId };
   });
+
+  /**
+   * Fill a collection from a pasted list of titles.
+   *
+   * The same affordance the import page gives a library — paste a list, get
+   * it matched — pointed at a collection instead. "The Zelda games in order"
+   * is twenty lines of typing you already have somewhere, and adding them one
+   * search at a time was the reason collections stayed empty.
+   *
+   * Three differences from the library's import, all deliberate:
+   *
+   *  - It runs in the request rather than through a pg-boss job. There is no
+   *    OCR stage to wait on, and a collection has to *exist* with games in it
+   *    before the page it redirects to is worth opening. That's also why the
+   *    cap is 50 rather than the import's 200: each unmatched line is one
+   *    throttled IGDB round trip (~3/s), so 50 is a few seconds and 200 would
+   *    be a minute of a held connection.
+   *  - There is no review step. Every line comes back in the response saying
+   *    what it matched and how confidently, and a wrong one is removed from
+   *    the collection in one click — a collection is a list of titles, so the
+   *    cost of a bad row is nothing like adding a wrong game to a library.
+   *  - Matching skips the OCR-damage retries: a typed list has no icon junk
+   *    to strip, and each retry is another IGDB call.
+   *
+   * Games are pulled into the shared catalog but deliberately NOT into your
+   * library, exactly like adding one by hand.
+   */
+  app.post<{ Params: { id: string } }>(
+    "/api/collections/:id/games/from-list",
+    { config: importRateLimit },
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const collection = await ownedCollection(user.id, request.params.id);
+      if (!collection) return reply.status(404).send({ message: "Collection not found" });
+
+      const parsed = z
+        .object({ text: z.string().min(1).max(20_000) })
+        .safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+      }
+
+      const titles = extractTitles(parsed.data.text, LIST_IMPORT_MAX);
+      if (titles.length === 0) {
+        return reply.status(400).send({ message: "No game titles found in that list" });
+      }
+
+      // what's already in here, so a re-paste doesn't double anything up and
+      // the sort order keeps counting from the right place
+      const existingRows = await db
+        .select({ gameId: schema.collectionGames.gameId })
+        .from(schema.collectionGames)
+        .where(eq(schema.collectionGames.collectionId, collection.id));
+      const present = new Set(existingRows.map((r) => r.gameId));
+      let n = existingRows.length;
+
+      const results: ListImportResult[] = [];
+      for (const title of titles) {
+        let match;
+        try {
+          match = await matchTitle(title, { ocrVariants: false });
+        } catch {
+          results.push({ input: title, matched: null, confidence: 0, status: "failed" });
+          continue;
+        }
+        const top = match.candidates[0];
+        if (!top || match.confidence < LIST_IMPORT_MIN_CONFIDENCE) {
+          results.push({ input: title, matched: null, confidence: match.confidence, status: "unmatched" });
+          continue;
+        }
+
+        let gameId = top.gameId;
+        if (!gameId && top.igdbId) {
+          try {
+            gameId = await upsertGameFromIgdb(top.igdbId);
+          } catch {
+            results.push({ input: title, matched: null, confidence: match.confidence, status: "failed" });
+            continue;
+          }
+        }
+        if (!gameId) {
+          results.push({ input: title, matched: null, confidence: match.confidence, status: "unmatched" });
+          continue;
+        }
+
+        if (present.has(gameId)) {
+          results.push({
+            input: title,
+            matched: { gameId, title: top.title, coverSrc: top.coverSrc },
+            confidence: match.confidence,
+            status: "duplicate",
+          });
+          continue;
+        }
+
+        await db
+          .insert(schema.collectionGames)
+          .values({
+            collectionId: collection.id,
+            gameId,
+            // the same loose grid single adds use, so the graph opens legible
+            positionX: 80 + (n % 5) * 150,
+            positionY: 80 + Math.floor(n / 5) * 190,
+            // pasted order is the play order — that's the whole point of
+            // pasting a list rather than adding twenty games by search
+            sortOrder: n + 1,
+          })
+          .onConflictDoNothing();
+        present.add(gameId);
+        n++;
+        results.push({
+          input: title,
+          matched: { gameId, title: top.title, coverSrc: top.coverSrc },
+          confidence: match.confidence,
+          status: "added",
+        });
+      }
+
+      return {
+        added: results.filter((r) => r.status === "added").length,
+        duplicates: results.filter((r) => r.status === "duplicate").length,
+        unmatched: results.filter((r) => r.status !== "added" && r.status !== "duplicate").length,
+        results,
+      };
+    },
+  );
 
   app.delete<{ Params: { id: string; gameId: string } }>(
     "/api/collections/:id/games/:gameId",

@@ -28,6 +28,7 @@ import {
   Chevron,
   Chip,
   ChipBar,
+  CollectionTimeLine,
   Cover,
   EmptyState,
   Field,
@@ -376,6 +377,7 @@ function MineCard({
           <Text style={[type.micro, { marginTop: space.xs }]}>
             {c.finished}/{c.total} finished
           </Text>
+          <CollectionTimeLine time={c.time} compact />
         </View>
         <Chevron />
       </View>
@@ -423,6 +425,9 @@ function PublicCard({
               {c.description}
             </Text>
           ) : null}
+          {/* how long someone else's marathon is — most of what you want to
+              know before copying it */}
+          <CollectionTimeLine time={c.time} compact />
         </View>
       </View>
       <Covers preview={c.preview} />

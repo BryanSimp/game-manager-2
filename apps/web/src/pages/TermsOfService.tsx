@@ -38,9 +38,8 @@ export function TermsOfServicePage() {
 
       <LegalSection heading="4. Free tier and Premium">
         <p>
-          The free tier is supported by advertising: free accounts may be shown clearly-labelled
-          ads within the interface. Premium accounts see no ads. Features may differ between
-          tiers, and tiers may change over time; material changes will be announced in the app.
+          The service carries no advertising. Features may differ between tiers, and tiers may
+          change over time; material changes will be announced in the app.
         </p>
       </LegalSection>
 

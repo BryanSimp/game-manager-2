@@ -34,12 +34,39 @@ export function sortNodes(games: CollectionNode[], sort: ListSort): CollectionNo
       return a.releaseDate.localeCompare(b.releaseDate) || byTitle(a, b);
     }
     if (sort === "ttb") {
-      const av = a.ttbMain ?? Number.MAX_SAFE_INTEGER;
-      const bv = b.ttbMain ?? Number.MAX_SAFE_INTEGER;
+      const av = a.ttbSeconds ?? a.ttbMain ?? Number.MAX_SAFE_INTEGER;
+      const bv = b.ttbSeconds ?? b.ttbMain ?? Number.MAX_SAFE_INTEGER;
       return av - bv || byTitle(a, b);
     }
     return a.sortOrder - b.sortOrder || byTitle(a, b);
   });
+}
+
+/**
+ * What this row contributes to the collection's remaining time.
+ *
+ * A finished game says so instead of quoting a length — it's still in the
+ * total the header shows, but it's no longer time you owe. A part-played one
+ * shows what's left beside what it costs in full, because "6h left of 25h" is
+ * the number that decides whether you pick it up tonight.
+ */
+function RowTime({ game }: { game: CollectionNode }) {
+  const full = formatHours(game.ttbSeconds ?? game.ttbMain);
+  if (game.finished) {
+    return <span className="text-emerald-500">✓ beaten{full ? ` · ${full}` : ""}</span>;
+  }
+  if (game.endless) return <span>∞ endless</span>;
+  if (!full) return null;
+  const left = formatHours(game.remainingSeconds);
+  // only worth two figures when progress has actually moved one of them
+  if (left && game.remainingSeconds !== game.ttbSeconds) {
+    return (
+      <span>
+        ⏱ <span className="text-indigo-300">{left} left</span> of {full}
+      </span>
+    );
+  }
+  return <span>⏱ {full}</span>;
 }
 
 /**
@@ -179,7 +206,7 @@ export function CollectionList({
                 <p className="truncate font-medium text-zinc-100">{game.title}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
                   {game.releaseDate && <span>{game.releaseDate.slice(0, 4)}</span>}
-                  {game.ttbMain && <span>⏱ {formatHours(game.ttbMain)}</span>}
+                  <RowTime game={game} />
                   {chip ? (
                     <span
                       className={`${chip.className} rounded-full px-2 py-0.5`}

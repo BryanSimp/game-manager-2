@@ -5,6 +5,8 @@ import type { CollectionSummary, PublicCollection } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { AddCollectionToLibrary } from "../components/AddCollectionToLibrary.js";
+import { CollectionTimeLine } from "../components/CollectionTime.js";
+import { CreateCollection } from "../components/CreateCollection.js";
 import { VoteButtons } from "../components/VoteButtons.js";
 
 type Tab = "mine" | "public";
@@ -23,8 +25,6 @@ export function CollectionsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("mine");
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<"top" | "new">("top");
 
@@ -36,16 +36,6 @@ export function CollectionsPage() {
     queryKey: ["public-collections", debouncedSearch, sort],
     queryFn: () => api.getPublicCollections({ q: debouncedSearch || undefined, sort }),
     enabled: tab === "public",
-  });
-
-  const create = useMutation({
-    mutationFn: () => api.createCollection({ name: name.trim() }),
-    onSuccess: () => {
-      setName("");
-      setError(null);
-      queryClient.invalidateQueries({ queryKey: ["collections"] });
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : "Failed to create"),
   });
 
   const adopt = useMutation({
@@ -95,28 +85,7 @@ export function CollectionsPage() {
 
       {tab === "mine" ? (
         <>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (name.trim()) create.mutate();
-            }}
-            className="mb-8 flex max-w-md gap-3"
-          >
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. The Legend of Zelda"
-              className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm outline-none focus:border-indigo-500"
-            />
-            <button
-              type="submit"
-              disabled={!name.trim() || create.isPending}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-500 disabled:opacity-50"
-            >
-              Create
-            </button>
-          </form>
-          {error && <p className="-mt-4 mb-6 text-sm text-red-400">{error}</p>}
+          <CreateCollection />
 
           {collections.data?.length === 0 && (
             <p className="text-zinc-500">No collections yet — create your first one above.</p>
@@ -237,9 +206,10 @@ function MineCard({ collection: c }: { collection: CollectionSummary }) {
       </h2>
       {c.description && <p className="mt-1 line-clamp-2 text-sm text-zinc-400">{c.description}</p>}
       <Covers preview={c.preview} />
-      <div className="mt-3 flex items-center gap-3 text-sm text-zinc-400">
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-400">
         <span>{c.total} games</span>
         <span className="text-emerald-400">{c.finished} finished</span>
+        <CollectionTimeLine time={c.time} />
       </div>
       {c.total > 0 && (
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-800">
@@ -286,6 +256,11 @@ function PublicCard({
       </div>
       {c.description && <p className="mt-1 line-clamp-2 text-sm text-zinc-400">{c.description}</p>}
       <Covers preview={c.preview} />
+      {/* the length of someone else's marathon is most of what you want to
+          know before copying it */}
+      <p className="mt-3 text-sm">
+        <CollectionTimeLine time={c.time} />
+      </p>
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
         {c.mine ? (
           <Link

@@ -1,20 +1,18 @@
 import type { ReactNode } from "react";
 import { Footer } from "../Footer.js";
 import { MarketingNav } from "./MarketingNav.js";
-import { AdRail } from "./AdRail.js";
-import { AdSlot } from "./AdSlot.js";
-import { AD_SLOTS } from "../../lib/adsense.js";
 
 /**
- * The 'classic web' chrome shared by every public page: sticky nav, a centred
- * content column flanked by two sticky ad rails, and the site footer.
+ * The chrome shared by every public page: sticky nav, a centred content
+ * column, and the site footer.
  *
  * Deliberately outside the `Shell` — these pages must render with no session,
- * no `/api/me` fetch and no redirect to /login, both so a visitor can read
- * them before signing up and so an ad crawler can fetch them at all.
+ * no `/api/me` fetch and no redirect to /login, so a visitor can read them
+ * before signing up and a crawler can fetch them at all.
  *
- * Below `xl` the rails drop away and the whole thing is one column; the ad
- * that would have been in a rail moves under the content as a horizontal unit.
+ * The column used to be flanked by two 300px ad rails. Those are gone along
+ * with the rest of the ad placeholders, so the content is centred on its own
+ * and capped at a readable width rather than stretched across 1600px.
  */
 export function MarketingLayout({
   children,
@@ -27,22 +25,9 @@ export function MarketingLayout({
     <div className="flex min-h-screen flex-col">
       <MarketingNav variant={variant} />
 
-      <div className="mx-auto flex w-full max-w-[1600px] flex-1 gap-6 px-4 py-6">
-        <AdRail side="left" slotId={AD_SLOTS.railLeft} />
-
-        {/* min-w-0 so long words and wide children can't stretch the column
-            and squeeze the rails */}
-        <main className="min-w-0 flex-1">
-          {children}
-          <AdSlot
-            slotId={AD_SLOTS.contentMobile}
-            format="horizontal"
-            minHeight={100}
-            className="mt-10 xl:hidden"
-          />
-        </main>
-
-        <AdRail side="right" slotId={AD_SLOTS.railRight} />
+      <div className="mx-auto flex w-full max-w-6xl flex-1 px-4 py-6">
+        {/* min-w-0 so long words and wide children can't stretch the column */}
+        <main className="min-w-0 flex-1">{children}</main>
       </div>
 
       <Footer />

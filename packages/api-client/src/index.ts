@@ -37,6 +37,7 @@ import type {
   SteamStatus,
   CollectionDetail,
   CollectionLayoutInput,
+  CollectionListImport,
   CollectionSummary,
   DashboardData,
   DemoAdminView,
@@ -445,6 +446,18 @@ export class ApiClient {
     return this.request(`/api/collections/${id}/games`, {
       method: "POST",
       body: JSON.stringify(input),
+    });
+  }
+
+  /**
+   * Fill a collection from a pasted list of titles, one per line. Matching
+   * happens server-side in the request — there is no job to poll — so expect
+   * this to take a couple of seconds per title IGDB has to be asked about.
+   */
+  addCollectionGamesFromList(id: string, text: string): Promise<CollectionListImport> {
+    return this.request<CollectionListImport>(`/api/collections/${id}/games/from-list`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
     });
   }
 

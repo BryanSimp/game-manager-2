@@ -90,3 +90,10 @@ export type FriendshipStatus = (typeof FRIENDSHIP_STATUSES)[number];
 /** Which how-long-to-beat figure the remaining-time estimate is based on. */
 export const PROGRESS_BASES = ["main", "main_extra", "completionist"] as const;
 export type ProgressBasis = (typeof PROGRESS_BASES)[number];
+
+/**
+ * Where the source lives. The repo is public, so every claim the site makes
+ * about self-hosting can link straight at the thing you'd clone — one
+ * constant rather than a URL typed out on each page that mentions it.
+ */
+export const GITHUB_REPO_URL = "https://github.com/BryanSimp/game-manager-2";

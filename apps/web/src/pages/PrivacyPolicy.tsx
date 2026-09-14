@@ -1,3 +1,4 @@
+import { GITHUB_REPO_URL } from "@gm/shared";
 import { LegalLayout, LegalSection } from "../components/LegalLayout.js";
 import { useSeo } from "../lib/seo.js";
 
@@ -19,7 +20,17 @@ export function PrivacyPolicyPage() {
           information the service collects, how it is used, and which third-party services it
           talks to on your behalf. Because Game Manager is self-hosted, your data lives on the
           server run by the operator of this instance ("the operator"), not on a central service
-          run by the developers.
+          run by the developers. The source is public, so everything described here can be
+          checked against the code at{" "}
+          <a
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-zinc-100"
+          >
+            github.com/BryanSimp/game-manager-2
+          </a>
+          .
         </p>
       </LegalSection>
 
@@ -88,78 +99,21 @@ export function PrivacyPolicyPage() {
         </ul>
       </LegalSection>
 
-      <LegalSection heading="4. Advertising">
-        <p>
-          Free accounts are ad-supported. Ads are served by <strong>Google AdSense</strong>, a
-          third-party advertising network. Premium accounts see no ads: no ad unit is rendered
-          for a Premium session.
-        </p>
-        <p>
-          <strong>
-            Third-party vendors, including Google, use cookies to serve ads based on your prior
-            visits to this website or other websites.
-          </strong>{" "}
-          Google's use of advertising cookies enables it and its partners to serve ads to you
-          based on your visits to this site and/or other sites on the internet. Those cookies
-          and similar identifiers are also used to measure ads and cap how often you see them.
-          To do this, Google and its partners may process your IP address, your device and
-          browser information, and the pages you view here. Google describes this in{" "}
-          <a
-            href="https://policies.google.com/technologies/partner-sites"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:text-zinc-100"
-          >
-            How Google uses information from sites that use its services
-          </a>
-          .
-        </p>
-        <p>
-          To be clear about the scope: the AdSense script is loaded on every page of this site,
-          including pages you see while signed in. The ad <em>placements</em> in this
-          application are only on the public pages — the landing page, the guides, and the
-          contact page.
-        </p>
-        <p>
-          You can turn off personalised advertising in{" "}
-          <a
-            href="https://www.google.com/settings/ads"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:text-zinc-100"
-          >
-            Google Ads Settings
-          </a>
-          , or opt out of participating vendors' use of cookies at{" "}
-          <a
-            href="https://www.aboutads.info/choices/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:text-zinc-100"
-          >
-            aboutads.info
-          </a>
-          . Where the law requires it — including the EEA, the UK and Switzerland —
-          personalised advertising is used only with your consent, which is requested the first
-          time you visit and can be changed at any time from the same prompt.
-        </p>
-      </LegalSection>
-
-      <LegalSection heading="5. Cookies">
+      <LegalSection heading="4. Cookies">
         <p>
           Game Manager itself sets a single HTTP-only session cookie to keep you signed in. It
           sets no first-party analytics or tracking cookies — usage statistics are recorded
           server-side against your account, not against a cookie.
         </p>
         <p>
-          Google AdSense sets its own cookies for the ad serving, measurement and fraud
-          prevention described in section 4. Those are third-party cookies: you can control
-          them through your browser's cookie settings or the opt-out links above, and in
-          regions where consent is required they are only set once you have given it.
+          No third-party advertising cookies are set: the site carries no ads and loads no ad
+          network's script. The only cookies in play are the session cookie above and, if you
+          ask to be remembered past a two-factor challenge, the trusted-device cookie that
+          records that choice.
         </p>
       </LegalSection>
 
-      <LegalSection heading="6. Age requirement">
+      <LegalSection heading="5. Age requirement">
         <p>
           Game Manager is not directed at children. You must be at least <strong>13 years
           old</strong> (or the minimum age of digital consent in your country, if higher) to
@@ -168,7 +122,7 @@ export function PrivacyPolicyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection heading="7. Data retention and deletion">
+      <LegalSection heading="6. Data retention and deletion">
         <p>
           Your data is kept for as long as your account exists. Deleting your account removes
           your library, uploads, social connections, and preferences from the database. To
@@ -176,7 +130,7 @@ export function PrivacyPolicyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection heading="8. Changes to this policy">
+      <LegalSection heading="7. Changes to this policy">
         <p>
           Material changes to this policy will be reflected on this page with an updated date
           above. Continued use of the service after a change constitutes acceptance.

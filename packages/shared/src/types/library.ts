@@ -407,6 +407,33 @@ export interface VoteCounts {
   /** your own vote: 1, -1, or 0 for none */
   mine: number;
 }
+/**
+ * A collection's play time, rolled up.
+ *
+ * `totalSeconds` is the whole run — how long the collection takes to beat in
+ * full, finished games included, because that is a fact about the list rather
+ * than about your progress through it. `remainingSeconds` is what you have
+ * left: a finished game contributes nothing, a game with a part-ticked mission
+ * list contributes its pro-rated remainder, and everything else contributes
+ * its full length.
+ *
+ * The three counts explain any gap between the total and the number of games:
+ * lengths nobody knows (`unknown`) and games marked endless (`endless`) are
+ * deliberately left out of both figures rather than counted as zero.
+ */
+export interface CollectionTime {
+  totalSeconds: number;
+  remainingSeconds: number;
+  /** games whose length went into the totals */
+  counted: number;
+  /** games with no known length, here or in the community figures */
+  unknown: number;
+  /** games marked endless — excluded from both totals on purpose */
+  endless: number;
+  /** games you have finished or marked 100% */
+  finished: number;
+}
+
 export interface CollectionSummary {
   id: string;
   name: string;
@@ -414,6 +441,8 @@ export interface CollectionSummary {
   accentColor: string | null;
   total: number;
   finished: number;
+  /** how long the whole run takes, and how much of it you have left */
+  time: CollectionTime;
   /** listed for everyone to browse and adopt */
   isPublic: boolean;
   /** set when this is your copy of someone else's public collection */
@@ -443,6 +472,8 @@ export interface PublicCollection {
   /** true when it's yours */
   mine: boolean;
   votes: VoteCounts;
+  /** how long the run is — and, against your own library, what's left of it */
+  time: CollectionTime;
   preview: Array<{ gameId: string; title: string; coverSrc: string | null }>;
 }
 export interface CollectionNode {
@@ -456,7 +487,16 @@ export interface CollectionNode {
   sortOrder: number;
   /** so the list can sort by release date without a second request */
   releaseDate: string | null;
+  /** resolved play time — catalog, then yours, then the community average */
   ttbMain: number | null;
+  /** the figure this game contributes to the collection total, for its basis */
+  ttbSeconds: number | null;
+  /** what's left of it: 0 when finished, pro-rated against mission progress */
+  remainingSeconds: number | null;
+  /** finished or marked 100% */
+  finished: boolean;
+  /** marked endless, so it counts toward neither total */
+  endless: boolean;
   /** null when the game isn't in your library — the list says so and links to add it */
   userGameId: string | null;
   status: string | null;
@@ -479,6 +519,8 @@ export interface CollectionDetail {
   /** set only when it isn't yours */
   authorName: string | null;
   votes: VoteCounts;
+  /** summed from `games`, so the header can't disagree with the rows */
+  time: CollectionTime;
   games: CollectionNode[];
   links: CollectionLink[];
 }
@@ -504,6 +546,30 @@ export interface PublicCollectionPage {
 export interface AddCollectionGameInput {
   gameId?: string;
   igdbId?: number;
+}
+/**
+ * One line of a pasted list, and what became of it.
+ *
+ * Every line comes back, matched or not, with the score behind the decision —
+ * there is no review step before the games are filed, so the response *is*
+ * the review. A wrong row is one click to remove from the collection.
+ */
+export interface CollectionListImportResult {
+  /** the line as it was read out of the pasted text */
+  input: string;
+  /** the game it was filed as, or null when nothing scored high enough */
+  matched: { gameId: string; title: string; coverSrc: string | null } | null;
+  /** 0..1 title similarity against the top candidate */
+  confidence: number;
+  status: "added" | "duplicate" | "unmatched" | "failed";
+}
+export interface CollectionListImport {
+  added: number;
+  /** already in the collection — a re-paste doesn't double anything up */
+  duplicates: number;
+  /** lines nothing matched, or whose lookup failed */
+  unmatched: number;
+  results: CollectionListImportResult[];
 }
 /**
  * Pull a whole collection into your library — the point of browsing someone

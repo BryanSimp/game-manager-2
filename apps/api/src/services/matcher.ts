@@ -43,10 +43,22 @@ function fallbackVariants(title: string): string[] {
   return [...new Set(variants)].filter((v) => v.length > 2 && v !== title);
 }
 
-/** Find catalog/IGDB candidates for a cleaned title. Top match first. */
-export async function matchTitle(cleanedTitle: string): Promise<MatchResult> {
+/**
+ * Find catalog/IGDB candidates for a cleaned title. Top match first.
+ *
+ * `ocrVariants` retries a weak match with the OCR-damage repairs above. It's
+ * on by default because the import pipeline feeds this function text read off
+ * a screenshot — but a *typed* list has no icon junk and no i/l confusion, so
+ * callers handling one turn it off: each variant is another throttled IGDB
+ * round trip, and a low score there means "IGDB doesn't have it", which no
+ * amount of retrying fixes.
+ */
+export async function matchTitle(
+  cleanedTitle: string,
+  { ocrVariants = true }: { ocrVariants?: boolean } = {},
+): Promise<MatchResult> {
   let best = await matchOnce(cleanedTitle);
-  if (best.confidence < 0.8) {
+  if (ocrVariants && best.confidence < 0.8) {
     for (const variant of fallbackVariants(cleanedTitle)) {
       const alt = await matchOnce(variant);
       if (alt.confidence > best.confidence + 0.1) best = alt;
