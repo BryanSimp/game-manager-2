@@ -1,8 +1,10 @@
 import type {
   ChecklistKind,
+  GameLinkKind,
   OwnershipFormat,
   PlatformFamily,
   ProgressBasis,
+  PublishMode,
 } from "../constants.js";
 import type { TtbSource } from "../progress.js";
 export interface GameSummary {
@@ -366,6 +368,57 @@ export interface Preferences {
    * different chip overrides it for as long as you stay on the page.
    */
   defaultLibraryFilter: string;
+  /**
+   * What happens to a list or collection the moment you create it, so sharing
+   * (or not) isn't a button press every time. Governs only what you create:
+   * an adopted copy of someone else's work starts private under every mode,
+   * and changing the mode never republishes or unpublishes what exists.
+   */
+  publishMode: PublishMode;
+}
+/**
+ * A game on the other end of a link, with just enough to render a row and
+ * click through to it.
+ */
+export interface LinkedGame {
+  id: string;
+  title: string;
+  coverSrc: string | null;
+  releaseDate: string | null;
+  /** your library entry, when you own it — null means "linked, not owned" */
+  userGameId: string | null;
+  status: string | null;
+}
+export interface GameLink {
+  id: string;
+  kind: GameLinkKind;
+  /** the game at the other end — never the one you asked about */
+  game: LinkedGame;
+}
+/**
+ * Both ends of a game's links, because the relationship reads differently
+ * from each side. `children` are the things that hang off this game — its
+ * DLC, the remake of it. `parents` are what it hangs off: the base game a DLC
+ * belongs to, the original a remaster polished.
+ *
+ * A game can have both at once, and that isn't a mistake worth preventing: an
+ * expansion can itself have been remastered.
+ */
+export interface GameLinks {
+  children: GameLink[];
+  parents: GameLink[];
+}
+/** Link a game to another. `igdbId` pulls one into the catalog first. */
+export interface AddGameLinkInput {
+  kind: GameLinkKind;
+  relatedGameId?: string;
+  igdbId?: number;
+  /**
+   * Which way round. `child` (the default) means the game you're posting to
+   * is the base and the related game hangs off it — "this has DLC". `parent`
+   * flips it: the related game is the base — "this **is** DLC for that".
+   */
+  direction?: "child" | "parent";
 }
 export type ImportSource = "screenshot" | "shelf_photo" | "text_paste" | "steam";
 export type ImportJobStatus = "pending" | "ocr" | "matching" | "review" | "done" | "failed";

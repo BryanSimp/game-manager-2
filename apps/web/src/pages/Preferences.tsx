@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BUILTIN_CATEGORIES, type CategoryView, type Preferences } from "@gm/shared";
+import {
+  BUILTIN_CATEGORIES,
+  PUBLISH_MODES,
+  PUBLISH_MODE_LABELS,
+  type CategoryView,
+  type Preferences,
+} from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { SteamCard } from "../components/SteamCard.js";
@@ -234,6 +240,53 @@ export function PreferencesPage() {
               ))}
             </select>
           </label>
+        </section>
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h2 className="text-lg font-semibold">Sharing</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            What happens to a list or collection the moment you create one, so publishing isn't a
+            button press every time.
+          </p>
+
+          <div className="mt-4 space-y-2">
+            {PUBLISH_MODES.map((mode) => {
+              const meta = PUBLISH_MODE_LABELS[mode];
+              const active = (p?.publishMode ?? "manual") === mode;
+              return (
+                <label
+                  key={mode}
+                  className={`flex cursor-pointer gap-3 rounded-xl border p-3 transition ${
+                    active
+                      ? "border-indigo-500 bg-indigo-600/10"
+                      : "border-zinc-800 hover:border-zinc-600"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="publish-mode"
+                    checked={active}
+                    onChange={() => save.mutate({ publishMode: mode })}
+                    className="mt-0.5 accent-indigo-500"
+                  />
+                  <span className="min-w-0">
+                    <span
+                      className={`block text-sm font-medium ${active ? "text-indigo-200" : "text-zinc-200"}`}
+                    >
+                      {meta.label}
+                    </span>
+                    <span className="block text-xs text-zinc-500">{meta.blurb}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+
+          <p className="mt-3 text-xs text-zinc-600">
+            This only decides what happens to things you create from now on. Copies of other
+            people's lists always start private, and changing this never publishes or unpublishes
+            anything that already exists.
+          </p>
         </section>
       </div>
     </Shell>

@@ -15,8 +15,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  GAME_LINK_KINDS,
+  GAME_LINK_LABELS,
   GAME_STATUSES,
   type ChecklistSummary,
+  type GameLink,
   type LibraryEntry,
   type UpdateEntryInput,
 } from "@gm/shared";
@@ -25,6 +28,7 @@ import { formatHours, resolveImage, STATUS_COLORS } from "@/lib/ui";
 import { colors, radius, space, type } from "@/lib/theme";
 import {
   Button,
+  Cover,
   Icon,
   Loading,
   ProgressBar,
@@ -238,6 +242,7 @@ export default function GameDetailScreen() {
         )}
 
         <TimeToBeatSection entry={e} />
+        <RelatedSection gameId={e.game.id} />
         <ProgressSection entryId={id} gameId={e.game.id} />
         <AchievementsSection entryId={id} />
 
@@ -660,6 +665,70 @@ function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string 
   );
 }
 
+/**
+ * DLC, remasters and remakes attached to this game — read-only here.
+ *
+ * Linking is web-only, like list authoring and console management: the picker
+ * is a search plus a relation sentence, which is a lot of screen for something
+ * you do once per game. Seeing the links matters far more often than making
+ * them, and the section hides itself entirely when there are none, so a game
+ * with no DLC costs nothing.
+ */
+function RelatedSection({ gameId }: { gameId: string }) {
+  const router = useRouter();
+  const links = useQuery({
+    queryKey: ["game-links", gameId],
+    queryFn: () => api.getGameLinks(gameId),
+  });
+  const children = links.data?.children ?? [];
+  const parents = links.data?.parents ?? [];
+  if (children.length === 0 && parents.length === 0) return null;
+
+  const open = (link: GameLink) => {
+    // your copy when you own it; the add screen with the name typed in when
+    // you don't — mobile has no catalog screen, the same fallback a friend's
+    // library uses
+    if (link.game.userGameId) router.push(`/game/${link.game.userGameId}`);
+    else router.push(`/add?q=${encodeURIComponent(link.game.title)}`);
+  };
+
+  const row = (link: GameLink, label: string | null) => (
+    <Pressable key={link.id} style={styles.relatedRow} onPress={() => open(link)}>
+      <Cover src={resolveImage(link.game.coverSrc)} width={34} height={45} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={type.body} numberOfLines={2}>
+          {link.game.title}
+        </Text>
+        <Text style={type.micro}>
+          {[label, link.game.userGameId ? null : "Not in library"].filter(Boolean).join(" · ")}
+        </Text>
+      </View>
+      <Icon name="chevron-forward" size={16} color={colors.textGhost} />
+    </Pressable>
+  );
+
+  return (
+    <>
+      {parents.length > 0 && (
+        <>
+          <SectionTitle>Part of</SectionTitle>
+          {parents.map((l) => row(l, `${GAME_LINK_LABELS[l.kind].back} this`))}
+        </>
+      )}
+      {GAME_LINK_KINDS.map((kind) => {
+        const rows = children.filter((l) => l.kind === kind);
+        if (rows.length === 0) return null;
+        return (
+          <View key={kind}>
+            <SectionTitle>{GAME_LINK_LABELS[kind].section}</SectionTitle>
+            {rows.map((l) => row(l, null))}
+          </View>
+        );
+      })}
+    </>
+  );
+}
+
 function AchievementsSection({ entryId }: { entryId: string }) {
   const achievements = useQuery({
     queryKey: ["achievements", entryId],
@@ -892,6 +961,17 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   achievementGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: space.md },
+  relatedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: space.sm,
+    marginBottom: space.xs,
+  },
   achievementIcon: {
     width: 38,
     height: 38,

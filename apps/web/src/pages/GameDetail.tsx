@@ -18,6 +18,7 @@ import { AddConsoleControl, FAMILY_LABELS } from "../components/ConsolePicker.js
 import { SteamMatchFixer } from "../components/SteamMatchFixer.js";
 import { CoverBrowser } from "../components/CoverBrowser.js";
 import { CollectionPicker } from "../components/CollectionPicker.js";
+import { RelatedGames } from "../components/RelatedGames.js";
 import { AddCollectionToLibrary } from "../components/AddCollectionToLibrary.js";
 import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
@@ -409,6 +410,8 @@ export function GameDetailPage() {
               </button>
             )}
           </div>
+
+          <RelatedGames gameId={e.game.id} title={e.game.title} />
 
           <InPublicCollections gameId={e.game.id} />
 

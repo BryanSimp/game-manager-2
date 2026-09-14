@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { OwnershipFormat } from "@gm/shared";
+import { PUBLISH_MODES, type OwnershipFormat, type PublishMode } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { isValidCategory } from "./categories.js";
 
@@ -35,4 +35,26 @@ export async function defaultPlatformFor(
     .where(eq(schema.userPreferences.userId, userId));
   if (!row?.platformId) return null;
   return { platformId: row.platformId, format: row.format };
+}
+
+/**
+ * Whether a list or collection this user creates should be published, kept
+ * private, or left for them to decide.
+ *
+ * Falls back to 'manual' when unset *and* when the stored value isn't one we
+ * recognise — an unreadable preference must never be the reason something
+ * gets published, so the safe end of the range is the fallback.
+ */
+export async function publishModeFor(userId: string): Promise<PublishMode> {
+  const [row] = await db
+    .select({ publishMode: schema.userPreferences.publishMode })
+    .from(schema.userPreferences)
+    .where(eq(schema.userPreferences.userId, userId));
+  const mode = row?.publishMode;
+  return PUBLISH_MODES.includes(mode as PublishMode) ? (mode as PublishMode) : "manual";
+}
+
+/** Should something created right now be public? */
+export async function publishOnCreate(userId: string): Promise<boolean> {
+  return (await publishModeFor(userId)) === "always";
 }

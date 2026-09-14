@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { OWNERSHIP_FORMATS } from "@gm/shared";
+import { OWNERSHIP_FORMATS, PUBLISH_MODES } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { isValidCategory } from "../services/categories.js";
@@ -19,6 +19,7 @@ const DEFAULTS = {
   badgeOpacity: 100,
   libraryColumns: 5,
   defaultLibraryFilter: "all",
+  publishMode: "manual",
 };
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
@@ -39,6 +40,8 @@ const prefsSchema = z.object({
   libraryColumns: z.number().int().min(1).max(8).optional(),
   // a category key/id, or 'all' — validated below, since 'all' isn't one
   defaultLibraryFilter: z.string().min(1).max(64).optional(),
+  // what happens to a list or collection the moment you create it
+  publishMode: z.enum(PUBLISH_MODES).optional(),
 });
 
 export function registerPreferenceRoutes(app: FastifyInstance): void {
@@ -62,6 +65,7 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
       badgeOpacity: row.badgeOpacity,
       libraryColumns: row.libraryColumns,
       defaultLibraryFilter: row.defaultLibraryFilter,
+      publishMode: row.publishMode,
     };
   });
 
@@ -120,6 +124,7 @@ export function registerPreferenceRoutes(app: FastifyInstance): void {
       ...(parsed.data.defaultLibraryFilter !== undefined && {
         defaultLibraryFilter: parsed.data.defaultLibraryFilter,
       }),
+      ...(parsed.data.publishMode !== undefined && { publishMode: parsed.data.publishMode }),
     };
     const { userId, ...updates } = values;
     await db

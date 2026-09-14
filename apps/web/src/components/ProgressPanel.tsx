@@ -13,6 +13,7 @@ import {
 } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { formatHours } from "../lib/format.js";
+import { usePreferences } from "../lib/prefs.js";
 import { AchievementsPanel } from "./AchievementsPanel.js";
 import { VoteButtons } from "./VoteButtons.js";
 
@@ -480,6 +481,10 @@ function ListCard({
   canMoveDown?: boolean;
 }) {
   const queryClient = useQueryClient();
+  const prefs = usePreferences();
+  // unknown preferences mean "still loading" — assume the control belongs
+  // there rather than flickering it away and back
+  const canPublish = (prefs?.publishMode ?? "manual") !== "never";
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [publishError, setPublishError] = useState<string | null>(null);
@@ -576,22 +581,31 @@ function ListCard({
             copied
           </span>
         )}
-        <button
-          onClick={() => publish.mutate(!summary.isPublic)}
-          disabled={publish.isPending}
-          title={
-            summary.isPublic
-              ? "Published — other players can find this list on this game and take their own copy. Click to unpublish."
-              : "Publish so anyone can find this list on this game and take their own copy"
-          }
-          className={`shrink-0 rounded-lg border px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 ${
-            summary.isPublic
-              ? "border-emerald-600/60 bg-emerald-950 text-emerald-300 hover:bg-emerald-900/60"
-              : "border-indigo-500/50 text-indigo-300 hover:bg-indigo-600/20"
-          }`}
-        >
-          {publish.isPending ? "…" : summary.isPublic ? "✓ Published" : "Publish"}
-        </button>
+        {/*
+          "Never publish" hides this rather than greying it out: a disabled
+          button you can't explain is worse than no button. The API refuses a
+          publish under that mode too, so this isn't the only thing stopping
+          it. An already-published list keeps its control regardless — the
+          preference governs what goes out, never what comes back.
+        */}
+        {(canPublish || summary.isPublic) && (
+          <button
+            onClick={() => publish.mutate(!summary.isPublic)}
+            disabled={publish.isPending}
+            title={
+              summary.isPublic
+                ? "Published — other players can find this list on this game and take their own copy. Click to unpublish."
+                : "Publish so anyone can find this list on this game and take their own copy"
+            }
+            className={`shrink-0 rounded-lg border px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+              summary.isPublic
+                ? "border-emerald-600/60 bg-emerald-950 text-emerald-300 hover:bg-emerald-900/60"
+                : "border-indigo-500/50 text-indigo-300 hover:bg-indigo-600/20"
+            }`}
+          >
+            {publish.isPending ? "…" : summary.isPublic ? "✓ Published" : "Publish"}
+          </button>
+        )}
 
         <div className="ml-auto flex shrink-0 items-center gap-3">
           <span className="text-xs text-zinc-500">

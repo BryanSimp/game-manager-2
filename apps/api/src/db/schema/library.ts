@@ -150,6 +150,56 @@ export const userGameTags = pgTable(
   (t) => [primaryKey({ columns: [t.userGameId, t.tagId] })],
 );
 
+/**
+ * "This game is DLC for that one", "this one is the remake of that one".
+ *
+ * **Per-user, not catalog.** The relationship is arguably a fact about the
+ * real-world games — IGDB models it that way — but writing it to the shared
+ * catalog would let one person's mis-click reorganise everyone's library, and
+ * that is exactly the mistake phase 16 undid for play times. What this table
+ * actually records is a decision about *your* library: a Steam import drops
+ * DLC in as its own entry, and you say which game it belongs under.
+ *
+ * The row is directional. `gameId` is the base — the thing that has DLC, the
+ * original that got remade — and `relatedGameId` is what hangs off it, with
+ * `kind` describing what the related game is *to* the base. Both ends read
+ * their own side of it: the base lists its add-ons, the add-on says what it
+ * belongs to.
+ *
+ * Neither game has to be in your library. A collection can list games you
+ * don't own for the same reason — noting that a DLC exists is useful before
+ * you buy it.
+ */
+export const userGameLinks = pgTable(
+  "user_game_links",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** the base game: the one that has the DLC, or that got remade */
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    /** what hangs off it: the DLC, the remaster, the remake */
+    relatedGameId: uuid("related_game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    // text, not an enum, for the same reason user_games.status is: a new kind
+    // shouldn't need a migration on a pg type
+    kind: text("kind").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // one link per pair per kind — re-linking the same DLC is a no-op, not a
+    // second row
+    unique().on(t.userId, t.gameId, t.relatedGameId, t.kind),
+    // a game's page asks for both directions, so both columns are looked up
+    index("user_game_links_user_game_idx").on(t.userId, t.gameId),
+    index("user_game_links_user_related_idx").on(t.userId, t.relatedGameId),
+  ],
+);
+
 /** Display preferences — jsonb is deliberate here, it's pure UI config. */
 export const userPreferences = pgTable("user_preferences", {
   userId: text("user_id")
@@ -175,6 +225,10 @@ export const userPreferences = pgTable("user_preferences", {
   libraryColumns: integer("library_columns").notNull().default(5),
   // category the library opens on: a category key/id, or 'all' for no filter
   defaultLibraryFilter: text("default_library_filter").notNull().default("all"),
+  // what happens to a list or collection you create: manual | never | always.
+  // Text rather than an enum, same reasoning as user_games.status — adding a
+  // mode shouldn't need a migration on a pg type.
+  publishMode: text("publish_mode").notNull().default("manual"),
   dashboardConfig: jsonb("dashboard_config"),
 });
 

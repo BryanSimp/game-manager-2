@@ -195,6 +195,37 @@ Phase 0–8 roadmap — read it before making design decisions.
   supported by advertising", all described something that no longer
   happens. If ads ever come back, they come back with those paragraphs.
 
+- **Publishing can be a setting instead of a button** (`preferences.publish_mode`,
+  migration 0026). Three modes: `manual` (the original — private until you
+  press Publish), `never` (private, and the control is gone) and `always`
+  (published the moment it exists). `publishModeFor`/`publishOnCreate`
+  (`services/preferences.ts`) are the only readers, and an unrecognised stored
+  value falls back to `manual` — a preference we can't read must never be the
+  reason something gets published. Three rules hold it together:
+  **adopt is exempt** (`isPublic: false` is hardcoded in both adopt paths —
+  publishing someone else's work is their call, and `always` doesn't change
+  that), **nothing is retroactive** (switching modes never republishes or
+  unpublishes what exists), and **`never` is enforced server-side** — both
+  PATCH routes 403 a publish attempt, so hiding the button in the two apps is
+  the courtesy rather than the mechanism. Unpublishing is never refused: the
+  mode governs what goes out, not what comes back, which is also why an
+  already-published item keeps its button under `never`.
+- **Games link to their DLC, remasters and remakes** (`user_game_links`,
+  migration 0026). Per-user, *not* catalog: the relationship is arguably a
+  fact about the games, but writing it to the shared `games` rows would let
+  one mis-click reorganise everyone's library — the mistake phase 16 undid for
+  play times. What the table records is a decision about *your* library, which
+  is the actual problem (Steam sells DLC as its own app, so it imports as its
+  own entry). The row is **directional**: `game_id` is the base and
+  `related_game_id` is what hangs off it, with `kind` saying what the related
+  game is *to* the base. `direction` on the POST flips which end is which, so
+  the same control works from either game's page and a pair can't end up
+  stored twice swapped — the inverse row is a 409, because a game that is both
+  parent and child of another renders as listing itself. Three kinds only
+  (`dlc`, `remaster`, `remake`): the split that earns its place is add-on
+  content versus another version, and every extra kind is a decision to make
+  every time you link something. `gameLinksFor` (`routes/games.ts`) returns
+  both ends in one payload because the panel draws both.
 - **The repo is public, and the site says so.** `GITHUB_REPO_URL`
   (`packages/shared/src/constants.ts`) is the single copy of the URL; the
   footer links it on every page, the FAQ's self-host answer links it, and the
@@ -289,6 +320,8 @@ was dev-only). Never use `db push`.
 
 | 24 no ads, public repo, collections that know their length | see git log | **Every ad placeholder is gone** — the house-ad `MockAdService` (`AdBanner` was rendering "Your ad could be here" on every signed-in page) and the AdSense rails/slots/site tag/`ads.txt`, plus the privacy and terms paragraphs that described ads the site no longer serves. **The repo is public and linked**: `GITHUB_REPO_URL` in shared constants, a footer link on every page, the FAQ's self-host answer, and a README that is an actual self-hosting guide — backed by `deploy/docker-compose.selfhost.yml`, a stack built from source with no registry login and no Traefik, whose nginx proxies `/api` so sessions stay same-origin. **A collection can be built from a pasted list**: `POST /api/collections/:id/games/from-list` matches up to 50 titles through the existing matcher (`ocrVariants: false` — a typed list has no OCR damage to repair) and files them in pasted order; there is no review step because every line comes back with what it matched and its score, and a wrong row is one click to remove. Offered on the create form and inside an existing collection's add panel. **Collections show how long they take and how much is left**: `services/progress.ts` now owns `missionCountsByGame` (moved out of `routes/library.ts`, so the library card and the collection total can't drift) plus `gameTime`/`addGameTime`; a finished game contributes nothing to remaining, a part-ticked mission list is pro-rated by the same `estimateProgress` the Progress tab uses, and endless games leave both totals. Surfaced on the detail page, your cards, the public browse cards, and mobile |
 
+| 25 publish once, and games that know their DLC | see git log | **Publishing became a preference** (migration 0026): `publish_mode` is `manual`/`never`/`always`, applied by `POST /api/collections` and both checklist-create routes, with a Sharing panel on Preferences. `never` is enforced by the API (403 on a publish PATCH) as well as hidden in both apps; adopted copies stay private under every mode, and switching modes is never retroactive. **Games link to other games** (`user_game_links`): per-user `dlc`/`remaster`/`remake` links with `GET`/`POST`/`DELETE /api/games/:gameId/links`, stored one direction and flipped by a `direction` flag on the way in so a pair can't exist twice swapped (the inverse is a 409, a self-link a 400, a repeat an idempotent 200). Web gets `RelatedGames` on the game page — a "Link a game" button, a library-first/IGDB-underneath search, and the relation picked as a sentence ("… is DLC for this game") rather than a kind plus a direction toggle; sections appear as links are made, so a game with no DLC shows no empty shelf. Mobile shows the links read-only and can open either end. The library grid is deliberately untouched: a linked DLC keeps its own card |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
 (password resets, registration toggle, account actions — the *list* landed in
@@ -297,6 +330,43 @@ phase 22, read-only).
 file to be provided for reference).
 
 ## Deferred / known gaps
+
+- **`publish_mode` decides the default, not the ceiling — except under
+  `never`, where it is the ceiling.** An explicit `isPublic` in a create
+  request wins under `manual` and `always`; under `never` it is ignored and
+  the row is written private, matching the 403 the PATCH route returns. That
+  asymmetry is the whole point of having `never` as a separate mode from
+  `manual`, which otherwise behaves identically.
+- **Nothing about `publish_mode` is retroactive.** Switching to `always`
+  doesn't publish what you already have, and switching to `never` doesn't
+  unpublish it — it only stops new things going out, and leaves the button on
+  anything already public so you can take it back yourself. A "publish
+  everything I own" action would be a different feature, and a destructive
+  one.
+- **Game links are per-user and never reach the catalog.** Two people can
+  disagree about whether something is a remaster or a remake and both are
+  right in their own library. The cost is that everyone links their own DLC
+  from scratch; IGDB already models `dlcs`/`expansions`/`remakes`/`remasters`
+  on the games we import, so seeding suggestions from it is the obvious next
+  step — and would want to stay suggestions, written into `user_game_links`
+  on acceptance rather than replacing it.
+- **A linked DLC still gets its own library card.** Linking says what belongs
+  to what; it deliberately doesn't hide, merge or roll up anything in the
+  library grid, the counts, or the dashboard. Folding DLC into its base card
+  would mean hiding entries people can currently see, which needs a toggle and
+  a decision about every count in the app — worth doing, but as its own change.
+- **Link authoring is web-only.** Mobile's game screen lists both ends and
+  opens either (your copy, or `/add?q=` when you don't own it), but can't
+  create or remove a link — same line list authoring and console management
+  sit on, and for the same reason: the picker is a search plus a six-way
+  relation choice, which is a lot of phone screen for something done once per
+  game.
+- **A game can be linked in both directions to different games, but not to the
+  same one.** "The remaster of X, which itself has DLC" is a real shape and is
+  allowed; X being both parent and child of Y is refused with a 409, because
+  it renders as a game listing itself. A three-game cycle isn't checked — it
+  would need a graph walk on every link for a shape nobody has managed to
+  create by accident.
 
 - **A pasted collection list is only as good as the matcher.** With IGDB
   configured, each unmatched line is one IGDB search; without it, `matchOnce`

@@ -13,6 +13,7 @@ import {
   voteSchema,
   type VoteCounts,
 } from "../services/votes.js";
+import { publishModeFor } from "../services/preferences.js";
 import { voteRateLimit } from "../plugins/rate-limits.js";
 
 const titleSchema = z.object({
@@ -230,6 +231,10 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
           .status(409)
           .send({ message: "You already have a main story list for this game" });
       }
+      // The title has already passed the filter above, and an empty list has
+      // nothing else to check — so "publish automatically" can apply here
+      // without a second scan. Entries added later are filtered on write.
+      const isPublic = (await publishModeFor(user.id)) === "always";
       const [tpl] = await db
         .insert(schema.checklistTemplates)
         .values({
@@ -237,11 +242,12 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
           authorUserId: user.id,
           title: parsed.data.title.trim(),
           kind,
+          isPublic,
           position: await nextPosition(user.id, game.id),
         })
         .returning();
       reply.status(201);
-      return { id: tpl!.id };
+      return { id: tpl!.id, isPublic };
     },
   );
 
@@ -318,6 +324,9 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
           .status(409)
           .send({ message: "You already have a main story list for this game" });
       }
+      // every mission went through the filter above alongside the title, so
+      // there is nothing left unscanned for "publish automatically" to expose
+      const isPublic = (await publishModeFor(user.id)) === "always";
       const [tpl] = await db
         .insert(schema.checklistTemplates)
         .values({
@@ -325,6 +334,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
           authorUserId: user.id,
           title: parsed.data.title.trim(),
           kind: parsed.data.kind,
+          isPublic,
           position: await nextPosition(user.id, game.id),
         })
         .returning();
@@ -332,7 +342,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
         missions.map((text, i) => ({ templateId: tpl!.id, position: i, text })),
       );
       reply.status(201);
-      return { id: tpl!.id, count: missions.length };
+      return { id: tpl!.id, count: missions.length, isPublic };
     },
   );
 
@@ -399,6 +409,15 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     // by an older client, would otherwise reach the public list on an
     // isPublic-only PATCH.
     if (parsed.data.isPublic === true) {
+      // "Never publish" is a guarantee, not a default: the control is hidden
+      // in both apps, and the API says no to anything that asks anyway.
+      // Unpublishing is always allowed — the setting governs what goes out,
+      // never what comes back.
+      if ((await publishModeFor(user.id)) === "never") {
+        return reply
+          .status(403)
+          .send({ message: "Publishing is turned off in your preferences" });
+      }
       const items = await db
         .select({ text: schema.checklistItems.text, category: schema.checklistItems.category })
         .from(schema.checklistItems)
@@ -465,8 +484,9 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
         // a scraped list's CC-BY-SA attribution travels with the copy
         sourceUrl: tpl.sourceUrl,
         sequential: tpl.sequential,
-        // a copy always starts private — publishing someone else's work is
-        // their call, not yours
+        // A copy always starts private — publishing someone else's work is
+        // their call, not yours. "Publish automatically" does not reach here
+        // either: it governs what you make, and a copy is not that.
         isPublic: false,
         adoptedFromId: tpl.id,
         position: await nextPosition(user.id, tpl.gameId),
