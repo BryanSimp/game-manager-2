@@ -62,13 +62,25 @@ const routes = [
       q: typeof search.q === "string" && search.q ? search.q : undefined,
     }),
   }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/game/$id", component: GameDetailPage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/game/$id",
+    component: GameDetailPage,
+    // ?tab= is the tab you're on, so Back and a refresh land on it again —
+    // the Linked tab especially, which you leave by opening another game
+    validateSearch: (search: Record<string, unknown>): { tab?: "progress" | "linked" } => ({
+      tab: search.tab === "progress" || search.tab === "linked" ? search.tab : undefined,
+    }),
+  }),
   // a game from the shared catalog, keyed by catalog id rather than by your
   // entry id — where a collection sends you for a game you don't own yet
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/catalog/$gameId",
     component: CatalogGamePage,
+    validateSearch: (search: Record<string, unknown>): { tab?: "linked" } => ({
+      tab: search.tab === "linked" ? "linked" : undefined,
+    }),
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/import", component: ImportPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage }),

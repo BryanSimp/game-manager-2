@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CollectionNode } from "@gm/shared";
@@ -75,18 +75,29 @@ function RowTime({ game }: { game: CollectionNode }) {
  *
  * Reordering is only offered on "Custom order" — dragging a row while sorted
  * by title would have nowhere to save to.
+ *
+ * While `selecting`, the games you don't own become checkboxes (for adding a
+ * handful to your library) and the ones you do own sit dimmed, since there's
+ * nothing to add. Rows don't navigate then, for the same reason they don't
+ * while reordering: a mis-click would leave the page and lose the selection.
  */
 export function CollectionList({
   collectionId,
   games,
   accent,
   readOnly = false,
+  selecting = false,
+  selected,
+  onToggleSelect,
 }: {
   collectionId: string;
   games: CollectionNode[];
   accent: string;
   /** someone else's published collection: browse and sort, but don't reorder */
   readOnly?: boolean;
+  selecting?: boolean;
+  selected?: Set<string>;
+  onToggleSelect?: (gameId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const prefs = usePreferences();
@@ -94,6 +105,15 @@ export function CollectionList({
   const [sort, setSort] = useState<ListSort>("custom");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CollectionNode[] | null>(null);
+
+  // choosing games and arranging them are separate jobs — starting one ends
+  // the other, rather than leaving a half-edited order behind the checkboxes
+  useEffect(() => {
+    if (selecting) {
+      setEditing(false);
+      setDraft(null);
+    }
+  }, [selecting]);
 
   const sorted = useMemo(() => sortNodes(games, sort), [games, sort]);
   const rows = editing && draft ? draft : sorted;
@@ -146,6 +166,7 @@ export function CollectionList({
 
         <div className="ml-auto flex gap-2">
           {!readOnly &&
+            !selecting &&
             sort === "custom" &&
             (editing ? (
               <>
@@ -223,6 +244,41 @@ export function CollectionList({
               </div>
             </>
           );
+
+          if (selecting) {
+            if (game.userGameId) {
+              return (
+                <li
+                  key={game.gameId}
+                  title="Already in your library"
+                  className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900 p-3 opacity-50"
+                >
+                  <span aria-hidden className="w-5 flex-none" />
+                  {body}
+                </li>
+              );
+            }
+            const checked = selected?.has(game.gameId) ?? false;
+            return (
+              <li key={game.gameId}>
+                <label
+                  className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition ${
+                    checked
+                      ? "border-indigo-500 bg-indigo-600/10"
+                      : "border-dashed border-zinc-700 bg-zinc-900/60 hover:border-zinc-500"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggleSelect?.(game.gameId)}
+                    className="h-4 w-5 flex-none accent-indigo-500"
+                  />
+                  {body}
+                </label>
+              </li>
+            );
+          }
 
           if (editing) {
             return (
