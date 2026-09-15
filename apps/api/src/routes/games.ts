@@ -1,7 +1,17 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, eq, ilike } from "drizzle-orm";
+import { and, asc, eq, ilike, max, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { GAME_LINK_KINDS, type CatalogGame, type GameLink, type GameLinks } from "@gm/shared";
+import {
+  GAME_LINK_ROLES,
+  GAME_LINK_ROLE_META,
+  GAME_LINK_SORTS,
+  type CatalogGame,
+  type GameLink,
+  type GameLinkRole,
+  type GameLinkSection,
+  type GameLinkSort,
+  type GameLinks,
+} from "@gm/shared";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
@@ -113,13 +123,13 @@ export function registerGameRoutes(app: FastifyInstance): void {
 
 
   /**
-   * How this game relates to others in your library: what hangs off it, and
-   * what it hangs off.
+   * A game's links, one section per role, from this game's point of view.
    *
-   * Both directions come back from one request because a game's page shows
-   * both — "DLC & add-ons" underneath it, and a "DLC for The Witcher 3"
-   * breadcrumb above. Splitting them into two routes would mean two round
-   * trips to draw one panel.
+   * Both ends of every stored row come back, which is the whole trick behind
+   * "a link shows on both games": linking Blood and Wine as DLC on The Witcher
+   * 3's page writes one row, and Blood and Wine's page reads that same row as
+   * its base game. Nothing here cares whether you own either game — a DLC you
+   * haven't bought still says what it's for.
    *
    * Links are per-user (see `user_game_links`), so this resolves against
    * whoever is asking and never leaks anyone else's arrangement.
@@ -134,11 +144,12 @@ export function registerGameRoutes(app: FastifyInstance): void {
   /**
    * Link another game to this one.
    *
-   * `direction` decides which end is the base, so the same control works from
-   * either side: standing on The Witcher 3 you add its DLC (`child`), and
-   * standing on Blood and Wine you say what it belongs to (`parent`). Storing
-   * one direction and flipping the input is what keeps a link from existing
-   * twice with the two games swapped.
+   * `role` is what the game you're adding is *to this one* — its DLC, its
+   * prequel, its sequel, a remake of it, or (from the other side) the base
+   * game it's DLC for or the original it remakes. Each role maps to one kind
+   * and one end of the row (`GAME_LINK_ROLE_META`), so adding a prequel on
+   * Half-Life 2 and a sequel on Half-Life store the same thing, and a pair
+   * can't end up recorded twice with the games swapped.
    */
   app.post<{ Params: { gameId: string } }>("/api/games/:gameId/links", async (request, reply) => {
     const user = await requireUser(request, reply);
@@ -146,10 +157,9 @@ export function registerGameRoutes(app: FastifyInstance): void {
 
     const parsed = z
       .object({
-        kind: z.enum(GAME_LINK_KINDS),
+        role: z.enum(GAME_LINK_ROLES),
         relatedGameId: z.string().uuid().optional(),
         igdbId: z.number().int().positive().optional(),
-        direction: z.enum(["child", "parent"]).default("child"),
       })
       .refine((v) => v.relatedGameId || v.igdbId, {
         message: "relatedGameId or igdbId required",
@@ -182,37 +192,212 @@ export function registerGameRoutes(app: FastifyInstance): void {
       return reply.status(400).send({ message: "A game can't be linked to itself" });
     }
 
-    // `direction` is an input convenience; storage is always base → related
-    const base = parsed.data.direction === "parent" ? relatedId : game.id;
-    const related = parsed.data.direction === "parent" ? game.id : relatedId;
+    // the role names the game being added; storage is always base → related
+    const role = parsed.data.role;
+    const meta = GAME_LINK_ROLE_META[role];
+    const base = meta.side === "base" ? game.id : relatedId;
+    const related = meta.side === "base" ? relatedId : game.id;
 
-    // The opposite link would make the pair its own parent and child, which
-    // renders as a game listing itself. Refused rather than silently ignored
-    // so the UI can say why.
-    const [inverse] = await db
-      .select({ id: schema.userGameLinks.id })
+    // One link per pair. The same link again is a no-op; any *other* link
+    // between the two — the inverse (a game that's both prequel and sequel of
+    // another renders as listing itself) or a second kind (DLC and a sequel
+    // at once) — is refused and named, so the fix is "unlink that one" rather
+    // than two sections quietly disagreeing about what the pair is.
+    const existing = await db
+      .select({
+        id: schema.userGameLinks.id,
+        gameId: schema.userGameLinks.gameId,
+        kind: schema.userGameLinks.kind,
+      })
       .from(schema.userGameLinks)
       .where(
         and(
           eq(schema.userGameLinks.userId, user.id),
-          eq(schema.userGameLinks.gameId, related),
-          eq(schema.userGameLinks.relatedGameId, base),
+          or(
+            and(
+              eq(schema.userGameLinks.gameId, base),
+              eq(schema.userGameLinks.relatedGameId, related),
+            ),
+            and(
+              eq(schema.userGameLinks.gameId, related),
+              eq(schema.userGameLinks.relatedGameId, base),
+            ),
+          ),
         ),
       );
-    if (inverse) {
-      return reply
-        .status(409)
-        .send({ message: "These two are already linked the other way round" });
+    const same = existing.find((l) => l.gameId === base && l.kind === meta.kind);
+    if (same) return { ok: true, id: same.id };
+    if (existing[0]) {
+      const current = roleFor(existing[0].kind, existing[0].gameId === game.id ? "base" : "related");
+      return reply.status(409).send({
+        message: current
+          ? `Those two are already linked — it's under ${GAME_LINK_ROLE_META[current].section}. Unlink it there first to change how they're related.`
+          : "Those two are already linked. Unlink them first to change how they're related.",
+      });
     }
+
+    // new links go on the end of both lists they join, so a section already
+    // in custom order keeps the order you gave it
+    const [[baseMax], [relatedMax]] = await Promise.all([
+      db
+        .select({ value: max(schema.userGameLinks.basePosition) })
+        .from(schema.userGameLinks)
+        .where(
+          and(
+            eq(schema.userGameLinks.userId, user.id),
+            eq(schema.userGameLinks.gameId, base),
+            eq(schema.userGameLinks.kind, meta.kind),
+          ),
+        ),
+      db
+        .select({ value: max(schema.userGameLinks.relatedPosition) })
+        .from(schema.userGameLinks)
+        .where(
+          and(
+            eq(schema.userGameLinks.userId, user.id),
+            eq(schema.userGameLinks.relatedGameId, related),
+            eq(schema.userGameLinks.kind, meta.kind),
+          ),
+        ),
+    ]);
 
     const [created] = await db
       .insert(schema.userGameLinks)
-      .values({ userId: user.id, gameId: base, relatedGameId: related, kind: parsed.data.kind })
+      .values({
+        userId: user.id,
+        gameId: base,
+        relatedGameId: related,
+        kind: meta.kind,
+        basePosition: (baseMax?.value ?? 0) + 1,
+        relatedPosition: (relatedMax?.value ?? 0) + 1,
+      })
+      // two clicks racing each other: the second finds the first's row
       .onConflictDoNothing()
       .returning({ id: schema.userGameLinks.id });
     reply.status(created ? 201 : 200);
     return { ok: true, id: created?.id ?? null };
   });
+
+  /**
+   * Put one section of a game's links in the order you want — and switch that
+   * section to custom order, since arranging it by hand is the point.
+   *
+   * Writes whichever position column belongs to this game's end of the rows,
+   * so ordering Half-Life 2's prequels leaves Half-Life's sequels alone. Ids
+   * not in the section are ignored and any the caller left out keep their
+   * place at the end, the same rule the collection order follows — a stale
+   * tab can't drop a link made from another one.
+   */
+  app.put<{ Params: { gameId: string } }>(
+    "/api/games/:gameId/links/order",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const parsed = z
+        .object({
+          role: z.enum(GAME_LINK_ROLES),
+          linkIds: z.array(z.string().uuid()).max(500),
+        })
+        .safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+      }
+
+      const gameId = request.params.gameId;
+      const role = parsed.data.role;
+      const meta = GAME_LINK_ROLE_META[role];
+      const ownEnd =
+        meta.side === "base" ? schema.userGameLinks.gameId : schema.userGameLinks.relatedGameId;
+      const rows = await db
+        .select({ id: schema.userGameLinks.id })
+        .from(schema.userGameLinks)
+        .where(
+          and(
+            eq(schema.userGameLinks.userId, user.id),
+            eq(ownEnd, gameId),
+            eq(schema.userGameLinks.kind, meta.kind),
+          ),
+        )
+        .orderBy(
+          asc(
+            meta.side === "base"
+              ? schema.userGameLinks.basePosition
+              : schema.userGameLinks.relatedPosition,
+          ),
+        );
+      if (rows.length === 0) {
+        return reply.status(404).send({ message: "Nothing is linked there" });
+      }
+
+      const known = new Set(rows.map((r) => r.id));
+      const ordered = [...new Set(parsed.data.linkIds)].filter((id) => known.has(id));
+      const seen = new Set(ordered);
+      const rest = rows.map((r) => r.id).filter((id) => !seen.has(id));
+
+      await db.transaction(async (tx) => {
+        let position = 0;
+        for (const id of [...ordered, ...rest]) {
+          position += 1;
+          await tx
+            .update(schema.userGameLinks)
+            .set(meta.side === "base" ? { basePosition: position } : { relatedPosition: position })
+            .where(and(eq(schema.userGameLinks.id, id), eq(schema.userGameLinks.userId, user.id)));
+        }
+        await tx
+          .insert(schema.userGameLinkSorts)
+          .values({ userId: user.id, gameId, role, sort: "custom" })
+          .onConflictDoUpdate({
+            target: [
+              schema.userGameLinkSorts.userId,
+              schema.userGameLinkSorts.gameId,
+              schema.userGameLinkSorts.role,
+            ],
+            set: { sort: "custom" },
+          });
+      });
+      return { ok: true };
+    },
+  );
+
+  /**
+   * Choose how one section of a game's links is ordered: by release date, or
+   * the order you set. Remembered per game and per section — a series' sequels
+   * might want release order while its DLC wants the order you play them in.
+   * Switching to release date keeps your custom order for when you come back.
+   */
+  app.put<{ Params: { gameId: string } }>(
+    "/api/games/:gameId/links/sort",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const parsed = z
+        .object({ role: z.enum(GAME_LINK_ROLES), sort: z.enum(GAME_LINK_SORTS) })
+        .safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+      }
+
+      const gameId = request.params.gameId;
+      const [game] = await db
+        .select({ id: schema.games.id })
+        .from(schema.games)
+        .where(eq(schema.games.id, gameId));
+      if (!game) return reply.status(404).send({ message: "Game not found" });
+
+      await db
+        .insert(schema.userGameLinkSorts)
+        .values({ userId: user.id, gameId, role: parsed.data.role, sort: parsed.data.sort })
+        .onConflictDoUpdate({
+          target: [
+            schema.userGameLinkSorts.userId,
+            schema.userGameLinkSorts.gameId,
+            schema.userGameLinkSorts.role,
+          ],
+          set: { sort: parsed.data.sort },
+        });
+      return { ok: true };
+    },
+  );
 
   /** Unlink. Works from either end — the row is found by id, not by side. */
   app.delete<{ Params: { gameId: string; linkId: string } }>(
@@ -260,80 +445,128 @@ export function registerGameRoutes(app: FastifyInstance): void {
   });
 }
 
+/** Which role a stored row plays on the page of the game at `side` of it. */
+function roleFor(kind: string, side: "base" | "related"): GameLinkRole | null {
+  return (
+    GAME_LINK_ROLES.find(
+      (role) => GAME_LINK_ROLE_META[role].kind === kind && GAME_LINK_ROLE_META[role].side === side,
+    ) ?? null
+  );
+}
+
 /**
- * Both ends of one game's links, each row carrying the game at the *other*
- * end plus your library entry for it (so a row can open your copy, or say it
- * isn't one).
+ * One game's links as its page shows them: a section per role, each row
+ * carrying the game at the *other* end plus your library entry for it (so a
+ * row can open your copy, or say it isn't one), each section already in the
+ * order you chose for it.
  *
- * Two queries rather than a union: they select the same columns off opposite
- * join keys, and a union of two differently-joined selects reads far worse
- * than saying "the ones below me" and "the ones above me" separately.
+ * Two link queries rather than a union — they select the same columns off
+ * opposite join keys, "the rows where I'm the base" and "the rows where I'm
+ * the related game" — plus the section sorts. Sorting happens here rather
+ * than in SQL because it's per section and the sections are small.
  */
 export async function gameLinksFor(userId: string, gameId: string): Promise<GameLinks> {
-  const select = {
-    id: schema.userGameLinks.id,
-    kind: schema.userGameLinks.kind,
-    createdAt: schema.userGameLinks.createdAt,
-    gameId: schema.games.id,
-    title: schema.games.title,
-    releaseDate: schema.games.releaseDate,
-    coverImageId: schema.games.coverImageId,
-    coverUrl: schema.games.coverUrl,
-    userGameId: schema.userGames.id,
-    status: schema.userGames.status,
-    customCoverImageId: schema.userGames.customCoverImageId,
+  const linkRows = (side: "base" | "related") =>
+    db
+      .select({
+        id: schema.userGameLinks.id,
+        kind: schema.userGameLinks.kind,
+        basePosition: schema.userGameLinks.basePosition,
+        relatedPosition: schema.userGameLinks.relatedPosition,
+        gameId: schema.games.id,
+        igdbId: schema.games.igdbId,
+        title: schema.games.title,
+        releaseDate: schema.games.releaseDate,
+        coverImageId: schema.games.coverImageId,
+        coverUrl: schema.games.coverUrl,
+        userGameId: schema.userGames.id,
+        status: schema.userGames.status,
+        customCoverImageId: schema.userGames.customCoverImageId,
+      })
+      .from(schema.userGameLinks)
+      // as the base, the other end is the related game; as the related game,
+      // the other end is the base
+      .innerJoin(
+        schema.games,
+        eq(
+          schema.games.id,
+          side === "base" ? schema.userGameLinks.relatedGameId : schema.userGameLinks.gameId,
+        ),
+      )
+      .leftJoin(
+        schema.userGames,
+        and(eq(schema.userGames.gameId, schema.games.id), eq(schema.userGames.userId, userId)),
+      )
+      .where(
+        and(
+          eq(schema.userGameLinks.userId, userId),
+          eq(
+            side === "base" ? schema.userGameLinks.gameId : schema.userGameLinks.relatedGameId,
+            gameId,
+          ),
+        ),
+      );
+
+  const [asBase, asRelated, sorts] = await Promise.all([
+    linkRows("base"),
+    linkRows("related"),
+    db
+      .select({ role: schema.userGameLinkSorts.role, sort: schema.userGameLinkSorts.sort })
+      .from(schema.userGameLinkSorts)
+      .where(
+        and(
+          eq(schema.userGameLinkSorts.userId, userId),
+          eq(schema.userGameLinkSorts.gameId, gameId),
+        ),
+      ),
+  ]);
+  type Row = (typeof asBase)[number];
+
+  const sortByRole = new Map(sorts.map((s) => [s.role, s.sort]));
+  // unknown release dates sink rather than sorting as the year 0
+  const byRelease = (a: Row, b: Row) => {
+    if (a.releaseDate !== b.releaseDate) {
+      if (!a.releaseDate) return 1;
+      if (!b.releaseDate) return -1;
+      return a.releaseDate.localeCompare(b.releaseDate);
+    }
+    return a.title.localeCompare(b.title);
   };
 
-  const rows = await Promise.all(
-    (["children", "parents"] as const).map((side) =>
-      db
-        .select(select)
-        .from(schema.userGameLinks)
-        // children: this game is the base, so join the *related* game.
-        // parents: this game is the related one, so join the base.
-        .innerJoin(
-          schema.games,
-          eq(
-            schema.games.id,
-            side === "children"
-              ? schema.userGameLinks.relatedGameId
-              : schema.userGameLinks.gameId,
-          ),
-        )
-        .leftJoin(
-          schema.userGames,
-          and(eq(schema.userGames.gameId, schema.games.id), eq(schema.userGames.userId, userId)),
-        )
-        .where(
-          and(
-            eq(schema.userGameLinks.userId, userId),
-            eq(
-              side === "children" ? schema.userGameLinks.gameId : schema.userGameLinks.relatedGameId,
-              gameId,
-            ),
-          ),
-        )
-        .orderBy(asc(schema.games.releaseDate), asc(schema.games.title)),
-    ),
-  );
+  const sections = GAME_LINK_ROLES.map((role): GameLinkSection => {
+    const meta = GAME_LINK_ROLE_META[role];
+    const sort: GameLinkSort = sortByRole.get(role) === "custom" ? "custom" : "release";
+    const position = (r: Row) => (meta.side === "base" ? r.basePosition : r.relatedPosition);
+    const rows = (meta.side === "base" ? asBase : asRelated)
+      .filter((r) => r.kind === meta.kind)
+      .sort((a, b) => (sort === "custom" ? position(a) - position(b) : 0) || byRelease(a, b));
 
-  const toLink = (r: (typeof rows)[number][number]): GameLink => ({
-    id: r.id,
-    kind: r.kind as GameLink["kind"],
-    game: {
-      id: r.gameId,
-      title: r.title,
-      releaseDate: r.releaseDate,
-      // a user's own cover upload wins over the catalog cover, as everywhere
-      coverSrc: r.customCoverImageId
-        ? `/api/images/${r.customCoverImageId}`
-        : r.coverImageId
-          ? `/api/images/${r.coverImageId}`
-          : r.coverUrl,
-      userGameId: r.userGameId,
-      status: r.status,
-    },
+    return {
+      role,
+      sort,
+      links: rows.map(
+        (r): GameLink => ({
+          id: r.id,
+          kind: meta.kind,
+          role,
+          game: {
+            id: r.gameId,
+            igdbId: r.igdbId,
+            title: r.title,
+            releaseDate: r.releaseDate,
+            // a user's own cover upload wins over the catalog cover, as everywhere
+            coverSrc: r.customCoverImageId
+              ? `/api/images/${r.customCoverImageId}`
+              : r.coverImageId
+                ? `/api/images/${r.coverImageId}`
+                : r.coverUrl,
+            userGameId: r.userGameId,
+            status: r.status,
+          },
+        }),
+      ),
+    };
   });
 
-  return { children: rows[0]!.map(toLink), parents: rows[1]!.map(toLink) };
+  return { sections };
 }

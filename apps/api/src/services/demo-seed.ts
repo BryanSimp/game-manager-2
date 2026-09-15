@@ -509,6 +509,13 @@ async function clearDemoData(userIds: string[]): Promise<void> {
   await db
     .delete(schema.userTimeToBeat)
     .where(inArray(schema.userTimeToBeat.userId, userIds));
+  // links point at catalog games, not at user_games, so clearing the library
+  // above doesn't cascade to them — without these a rebuild would keep every
+  // link an admin made while editing the demo
+  await db.delete(schema.userGameLinks).where(inArray(schema.userGameLinks.userId, userIds));
+  await db
+    .delete(schema.userGameLinkSorts)
+    .where(inArray(schema.userGameLinkSorts.userId, userIds));
 }
 
 async function runSeed(log: (line: string) => void) {

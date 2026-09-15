@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   GAME_STATUSES,
@@ -18,22 +18,43 @@ import { AddConsoleControl, FAMILY_LABELS } from "../components/ConsolePicker.js
 import { SteamMatchFixer } from "../components/SteamMatchFixer.js";
 import { CoverBrowser } from "../components/CoverBrowser.js";
 import { CollectionPicker } from "../components/CollectionPicker.js";
-import { RelatedGames } from "../components/RelatedGames.js";
+import {
+  LinkedGamesMenu,
+  LinkedGamesPanel,
+  linkCount,
+  useGameLinks,
+} from "../components/LinkedGames.js";
 import { AddCollectionToLibrary } from "../components/AddCollectionToLibrary.js";
 import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 
-type Tab = "overview" | "progress";
+type Tab = "overview" | "progress" | "linked";
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "progress", label: "Progress" },
+  { key: "linked", label: "Linked" },
 ];
 
 export function GameDetailPage() {
   const { id } = useParams({ from: "/game/$id" });
+  const { tab: tabParam } = useSearch({ from: "/game/$id" });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // The tab lives in the URL rather than in state: opening a linked game and
+  // pressing Back returns to the Linked tab, and moving from one game to
+  // another starts on Overview instead of inheriting the last game's tab.
+  const tab: Tab = tabParam ?? "overview";
+  function setTab(next: Tab) {
+    navigate({
+      to: "/game/$id",
+      params: { id },
+      search: next === "overview" ? {} : { tab: next },
+      replace: true,
+      resetScroll: false,
+    });
+  }
 
   const prefs = usePreferences();
   const entry = useQuery({ queryKey: ["entry", id], queryFn: () => api.getEntry(id) });
@@ -43,8 +64,11 @@ export function GameDetailPage() {
 
   const [notes, setNotes] = useState("");
   const [notesDirty, setNotesDirty] = useState(false);
-  const [tab, setTab] = useState<Tab>("overview");
   const [browsingCovers, setBrowsingCovers] = useState(false);
+  // for the count on the Linked tab; the tab and the menu under the title
+  // read the same cached query
+  const links = useGameLinks(entry.data?.game.id);
+  const linkTotal = linkCount(links.data);
   useEffect(() => {
     if (entry.data && !notesDirty) setNotes(entry.data.notes ?? "");
   }, [entry.data, notesDirty]);
@@ -197,6 +221,7 @@ export function GameDetailPage() {
           {e.game.releaseDate && (
             <p className="mt-1 text-sm text-zinc-500">Released {e.game.releaseDate}</p>
           )}
+          <LinkedGamesMenu gameId={e.game.id} onManage={() => setTab("linked")} />
 
           <div className="mt-4 flex gap-1 border-b border-zinc-800">
             {TABS.map((t) => (
@@ -210,11 +235,19 @@ export function GameDetailPage() {
                 }`}
               >
                 {t.label}
+                {t.key === "linked" && linkTotal > 0 && (
+                  <span className="ml-1.5 rounded-full bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">
+                    {linkTotal}
+                  </span>
+                )}
               </button>
             ))}
           </div>
 
           {tab === "progress" && <ProgressPanel entry={e} />}
+          {tab === "linked" && (
+            <LinkedGamesPanel gameId={e.game.id} igdbId={e.game.igdbId} title={e.game.title} />
+          )}
 
           <div className={tab === "overview" ? "" : "hidden"}>
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -410,8 +443,6 @@ export function GameDetailPage() {
               </button>
             )}
           </div>
-
-          <RelatedGames gameId={e.game.id} title={e.game.title} />
 
           <InPublicCollections gameId={e.game.id} />
 

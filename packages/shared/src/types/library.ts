@@ -1,6 +1,8 @@
 import type {
   ChecklistKind,
   GameLinkKind,
+  GameLinkRole,
+  GameLinkSort,
   OwnershipFormat,
   PlatformFamily,
   ProgressBasis,
@@ -382,6 +384,8 @@ export interface Preferences {
  */
 export interface LinkedGame {
   id: string;
+  /** so a search result can be recognised as already linked */
+  igdbId: number | null;
   title: string;
   coverSrc: string | null;
   releaseDate: string | null;
@@ -392,33 +396,48 @@ export interface LinkedGame {
 export interface GameLink {
   id: string;
   kind: GameLinkKind;
+  /** what the game at the other end is to the one you asked about */
+  role: GameLinkRole;
   /** the game at the other end — never the one you asked about */
   game: LinkedGame;
 }
+/** Every link in one role, already in the order the section is set to. */
+export interface GameLinkSection {
+  role: GameLinkRole;
+  sort: GameLinkSort;
+  links: GameLink[];
+}
 /**
- * Both ends of a game's links, because the relationship reads differently
- * from each side. `children` are the things that hang off this game — its
- * DLC, the remake of it. `parents` are what it hangs off: the base game a DLC
- * belongs to, the original a remaster polished.
+ * A game's links from its own point of view: one section per role, in
+ * `GAME_LINK_ROLES` order, empty ones included so a client needn't know the
+ * list. Both ends of every row come back — a DLC's page gets a `base_game`
+ * section out of the very row that put it in its base game's `dlc` section —
+ * which is what lets a link show on both games whether or not you own either.
  *
- * A game can have both at once, and that isn't a mistake worth preventing: an
- * expansion can itself have been remastered.
+ * Ordering is resolved server-side so the web app and the phone agree on it.
  */
 export interface GameLinks {
-  children: GameLink[];
-  parents: GameLink[];
+  sections: GameLinkSection[];
 }
 /** Link a game to another. `igdbId` pulls one into the catalog first. */
 export interface AddGameLinkInput {
-  kind: GameLinkKind;
+  /**
+   * What the game you're linking is to the one you're posting to — standing
+   * on The Witcher 3 you add Blood and Wine as `dlc`; standing on Blood and
+   * Wine you add The Witcher 3 as `base_game`. Both store the same row.
+   */
+  role: GameLinkRole;
   relatedGameId?: string;
   igdbId?: number;
-  /**
-   * Which way round. `child` (the default) means the game you're posting to
-   * is the base and the related game hangs off it — "this has DLC". `parent`
-   * flips it: the related game is the base — "this **is** DLC for that".
-   */
-  direction?: "child" | "parent";
+}
+export interface GameLinkOrderInput {
+  role: GameLinkRole;
+  /** every link in the section, in the order you want them */
+  linkIds: string[];
+}
+export interface GameLinkSortInput {
+  role: GameLinkRole;
+  sort: GameLinkSort;
 }
 export type ImportSource = "screenshot" | "shelf_photo" | "text_paste" | "steam";
 export type ImportJobStatus = "pending" | "ocr" | "matching" | "review" | "done" | "failed";
@@ -634,6 +653,12 @@ export interface AddCollectionToLibraryInput {
   /** category the new entries land in — a built-in key or a custom category id */
   status: string;
   platforms?: Array<{ platformId: string; format: OwnershipFormat }>;
+  /**
+   * Only these games (catalog ids) rather than the whole collection — "just
+   * the three I haven't got, into my wishlist". Ids that aren't in the
+   * collection are ignored rather than added.
+   */
+  gameIds?: string[];
 }
 export interface AddCollectionToLibraryResult {
   added: number;

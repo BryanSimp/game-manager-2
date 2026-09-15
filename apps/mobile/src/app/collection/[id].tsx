@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AddCollectionGameInput, CollectionNode } from "@gm/shared";
+import { BUILTIN_CATEGORIES, type AddCollectionGameInput, type CollectionNode } from "@gm/shared";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, statusStyle } from "@/lib/ui";
 import { useBadgeOpacity, usePreferences } from "@/lib/prefs";
@@ -29,6 +29,7 @@ import {
   Icon,
   IconButton,
   Loading,
+  OptionRow,
   Screen,
   Sheet,
   SheetSection,
@@ -119,6 +120,7 @@ export default function CollectionDetailScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [picking, setPicking] = useState(false);
+  const [addingMissing, setAddingMissing] = useState(false);
   const [view, setView] = useState<ViewMode>("list");
   const [sort, setSort] = useState<ListSort>("custom");
   const [editing, setEditing] = useState(false);
@@ -174,6 +176,7 @@ export default function CollectionDetailScreen() {
 
   const detail = collection.data;
   const inCollection = new Set(detail.games.map((g) => g.gameId));
+  const missing = detail.games.filter((g) => !g.userGameId);
   const accent = detail.accentColor ?? colors.accent;
 
   // the graph view walks the play-order links; the list view sorts the same
@@ -196,6 +199,23 @@ export default function CollectionDetailScreen() {
             {detail.description ? <Text style={type.prose}>{detail.description}</Text> : null}
 
             <CollectionTimeLine time={detail.time} />
+
+            {missing.length > 0 && (
+              <View style={styles.missingRow}>
+                <Icon name="library-outline" size={15} color={colors.success} />
+                <Text style={[type.caption, { flex: 1 }]}>
+                  {missing.length} of {detail.games.length}{" "}
+                  {missing.length === 1 ? "game here isn't" : "games here aren't"} in your library
+                </Text>
+                <Button
+                  label="Add"
+                  icon="add"
+                  tone="ghost"
+                  onPress={() => setAddingMissing(true)}
+                  style={styles.headerBtn}
+                />
+              </View>
+            )}
 
             <View style={styles.headerRow}>
               {/* "Never publish" hides this, same as the web app — the API
@@ -358,6 +378,14 @@ export default function CollectionDetailScreen() {
         accent={accent}
         visible={picking}
         onClose={() => setPicking(false)}
+        onAdded={invalidate}
+      />
+
+      <AddMissingSheet
+        collectionId={id}
+        games={missing}
+        visible={addingMissing}
+        onClose={() => setAddingMissing(false)}
         onAdded={invalidate}
       />
 
@@ -612,6 +640,144 @@ function AddGameSheet({
   );
 }
 
+/**
+ * The games in this collection you haven't got, into your library in one go.
+ *
+ * The web app splits this into "add all to Wishlist / Backlog / …" buttons and
+ * a separate choose-games mode; on a phone it's one sheet that opens with every
+ * missing game ticked and Wishlist chosen, so "add all to my wishlist" is still
+ * a single tap, and picking some of them into another category is a few more.
+ * Only the ticked games are sent, by id, so games you already own are never
+ * touched.
+ */
+function AddMissingSheet({
+  collectionId,
+  games,
+  visible,
+  onClose,
+  onAdded,
+}: {
+  collectionId: string;
+  games: CollectionNode[];
+  visible: boolean;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState("wishlist");
+  // null = every missing game, so a game added from elsewhere can't linger
+  // in a stale set
+  const [ticked, setTicked] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      setTicked(null);
+      setStatus("wishlist");
+    }
+  }, [visible]);
+
+  // custom categories too, though they're managed on the web — "another
+  // category" is the point of the sheet
+  const categories = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => api.getCategories(),
+    enabled: visible,
+  });
+  const options = [...(categories.data ?? BUILTIN_CATEGORIES)].sort(
+    (a, b) => rank(a.key) - rank(b.key),
+  );
+  const statusName = options.find((c) => c.key === status)?.label ?? "Wishlist";
+  const chosen = games.filter((g) => ticked === null || ticked.has(g.gameId));
+
+  const add = useMutation({
+    mutationFn: () =>
+      api.addCollectionToLibrary(collectionId, {
+        status,
+        gameIds: chosen.map((g) => g.gameId),
+      }),
+    onSuccess: (res) => {
+      onAdded();
+      queryClient.invalidateQueries({ queryKey: ["library"] });
+      queryClient.invalidateQueries({ queryKey: ["public-collections"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      Alert.alert(
+        "Added to your library",
+        `${res.added} added to ${statusName}${res.skipped > 0 ? ` · ${res.skipped} already yours` : ""}`,
+        [{ text: "OK", onPress: onClose }],
+      );
+    },
+  });
+
+  function toggle(gameId: string) {
+    setTicked((prev) => {
+      const next = new Set(prev ?? games.map((g) => g.gameId));
+      if (next.has(gameId)) next.delete(gameId);
+      else next.add(gameId);
+      return next;
+    });
+  }
+
+  return (
+    <Sheet visible={visible} title="Add to your library" onClose={onClose}>
+      <Text style={type.caption}>
+        These aren't in your library yet. Untick any you don't want, then pick a category.
+      </Text>
+
+      <SheetSection label={`Games · ${chosen.length} of ${games.length}`} />
+      {games.map((g) => (
+        <OptionRow
+          key={g.gameId}
+          label={g.title}
+          selected={ticked === null || ticked.has(g.gameId)}
+          onPress={() => toggle(g.gameId)}
+        />
+      ))}
+      {games.length > 1 && (
+        <View style={[styles.headerRow, { marginTop: space.sm }]}>
+          <Button label="All" tone="ghost" onPress={() => setTicked(null)} style={styles.headerBtn} />
+          <Button
+            label="None"
+            tone="ghost"
+            onPress={() => setTicked(new Set())}
+            style={styles.headerBtn}
+          />
+        </View>
+      )}
+
+      <SheetSection label="Category" />
+      {options.map((c) => (
+        <OptionRow
+          key={c.key}
+          label={c.label}
+          tint={c.color}
+          selected={status === c.key}
+          onPress={() => setStatus(c.key)}
+        />
+      ))}
+
+      {add.isError && (
+        <Text style={[type.caption, { color: colors.danger, marginTop: space.sm }]}>
+          {add.error instanceof Error ? add.error.message : "Couldn't add those games"}
+        </Text>
+      )}
+      <Button
+        label={`Add ${chosen.length} to ${statusName}`}
+        icon="add"
+        busy={add.isPending}
+        disabled={chosen.length === 0}
+        onPress={() => add.mutate()}
+        style={{ marginTop: space.md }}
+      />
+    </Sheet>
+  );
+}
+
+/** Wishlist and Backlog first — where games you don't have yet usually go. */
+function rank(key: string): number {
+  const at = ["wishlist", "backlog"].indexOf(key);
+  return at === -1 ? 2 : at;
+}
+
 function AddRow({
   title,
   year,
@@ -647,6 +813,18 @@ function AddRow({
 const styles = StyleSheet.create({
   orderNote: { flexDirection: "row", alignItems: "center", gap: 5 },
   headerRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  missingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingVertical: space.xs,
+    paddingLeft: space.md,
+    paddingRight: space.xs,
+  },
   headerBtn: { minHeight: 38, paddingHorizontal: space.md },
   copiedTag: { flexDirection: "row", alignItems: "center", gap: 4 },
   tabs: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border },

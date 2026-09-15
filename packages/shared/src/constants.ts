@@ -130,27 +130,124 @@ export const PUBLISH_MODE_LABELS: Record<PublishMode, { label: string; blurb: st
 };
 
 /**
- * How one game relates to another in your library.
+ * What a stored link between two games *is*. Each row is directional —
+ * `game_id` is the base, `related_game_id` hangs off it:
  *
- * Deliberately three kinds and not a taxonomy. "Expansion" is DLC, "GOTY
- * edition" is the same game, and every extra kind is another decision to make
- * every time you link something. The split that earns its place is
- * *add-on content* versus *another version of the same game*, and remakes and
- * remasters are worth telling apart because one is a rebuild and the other a
- * polish.
+ *  - `dlc`    — the related game is DLC (or an expansion) for the base
+ *  - `sequel` — the related game follows the base. There is no `prequel`
+ *               kind: "A is the prequel to B" is the same fact as "B is the
+ *               sequel to A", and storing it one way is what lets each game's
+ *               page show its half without the two ever disagreeing.
+ *  - `remake` — the related game remakes *or* remasters the base. One kind,
+ *               because telling a rebuild from a polish was a decision to make
+ *               every time you linked something, for a distinction nothing in
+ *               the app acts on. Migration 0027 folded `remaster` into it.
+ *
+ * The UI never speaks in kinds — see `GAME_LINK_ROLES`.
  */
-export const GAME_LINK_KINDS = ["dlc", "remaster", "remake"] as const;
+export const GAME_LINK_KINDS = ["dlc", "sequel", "remake"] as const;
 export type GameLinkKind = (typeof GAME_LINK_KINDS)[number];
 
 /**
- * Both halves of each kind, because a link reads differently from each end:
- * Blood and Wine is *DLC for* The Witcher 3, and The Witcher 3 *has DLC*.
+ * What the *other* game is to the one you're looking at. A kind read from one
+ * end: the same `dlc` row is a `dlc` role on the base game's page and a
+ * `base_game` role on the DLC's page.
+ *
+ * In display order. The two that describe what a game *is* — DLC for
+ * something, a remake of something — lead, and only appear when filled; the
+ * four you add (`primary`) are always shown, in the order they were asked for.
  */
-export const GAME_LINK_LABELS: Record<
-  GameLinkKind,
-  { section: string; forward: string; back: string }
-> = {
-  dlc: { section: "DLC & add-ons", forward: "DLC", back: "DLC for" },
-  remaster: { section: "Remasters", forward: "Remaster", back: "Remaster of" },
-  remake: { section: "Remakes", forward: "Remake", back: "Remake of" },
+export const GAME_LINK_ROLES = [
+  "base_game",
+  "original",
+  "dlc",
+  "prequel",
+  "sequel",
+  "remake",
+] as const;
+export type GameLinkRole = (typeof GAME_LINK_ROLES)[number];
+
+export interface GameLinkRoleMeta {
+  kind: GameLinkKind;
+  /**
+   * Which column of the stored row holds the game whose page you're on:
+   * `base` for the roles that hang things off it, `related` for the ones that
+   * say what it hangs off.
+   */
+  side: "base" | "related";
+  /** the same link as seen from the other game's page */
+  inverse: GameLinkRole;
+  /** always shown as a section, and first in the add menu */
+  primary: boolean;
+  /** section heading */
+  section: string;
+  /** add-menu label */
+  singular: string;
+  /** what picking this role says about the game you pick */
+  hint: string;
+}
+
+export const GAME_LINK_ROLE_META: Record<GameLinkRole, GameLinkRoleMeta> = {
+  dlc: {
+    kind: "dlc",
+    side: "base",
+    inverse: "base_game",
+    primary: true,
+    section: "DLC",
+    singular: "DLC",
+    hint: "DLC or an expansion for this game",
+  },
+  prequel: {
+    kind: "sequel",
+    side: "related",
+    inverse: "sequel",
+    primary: true,
+    section: "Prequels",
+    singular: "Prequel",
+    hint: "Comes before this game",
+  },
+  sequel: {
+    kind: "sequel",
+    side: "base",
+    inverse: "prequel",
+    primary: true,
+    section: "Sequels",
+    singular: "Sequel",
+    hint: "Follows this game",
+  },
+  remake: {
+    kind: "remake",
+    side: "base",
+    inverse: "original",
+    primary: true,
+    section: "Remakes & remasters",
+    singular: "Remake / Remaster",
+    hint: "A remake or remaster of this game",
+  },
+  base_game: {
+    kind: "dlc",
+    side: "related",
+    inverse: "dlc",
+    primary: false,
+    section: "Base game",
+    singular: "Base game",
+    hint: "The game this one is DLC for",
+  },
+  original: {
+    kind: "remake",
+    side: "related",
+    inverse: "remake",
+    primary: false,
+    section: "Original",
+    singular: "Original",
+    hint: "The game this one remakes or remasters",
+  },
 };
+
+/**
+ * How a section of linked games is ordered. `release` is by release date
+ * (unknown dates last); `custom` is the order you set by hand. Chosen per
+ * section, per game, and remembered — see `user_game_link_sorts`.
+ */
+export const GAME_LINK_SORTS = ["release", "custom"] as const;
+export type GameLinkSort = (typeof GAME_LINK_SORTS)[number];

@@ -7,6 +7,7 @@ import { Shell } from "../components/Shell.js";
 import { AddCollectionGame } from "../components/AddCollectionGame.js";
 import { CollectionList } from "../components/CollectionList.js";
 import { CollectionTimePanel } from "../components/CollectionTime.js";
+import { MissingGamesBar } from "../components/MissingGamesBar.js";
 import { usePreferences } from "../lib/prefs.js";
 
 const NODE_W = 92;
@@ -46,6 +47,9 @@ export function CollectionDetailPage() {
    * Reading a play order is the common case; rearranging one is not.
    */
   const [editing, setEditing] = useState(false);
+  // picking which of the games you don't own to add — see MissingGamesBar
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [nodes, setNodes] = useState<LocalNode[]>([]);
   const [links, setLinks] = useState<CollectionLink[]>([]);
   const [connectFrom, setConnectFrom] = useState<string | null>(null);
@@ -317,6 +321,31 @@ export function CollectionDetailPage() {
         )}
       </div>
 
+      {/* games in here you haven't got: add all of them, or pick some. Yours
+          or someone else's collection alike — a reading list you made is as
+          likely to have gaps as one you're browsing */}
+      <MissingGamesBar
+        collectionId={id}
+        games={nodes}
+        selecting={selecting}
+        selected={selected}
+        onStartSelecting={() => {
+          // the checkboxes live on the list, and dragging nodes around while
+          // choosing games would be two jobs at once
+          setView("list");
+          setEditing(false);
+          setConnectMode(false);
+          setConnectFrom(null);
+          setSelected(new Set());
+          setSelecting(true);
+        }}
+        onStopSelecting={() => {
+          setSelecting(false);
+          setSelected(new Set());
+        }}
+        onSelect={setSelected}
+      />
+
       {/* two ways to look at the same games. The list comes first because a
           numbered run is what most people open a collection for; the graph is
           the specialist view, for orders that branch */}
@@ -329,7 +358,14 @@ export function CollectionDetailPage() {
         ).map((v) => (
           <button
             key={v.key}
-            onClick={() => setView(v.key)}
+            onClick={() => {
+              setView(v.key);
+              // the graph has no checkboxes to choose with
+              if (v.key === "graph") {
+                setSelecting(false);
+                setSelected(new Set());
+              }
+            }}
             className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
               view === v.key
                 ? "border-indigo-500 text-indigo-300"
@@ -361,6 +397,16 @@ export function CollectionDetailPage() {
           games={nodes}
           accent={collection.data.accentColor ?? "#818cf8"}
           readOnly={!isOwner}
+          selecting={selecting}
+          selected={selected}
+          onToggleSelect={(gameId) =>
+            setSelected((prev) => {
+              const next = new Set(prev);
+              if (next.has(gameId)) next.delete(gameId);
+              else next.add(gameId);
+              return next;
+            })
+          }
         />
       ) : (
         <div className="overflow-auto rounded-2xl border border-zinc-800 bg-zinc-950">

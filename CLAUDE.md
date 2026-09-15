@@ -210,22 +210,35 @@ Phase 0–8 roadmap — read it before making design decisions.
   the courtesy rather than the mechanism. Unpublishing is never refused: the
   mode governs what goes out, not what comes back, which is also why an
   already-published item keeps its button under `never`.
-- **Games link to their DLC, remasters and remakes** (`user_game_links`,
-  migration 0026). Per-user, *not* catalog: the relationship is arguably a
-  fact about the games, but writing it to the shared `games` rows would let
+- **Games link to their DLC, prequels, sequels and remakes** (`user_game_links`,
+  migrations 0026–0027). Per-user, *not* catalog: the relationship is arguably
+  a fact about the games, but writing it to the shared `games` rows would let
   one mis-click reorganise everyone's library — the mistake phase 16 undid for
   play times. What the table records is a decision about *your* library, which
   is the actual problem (Steam sells DLC as its own app, so it imports as its
   own entry). The row is **directional**: `game_id` is the base and
   `related_game_id` is what hangs off it, with `kind` saying what the related
-  game is *to* the base. `direction` on the POST flips which end is which, so
-  the same control works from either game's page and a pair can't end up
-  stored twice swapped — the inverse row is a 409, because a game that is both
-  parent and child of another renders as listing itself. Three kinds only
-  (`dlc`, `remaster`, `remake`): the split that earns its place is add-on
-  content versus another version, and every extra kind is a decision to make
-  every time you link something. `gameLinksFor` (`routes/games.ts`) returns
-  both ends in one payload because the panel draws both.
+  game is *to* the base. **Kinds and roles are two different things.** There
+  are three stored kinds — `dlc`, `sequel`, `remake` (which covers remasters;
+  0027 folded `remaster` into it) — and six *roles*, which are a kind read from
+  one end (`GAME_LINK_ROLES`/`GAME_LINK_ROLE_META` in shared constants): the
+  base game sees `dlc`/`sequel`/`remake`, the related game sees
+  `base_game`/`prequel`/`original`. **There is no `prequel` kind on purpose**:
+  "A is the prequel to B" is the same fact as "B is the sequel to A", and
+  storing it once is what makes a link show on both games without the two
+  pages ever disagreeing. The UI and the API only speak roles — `POST
+  /api/games/:gameId/links` takes `{ role }` and maps it to a kind and an end —
+  and `gameLinksFor` (`routes/games.ts`) returns every role as a section, both
+  ends of every row, whether or not you own either game. **One link per pair**:
+  the same link again is an idempotent 200; any *other* link between the two
+  (the inverse, or a second kind) is a 409 that names the section it's already
+  under. **Two orders per row** (`base_position`, `related_position`), because
+  a row sits in two lists — Half-Life 2's prequels and Half-Life's sequels are
+  separate hand orders — and the sort per section (`release` | `custom`) lives
+  in `user_game_link_sorts`, keyed (user, game, role): neither end has a
+  per-user row to hang it on when you don't own the game, and a flag copied onto
+  every link in a section would drift. Sorting happens server-side so web and
+  mobile show the same order.
 - **The repo is public, and the site says so.** `GITHUB_REPO_URL`
   (`packages/shared/src/constants.ts`) is the single copy of the URL; the
   footer links it on every page, the FAQ's self-host answer links it, and the
@@ -322,6 +335,8 @@ was dev-only). Never use `db push`.
 
 | 25 publish once, and games that know their DLC | see git log | **Publishing became a preference** (migration 0026): `publish_mode` is `manual`/`never`/`always`, applied by `POST /api/collections` and both checklist-create routes, with a Sharing panel on Preferences. `never` is enforced by the API (403 on a publish PATCH) as well as hidden in both apps; adopted copies stay private under every mode, and switching modes is never retroactive. **Games link to other games** (`user_game_links`): per-user `dlc`/`remaster`/`remake` links with `GET`/`POST`/`DELETE /api/games/:gameId/links`, stored one direction and flipped by a `direction` flag on the way in so a pair can't exist twice swapped (the inverse is a 409, a self-link a 400, a repeat an idempotent 200). Web gets `RelatedGames` on the game page — a "Link a game" button, a library-first/IGDB-underneath search, and the relation picked as a sentence ("… is DLC for this game") rather than a kind plus a direction toggle; sections appear as links are made, so a game with no DLC shows no empty shelf. Mobile shows the links read-only and can open either end. The library grid is deliberately untouched: a linked DLC keeps its own card |
 
+| 26 the Linked tab, and collections that fill your gaps | see git log | **Four link types, one row each** (migration 0027): DLC, Prequel, Sequel and Remake/Remaster, stored as three kinds (`dlc`, `sequel`, `remake` — `remaster` folded in) and read as six *roles* depending on which end you stand on (`GAME_LINK_ROLE_META`), so a prequel added on one game is the sequel on the other with nothing stored twice. `POST /api/games/:gameId/links` takes `{ role }`; one link per pair, and any other link between the two is a 409 naming the section. **A Linked tab** on `/game/$id` *and* `/catalog/$gameId`, so a DLC you don't own still says what it's DLC for: an "＋ Add a link ▾" type menu, a picker that links as many games as you like and marks ones already filed, and a section per role in **release-date or custom order** — remembered per section (`user_game_link_sorts`) and hand-set per end (`base_position`/`related_position`; `PUT /links/order`, `PUT /links/sort`). The old inline Related games block became a "🔗 N linked games ▾" dropdown under the title, and the game page's tab moved into the URL (`?tab=`) so Back returns to it. **Collections fill your gaps**: `add-to-library` takes `gameIds`, and `MissingGamesBar` offers add-all to Wishlist, Backlog or any other category, or *Choose games* checkboxes for some of them; mobile gets a one-sheet equivalent and reads the new link sections. The demo rebuild now clears links and link sorts too — it never had |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
 (password resets, registration toggle, account actions — the *list* landed in
@@ -344,29 +359,61 @@ file to be provided for reference).
   everything I own" action would be a different feature, and a destructive
   one.
 - **Game links are per-user and never reach the catalog.** Two people can
-  disagree about whether something is a remaster or a remake and both are
+  disagree about whether something is a sequel or a spin-off and both are
   right in their own library. The cost is that everyone links their own DLC
   from scratch; IGDB already models `dlcs`/`expansions`/`remakes`/`remasters`
   on the games we import, so seeding suggestions from it is the obvious next
   step — and would want to stay suggestions, written into `user_game_links`
   on acceptance rather than replacing it.
+- **Links live on a Linked tab**, on both `/game/$id` and `/catalog/$gameId`
+  (`LinkedGamesPanel` in `components/LinkedGames.tsx`). It has to exist on the
+  catalog page too: clicking a DLC you linked but don't own lands there, and a
+  link that only showed on games you own would only show half of itself. The
+  four roles you add (`primary` in the meta) are always drawn, empty or not;
+  `base_game` and `original` only appear once filled, since most games are
+  neither DLC nor a remake — both are still in the add menu. The link type is
+  chosen from a menu ("＋ Add a link ▾"), then the picker takes any number of
+  games without reopening, and marks results already linked with the section
+  they're under (matched by catalog id *and* IGDB id, so a result can be
+  recognised before it's been pulled into the catalog). Under the title, a
+  "🔗 N linked games ▾" dropdown lists them without leaving Overview.
+- **A game page's tab is in the URL** (`?tab=progress|linked` on `/game/$id`,
+  `?tab=linked` on `/catalog/$gameId`, via `validateSearch` in `main.tsx`).
+  It used to be `useState`, which meant Back from a linked game dropped you on
+  Overview, and — because TanStack reuses the component across `/game/A` →
+  `/game/B` — the *next* game inherited whatever tab the last one was on.
+  Tab clicks `replace` with `resetScroll: false`, so they don't stack history
+  or jump the page. Opening a linked game deliberately does *not* carry the
+  tab: you clicked a game, so you get the game.
+- **Custom order saves as you click**, one `PUT /links/order` per arrow, with
+  an optimistic cache update. Sort toggles and reorders share a
+  `mutationKey`, and only the last one in flight refetches
+  (`isMutating(...) === 1`) — otherwise a refetch from the first of three
+  quick clicks snaps the list back mid-sequence. Reordering also flips that
+  section to `custom`; switching back to `release` keeps the hand order for
+  next time rather than clearing it.
+- Link and collection titles in the new pickers **wrap to two lines instead of
+  truncating**. DLC is named "<base game> - <the part that differs>", so an
+  ellipsis turned three different DLC into three identical rows.
 - **A linked DLC still gets its own library card.** Linking says what belongs
   to what; it deliberately doesn't hide, merge or roll up anything in the
   library grid, the counts, or the dashboard. Folding DLC into its base card
   would mean hiding entries people can currently see, which needs a toggle and
   a decision about every count in the app — worth doing, but as its own change.
-- **Link authoring is web-only.** Mobile's game screen lists both ends and
-  opens either (your copy, or `/add?q=` when you don't own it), but can't
-  create or remove a link — same line list authoring and console management
-  sit on, and for the same reason: the picker is a search plus a six-way
-  relation choice, which is a lot of phone screen for something done once per
-  game.
-- **A game can be linked in both directions to different games, but not to the
-  same one.** "The remaster of X, which itself has DLC" is a real shape and is
-  allowed; X being both parent and child of Y is refused with a 409, because
-  it renders as a game listing itself. A three-game cycle isn't checked — it
-  would need a graph walk on every link for a shape nobody has managed to
-  create by accident.
+- **Link authoring is web-only.** Mobile's game screen lists every filled
+  section in the server's order and opens either end (your copy, or `/add?q=`
+  when you don't own it), but can't create, remove or reorder a link — same
+  line list authoring and console management sit on, and for the same reason:
+  a type menu plus a search plus reorder arrows is a lot of phone screen for
+  something done once per game.
+- **A game can be linked to many games, but to each one only once.** "The
+  remake of X, which itself has DLC" is a real shape and is allowed; X being
+  both prequel and sequel of Y, or Y being both X's DLC and its sequel, is a
+  409 naming the section the pair is already under. A three-game cycle (A
+  before B before C before A) isn't checked — it would need a graph walk on
+  every link for a shape nobody has managed to create by accident.
+- Unlinking isn't confirmed. A link is one click to make again, and the picker
+  stays open for exactly that.
 
 - **A pasted collection list is only as good as the matcher.** With IGDB
   configured, each unmatched line is one IGDB search; without it, `matchOnce`
@@ -454,7 +501,25 @@ file to be provided for reference).
   you can see (yours or public). Games you already own count as `skipped` and
   keep their category — but the chosen platform *is* applied to them, the same
   rule `POST /api/library/bulk` follows, because "I own this marathon on
-  Switch" is true of the ones you already had.
+  Switch" is true of the ones you already had. An optional `gameIds` narrows
+  it to some of the collection's games; it can only narrow — an id that isn't
+  in the collection is ignored, so the route can't add arbitrary games.
+- **A collection page offers the games you don't have** (`MissingGamesBar`,
+  above the List/Play order tabs, on yours and on public ones): *Add all to
+  Wishlist*, *Add all to Backlog*, *Add all to… ▾* for every other category
+  (custom ones included), and *Choose games*, which turns the list's
+  not-owned rows into checkboxes and points the same three controls at the
+  ticked ones. It always sends explicit `gameIds` — only the games you're
+  missing — so a bulk "wishlist the rest" never touches your own copies, which
+  the whole-collection form would re-platform. Choosing switches to the list
+  view and cancels reordering; the graph has nothing to tick. Mobile gets one
+  sheet instead (`AddMissingSheet`): every missing game ticked and Wishlist
+  picked, so "add all to wishlist" is still one tap. The older *Add all to
+  library* popover on public browse cards and the game page's "In public
+  collections" block is unchanged — it doesn't know which games you own.
+- Adding from a collection is **one click with no confirm**, like the rest of
+  the app's bulk adds. The count is on the button while choosing, and the
+  result line says how many were added and how many were already yours.
 - **Collections publish and adopt like checklists do** (migration 0015:
   `collections.is_public`, `adopted_from_id`). Adopting takes a **deep copy** —
   games, node positions and play-order links — not a live reference: your edits

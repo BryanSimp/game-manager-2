@@ -40,6 +40,8 @@ import type {
   CollectionLayoutInput,
   CollectionListImport,
   CollectionSummary,
+  GameLinkOrderInput,
+  GameLinkSortInput,
   GameLinks,
   DashboardData,
   DemoAdminView,
@@ -371,20 +373,20 @@ export class ApiClient {
     return this.request(`/api/tags/${id}`, { method: "DELETE" });
   }
 
-  // ---- game links (DLC, remasters, remakes) ----
+  // ---- game links (DLC, prequels, sequels, remakes & remasters) ----
 
   /**
-   * Both ends of a game's links in one request: what hangs off it, and what
-   * it hangs off. The game page draws both from this.
+   * A game's links from its own side: one section per role, both ends of
+   * every link included, each section already in the order it's set to.
    */
   getGameLinks(gameId: string): Promise<GameLinks> {
     return this.request<GameLinks>(`/api/games/${gameId}/links`);
   }
 
   /**
-   * Link another game to this one. `direction: "parent"` flips which end is
-   * the base, so the same control works from the DLC's page as from the base
-   * game's.
+   * Link another game to this one. `role` is what the other game is to this
+   * one, so the same call works from the DLC's page (`base_game`) as from the
+   * base game's (`dlc`).
    */
   addGameLink(gameId: string, input: AddGameLinkInput): Promise<{ ok: true; id: string | null }> {
     return this.request(`/api/games/${gameId}/links`, {
@@ -395,6 +397,22 @@ export class ApiClient {
 
   removeGameLink(gameId: string, linkId: string): Promise<{ ok: true }> {
     return this.request(`/api/games/${gameId}/links/${linkId}`, { method: "DELETE" });
+  }
+
+  /** Hand-order one section of a game's links; switches that section to custom order. */
+  saveGameLinkOrder(gameId: string, input: GameLinkOrderInput): Promise<{ ok: true }> {
+    return this.request(`/api/games/${gameId}/links/order`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  /** Release date or custom order, for one section of a game's links. */
+  setGameLinkSort(gameId: string, input: GameLinkSortInput): Promise<{ ok: true }> {
+    return this.request(`/api/games/${gameId}/links/sort`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
   }
 
   // ---- collections ----
@@ -512,7 +530,10 @@ export class ApiClient {
     });
   }
 
-  /** Add every game in a collection to your library, in one category. */
+  /**
+   * Add a collection's games to your library, in one category — all of them,
+   * or only the `gameIds` you name.
+   */
   addCollectionToLibrary(
     id: string,
     input: AddCollectionToLibraryInput,

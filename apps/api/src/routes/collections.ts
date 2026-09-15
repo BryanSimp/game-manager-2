@@ -1007,6 +1007,10 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
    * already own are counted as skipped rather than re-filed, but the chosen
    * platform is applied to them too: "I own this marathon on Switch" is true
    * of the ones you already had.
+   *
+   * `gameIds` narrows it to some of them — the three you picked, or just the
+   * ones you don't have yet. It can only narrow: an id that isn't in the
+   * collection is ignored, so this can't be used to add arbitrary games.
    */
   app.post<{ Params: { id: string } }>(
     "/api/collections/:id/add-to-library",
@@ -1034,6 +1038,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
             )
             .max(10)
             .optional(),
+          gameIds: z.array(z.string().uuid()).min(1).max(500).optional(),
         })
         .safeParse(request.body);
       if (!parsed.success) {
@@ -1047,7 +1052,14 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         .select({ gameId: schema.collectionGames.gameId, title: schema.games.title })
         .from(schema.collectionGames)
         .innerJoin(schema.games, eq(schema.games.id, schema.collectionGames.gameId))
-        .where(eq(schema.collectionGames.collectionId, collection.id))
+        .where(
+          and(
+            eq(schema.collectionGames.collectionId, collection.id),
+            parsed.data.gameIds
+              ? inArray(schema.collectionGames.gameId, parsed.data.gameIds)
+              : undefined,
+          ),
+        )
         .orderBy(asc(schema.collectionGames.sortOrder));
 
       const platforms = parsed.data.platforms ?? [];

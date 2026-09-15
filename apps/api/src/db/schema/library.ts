@@ -151,7 +151,8 @@ export const userGameTags = pgTable(
 );
 
 /**
- * "This game is DLC for that one", "this one is the remake of that one".
+ * "This game is DLC for that one", "that one is its sequel", "this one is the
+ * remake of that one".
  *
  * **Per-user, not catalog.** The relationship is arguably a fact about the
  * real-world games — IGDB models it that way — but writing it to the shared
@@ -161,10 +162,11 @@ export const userGameTags = pgTable(
  * DLC in as its own entry, and you say which game it belongs under.
  *
  * The row is directional. `gameId` is the base — the thing that has DLC, the
- * original that got remade — and `relatedGameId` is what hangs off it, with
- * `kind` describing what the related game is *to* the base. Both ends read
- * their own side of it: the base lists its add-ons, the add-on says what it
- * belongs to.
+ * game that came first, the original that got remade — and `relatedGameId`
+ * is what hangs off it, with `kind` describing what the related game is *to*
+ * the base. Both ends read their own side of it (see `GAME_LINK_ROLE_META`):
+ * the base lists its DLC and sequels, the DLC names its base game, the sequel
+ * lists this as a prequel.
  *
  * Neither game has to be in your library. A collection can list games you
  * don't own for the same reason — noting that a DLC exists is useful before
@@ -177,17 +179,26 @@ export const userGameLinks = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    /** the base game: the one that has the DLC, or that got remade */
+    /** the base game: the one that has the DLC, came first, or got remade */
     gameId: uuid("game_id")
       .notNull()
       .references(() => games.id, { onDelete: "cascade" }),
-    /** what hangs off it: the DLC, the remaster, the remake */
+    /** what hangs off it: the DLC, the sequel, the remake or remaster */
     relatedGameId: uuid("related_game_id")
       .notNull()
       .references(() => games.id, { onDelete: "cascade" }),
     // text, not an enum, for the same reason user_games.status is: a new kind
     // shouldn't need a migration on a pg type
     kind: text("kind").notNull(),
+    /**
+     * Two hand-set orders, because a row sits in two lists: the base game's
+     * (its DLC, its sequels) and the related game's (its base games, its
+     * prequels). Rearranging Half-Life 2's prequels must not reshuffle
+     * Half-Life's sequels, so each end keeps its own. Only read when that
+     * section's sort is `custom`; new links go on the end of both.
+     */
+    basePosition: integer("base_position").notNull().default(0),
+    relatedPosition: integer("related_position").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -198,6 +209,32 @@ export const userGameLinks = pgTable(
     index("user_game_links_user_game_idx").on(t.userId, t.gameId),
     index("user_game_links_user_related_idx").on(t.userId, t.relatedGameId),
   ],
+);
+
+/**
+ * How one section of a game's links is ordered — release date or your own
+ * order — per user, per game, per role.
+ *
+ * Its own table because neither end of a link has a row to hang it on: both
+ * games can be ones you don't own, so there's no `user_games` entry, and
+ * copying the choice onto every link in the section would be a denormalised
+ * flag that drifts the first time a link is deleted. No row means `release`.
+ */
+export const userGameLinkSorts = pgTable(
+  "user_game_link_sorts",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    // a GameLinkRole — text for the same reason `kind` is
+    role: text("role").notNull(),
+    // 'release' | 'custom'
+    sort: text("sort").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.gameId, t.role] })],
 );
 
 /** Display preferences — jsonb is deliberate here, it's pure UI config. */

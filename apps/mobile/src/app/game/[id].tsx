@@ -15,8 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  GAME_LINK_KINDS,
-  GAME_LINK_LABELS,
+  GAME_LINK_ROLE_META,
   GAME_STATUSES,
   type ChecklistSummary,
   type GameLink,
@@ -666,13 +665,14 @@ function ProgressSection({ entryId, gameId }: { entryId: string; gameId: string 
 }
 
 /**
- * DLC, remasters and remakes attached to this game — read-only here.
+ * What this game is linked to — its base game or original, its DLC, prequels,
+ * sequels and remakes — read-only here, each section in the order it's set to
+ * on the web (the API sorts, so the two apps can't disagree).
  *
  * Linking is web-only, like list authoring and console management: the picker
- * is a search plus a relation sentence, which is a lot of screen for something
- * you do once per game. Seeing the links matters far more often than making
- * them, and the section hides itself entirely when there are none, so a game
- * with no DLC costs nothing.
+ * is a type menu plus a search, which is a lot of screen for something you do
+ * once per game. Seeing the links matters far more often than making them,
+ * and only filled sections are drawn, so a game with no links costs nothing.
  */
 function RelatedSection({ gameId }: { gameId: string }) {
   const router = useRouter();
@@ -680,9 +680,9 @@ function RelatedSection({ gameId }: { gameId: string }) {
     queryKey: ["game-links", gameId],
     queryFn: () => api.getGameLinks(gameId),
   });
-  const children = links.data?.children ?? [];
-  const parents = links.data?.parents ?? [];
-  if (children.length === 0 && parents.length === 0) return null;
+  // `?? []` also covers a payload persisted from before links had sections
+  const sections = (links.data?.sections ?? []).filter((section) => section.links.length > 0);
+  if (sections.length === 0) return null;
 
   const open = (link: GameLink) => {
     // your copy when you own it; the add screen with the name typed in when
@@ -692,39 +692,32 @@ function RelatedSection({ gameId }: { gameId: string }) {
     else router.push(`/add?q=${encodeURIComponent(link.game.title)}`);
   };
 
-  const row = (link: GameLink, label: string | null) => (
-    <Pressable key={link.id} style={styles.relatedRow} onPress={() => open(link)}>
-      <Cover src={resolveImage(link.game.coverSrc)} width={34} height={45} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={type.body} numberOfLines={2}>
-          {link.game.title}
-        </Text>
-        <Text style={type.micro}>
-          {[label, link.game.userGameId ? null : "Not in library"].filter(Boolean).join(" · ")}
-        </Text>
-      </View>
-      <Icon name="chevron-forward" size={16} color={colors.textGhost} />
-    </Pressable>
-  );
-
   return (
     <>
-      {parents.length > 0 && (
-        <>
-          <SectionTitle>Part of</SectionTitle>
-          {parents.map((l) => row(l, `${GAME_LINK_LABELS[l.kind].back} this`))}
-        </>
-      )}
-      {GAME_LINK_KINDS.map((kind) => {
-        const rows = children.filter((l) => l.kind === kind);
-        if (rows.length === 0) return null;
-        return (
-          <View key={kind}>
-            <SectionTitle>{GAME_LINK_LABELS[kind].section}</SectionTitle>
-            {rows.map((l) => row(l, null))}
-          </View>
-        );
-      })}
+      {sections.map((section) => (
+        <View key={section.role}>
+          <SectionTitle>{GAME_LINK_ROLE_META[section.role].section}</SectionTitle>
+          {section.links.map((link) => (
+            <Pressable key={link.id} style={styles.relatedRow} onPress={() => open(link)}>
+              <Cover src={resolveImage(link.game.coverSrc)} width={34} height={45} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={type.body} numberOfLines={2}>
+                  {link.game.title}
+                </Text>
+                <Text style={type.micro}>
+                  {[
+                    link.game.releaseDate?.slice(0, 4),
+                    link.game.userGameId ? null : "Not in library",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </Text>
+              </View>
+              <Icon name="chevron-forward" size={16} color={colors.textGhost} />
+            </Pressable>
+          ))}
+        </View>
+      ))}
     </>
   );
 }

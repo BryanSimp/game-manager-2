@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { OwnershipFormat } from "@gm/shared";
 import { api } from "../lib/api.js";
@@ -8,8 +8,16 @@ import { StarRating } from "../components/StarRating.js";
 import { ConsoleSelect } from "../components/ConsolePicker.js";
 import { AddCollectionToLibrary } from "../components/AddCollectionToLibrary.js";
 import { CollectionPicker } from "../components/CollectionPicker.js";
+import {
+  LinkedGamesMenu,
+  LinkedGamesPanel,
+  linkCount,
+  useGameLinks,
+} from "../components/LinkedGames.js";
 import { formatHours } from "../lib/format.js";
 import { useCategories } from "../lib/categories.js";
+
+type Tab = "overview" | "linked";
 
 /**
  * A game you don't own, from the shared catalog.
@@ -24,17 +32,38 @@ import { useCategories } from "../lib/categories.js";
  * If it turns out you *do* own it, this redirects to your own copy: your
  * rating, notes and lists are the better page, and two URLs for one game you
  * own would be a bug you'd notice in the back button.
+ *
+ * Links get the same Linked tab the owned page has. A DLC you linked from its
+ * base game lands here when you click it, and it has to say what it's DLC for
+ * — a link that only showed on the games you own would only show half of
+ * itself.
  */
 export function CatalogGamePage() {
   const { gameId } = useParams({ from: "/catalog/$gameId" });
+  const { tab: tabParam } = useSearch({ from: "/catalog/$gameId" });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const categories = useCategories();
+
+  // in the URL for the same reason as the owned page: Back from a linked game
+  // should land on the Linked tab you left
+  const tab: Tab = tabParam ?? "overview";
+  function setTab(next: Tab) {
+    navigate({
+      to: "/catalog/$gameId",
+      params: { gameId },
+      search: next === "overview" ? {} : { tab: next },
+      replace: true,
+      resetScroll: false,
+    });
+  }
 
   const catalog = useQuery({
     queryKey: ["catalog-game", gameId],
     queryFn: () => api.getCatalogGame(gameId),
   });
+  const links = useGameLinks(gameId);
+  const linkTotal = linkCount(links.data);
 
   const [status, setStatus] = useState<string>("");
   const [platformId, setPlatformId] = useState<string | null>(null);
@@ -42,9 +71,17 @@ export function CatalogGamePage() {
 
   const owned = catalog.data?.userGameId ?? null;
   useEffect(() => {
-    // replace, not push: the row you came from should still be one Back away
-    if (owned) navigate({ to: "/game/$id", params: { id: owned }, replace: true });
-  }, [owned, navigate]);
+    // replace, not push: the row you came from should still be one Back away.
+    // A Linked tab carries over — the owned page has one too.
+    if (owned) {
+      navigate({
+        to: "/game/$id",
+        params: { id: owned },
+        search: tabParam ? { tab: tabParam } : {},
+        replace: true,
+      });
+    }
+  }, [owned, tabParam, navigate]);
 
   const add = useMutation({
     mutationFn: () =>
@@ -113,7 +150,39 @@ export function CatalogGamePage() {
           {g.releaseDate && (
             <p className="mt-1 text-sm text-zinc-500">Released {g.releaseDate}</p>
           )}
+          <LinkedGamesMenu gameId={gameId} onManage={() => setTab("linked")} />
 
+          <div className="mt-4 flex gap-1 border-b border-zinc-800">
+            {(
+              [
+                { key: "overview", label: "Overview" },
+                { key: "linked", label: "Linked" },
+              ] as Array<{ key: Tab; label: string }>
+            ).map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+                  tab === t.key
+                    ? "border-indigo-500 text-indigo-300"
+                    : "border-transparent text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {t.label}
+                {t.key === "linked" && linkTotal > 0 && (
+                  <span className="ml-1.5 rounded-full bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">
+                    {linkTotal}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {tab === "linked" && (
+            <LinkedGamesPanel gameId={gameId} igdbId={g.igdbId} title={g.title} />
+          )}
+
+          <div className={tab === "overview" ? "" : "hidden"}>
           <div className="mt-5 rounded-xl border border-indigo-900/60 bg-zinc-900 p-4">
             <p className="text-sm font-semibold text-zinc-200">Add it to your library</p>
             <p className="mt-1 text-xs text-zinc-500">
@@ -198,6 +267,7 @@ export function CatalogGamePage() {
 
           <PublicLists gameId={gameId} />
           <InPublicCollections gameId={gameId} />
+          </div>
         </div>
       </div>
     </Shell>
