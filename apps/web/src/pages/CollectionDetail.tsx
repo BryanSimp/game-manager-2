@@ -176,23 +176,6 @@ export function CollectionDetailPage() {
               </span>
             )}
             {collection.data.name}
-            {/* beside the name rather than among the buttons on the right:
-                a graph has a Rename of its own down there, and this one has
-                to be unmistakably the collection's */}
-            {isOwner && (
-              <button
-                onClick={() => {
-                  setDraftName(collection.data!.name);
-                  rename.reset();
-                  setRenaming(true);
-                }}
-                aria-label="Rename collection"
-                title="Rename collection"
-                className="rounded-md px-1.5 py-0.5 text-base font-normal text-zinc-500 hover:bg-zinc-800 hover:text-indigo-300"
-              >
-                ✎
-              </button>
-            )}
             {collection.data.adoptedFromId && (
               <span
                 className="rounded-full border border-zinc-700 px-2 py-0.5 text-xs font-normal text-zinc-500"
@@ -212,6 +195,23 @@ export function CollectionDetailPage() {
         {isOwner ? (
           <>
             <AddCollectionGame collectionId={id} excludeGameIds={inCollection} />
+            {/* A labelled button in the row with the others. It started as a
+                grey pencil beside the title, which was tidy and which nobody
+                could find — a control has to say what it does. The graph's own
+                rename is labelled "Rename graph" so the two can't be mixed up. */}
+            {!renaming && (
+              <button
+                onClick={() => {
+                  setDraftName(collection.data!.name);
+                  rename.reset();
+                  setRenaming(true);
+                }}
+                title="Rename this collection"
+                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800"
+              >
+                ✎ Rename
+              </button>
+            )}
             {(canPublish || collection.data.isPublic) && (
               <button
                 onClick={() => setPublic.mutate(!collection.data!.isPublic)}

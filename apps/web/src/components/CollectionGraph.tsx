@@ -375,7 +375,7 @@ export function CollectionGraphView({
                 }}
                 className={`${button} ${idle}`}
               >
-                Rename
+                Rename graph
               </button>
             )}
             <button
