@@ -87,9 +87,26 @@ export function isMainList(kind: ChecklistKind): boolean {
 export const FRIENDSHIP_STATUSES = ["pending", "accepted"] as const;
 export type FriendshipStatus = (typeof FRIENDSHIP_STATUSES)[number];
 
-/** Which how-long-to-beat figure the remaining-time estimate is based on. */
-export const PROGRESS_BASES = ["main", "main_extra", "completionist"] as const;
+/**
+ * Which how-long-to-beat figure the remaining-time estimate is based on.
+ *
+ * `custom` is the odd one out: the other three pick a figure the game already
+ * has, and this one is a length you type in (`user_games.progress_custom_seconds`).
+ * It exists because a game with no play time anywhere had three choices that
+ * all meant "unknown" — and because "I'm doing the story plus the one side
+ * arc I care about" isn't any of the three either.
+ */
+export const PROGRESS_BASES = ["main", "main_extra", "completionist", "custom"] as const;
 export type ProgressBasis = (typeof PROGRESS_BASES)[number];
+
+/** The longest custom length accepted: 10,000 hours, in seconds. */
+export const MAX_CUSTOM_PROGRESS_SECONDS = 36_000_000;
+
+/** What a collection's first graph is called until you rename it. */
+export const DEFAULT_COLLECTION_GRAPH_NAME = "Play order";
+/** How many graphs one collection can hold — they're tabs, and a row of tabs has an end. */
+export const MAX_COLLECTION_GRAPHS = 12;
+export const COLLECTION_GRAPH_NAME_MAX = 40;
 
 /**
  * Where the source lives. The repo is public, so every claim the site makes

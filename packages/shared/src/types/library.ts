@@ -56,6 +56,11 @@ export interface LibraryEntry {
   /** which how-long-to-beat figure the remaining-time estimate divides up */
   progressBasis: ProgressBasis;
   /**
+   * The length you typed for the `custom` basis, in seconds. Kept when you
+   * switch to another basis, so switching back doesn't mean typing it again.
+   */
+  progressCustomSeconds: number | null;
+  /**
    * Play time left, from the mission checklist. null when the game has no
    * mission list or no time for the chosen basis — the library sort treats
    * that as "unknown" rather than "zero".
@@ -197,6 +202,8 @@ export interface UpdateEntryInput {
   ttbEnabled?: boolean;
   completed100?: boolean;
   progressBasis?: ProgressBasis;
+  /** seconds; null clears it. Only read while the basis is `custom`. */
+  progressCustomSeconds?: number | null;
 }
 export interface BulkUpdateInput {
   ids: string[];
@@ -548,13 +555,29 @@ export interface PublicCollection {
   time: CollectionTime;
   preview: Array<{ gameId: string; title: string; coverSrc: string | null }>;
 }
+/**
+ * Another version of a game in a collection — its original, or a remake or
+ * remaster of it — taken from the links *you* made on the Linked tab.
+ *
+ * `relation` is what this version is to the collection's game: `original` is
+ * anything it remakes (directly or through a chain), `remake` is anything that
+ * remakes it, and `sibling` is another remake of the same original — the 2011
+ * HD port, seen from the 2021 remaster.
+ */
+export interface CollectionGameVersion {
+  gameId: string;
+  title: string;
+  coverSrc: string | null;
+  releaseDate: string | null;
+  /** null when this version isn't in your library */
+  userGameId: string | null;
+  status: string | null;
+  relation: "original" | "remake" | "sibling";
+}
 export interface CollectionNode {
   gameId: string;
   title: string;
   coverSrc: string | null;
-  /** node position on the play-order graph */
-  x: number;
-  y: number;
   /** 1-based place in the flat list view's custom order */
   sortOrder: number;
   /** so the list can sort by release date without a second request */
@@ -572,12 +595,36 @@ export interface CollectionNode {
   /** null when the game isn't in your library — the list says so and links to add it */
   userGameId: string | null;
   status: string | null;
+  /**
+   * Every other version of this game you've linked, oldest first. Yours, not
+   * the author's: links are per-user, so someone else's published collection
+   * shows the remakes *you* have linked.
+   */
+  versions: CollectionGameVersion[];
+  /**
+   * The `gameId` in `versions` that is the most recent version, when there is
+   * one newer than this game — what "Show latest versions" swaps in. Null when
+   * this game already is the latest, or has no other versions.
+   */
+  latestVersionId: string | null;
 }
 export interface CollectionLink {
   id: string;
   fromGameId: string;
   toGameId: string;
   label: string | null;
+}
+/**
+ * One named arrangement of a collection's games: where each node sits, and
+ * the arrows between them. A collection can hold several — "Play order",
+ * "Timeline", "Release date" — over the same set of games.
+ */
+export interface CollectionGraph {
+  id: string;
+  name: string;
+  /** where each of the collection's games sits on this graph */
+  nodes: Array<{ gameId: string; x: number; y: number }>;
+  links: CollectionLink[];
 }
 export interface CollectionDetail {
   id: string;
@@ -594,7 +641,8 @@ export interface CollectionDetail {
   /** summed from `games`, so the header can't disagree with the rows */
   time: CollectionTime;
   games: CollectionNode[];
-  links: CollectionLink[];
+  /** in tab order; a collection always has at least one */
+  graphs: CollectionGraph[];
 }
 /** How the public browse list is filtered and ordered. */
 export interface PublicCollectionQuery {
@@ -669,6 +717,14 @@ export interface AddCollectionToLibraryResult {
 export interface CollectionLayoutInput {
   nodes: Array<{ gameId: string; x: number; y: number }>;
   links: Array<{ fromGameId: string; toGameId: string; label?: string | null }>;
+}
+export interface CreateCollectionGraphInput {
+  name: string;
+  /**
+   * Start from another graph's layout and arrows instead of a fresh grid —
+   * a timeline is usually the play order with a few games moved.
+   */
+  copyFromGraphId?: string;
 }
 // ---- completionist checklists (Phase 7) ----
 export interface ChecklistSummary {

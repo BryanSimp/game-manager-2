@@ -11,7 +11,13 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BUILTIN_CATEGORIES, type AddCollectionGameInput, type CollectionNode } from "@gm/shared";
+import {
+  BUILTIN_CATEGORIES,
+  DEFAULT_COLLECTION_GRAPH_NAME,
+  type AddCollectionGameInput,
+  type CollectionGraph,
+  type CollectionNode,
+} from "@gm/shared";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, statusStyle } from "@/lib/ui";
 import { useBadgeOpacity, usePreferences } from "@/lib/prefs";
@@ -37,17 +43,23 @@ import {
 } from "@/components/ui";
 
 /**
- * The web app has the full drag-node graph editor; on mobile we flatten the
- * play-order graph into a list: chain order when links exist (topological-ish
- * walk), layout order otherwise.
+ * The web app has the full drag-node graph editor; on mobile we flatten one
+ * of the collection's graphs into a list: chain order when it has arrows
+ * (topological-ish walk), layout order otherwise.
  */
-function orderNodes(detail: {
-  games: CollectionNode[];
-  links: { fromGameId: string; toGameId: string }[];
-}) {
-  const { games, links } = detail;
+function orderNodes(games: CollectionNode[], graph: CollectionGraph | undefined) {
+  if (!graph) return games;
+  // a node's place is the graph's, not the game's — the same game sits
+  // somewhere different on "Timeline" than on "Release date"
+  const at = new Map(graph.nodes.map((n) => [n.gameId, n]));
+  const byLayout = (a: CollectionNode, b: CollectionNode) => {
+    const pa = at.get(a.gameId);
+    const pb = at.get(b.gameId);
+    return (pa?.y ?? 0) - (pb?.y ?? 0) || (pa?.x ?? 0) - (pb?.x ?? 0);
+  };
+  const { links } = graph;
   if (links.length === 0) {
-    return [...games].sort((a, b) => a.y - b.y || a.x - b.x);
+    return [...games].sort(byLayout);
   }
   const hasIncoming = new Set(links.map((l) => l.toGameId));
   const next = new Map<string, string[]>();
@@ -56,9 +68,7 @@ function orderNodes(detail: {
     next.get(l.fromGameId)!.push(l.toGameId);
   }
   const byId = new Map(games.map((g) => [g.gameId, g]));
-  const roots = games
-    .filter((g) => !hasIncoming.has(g.gameId))
-    .sort((a, b) => a.y - b.y || a.x - b.x);
+  const roots = games.filter((g) => !hasIncoming.has(g.gameId)).sort(byLayout);
   const ordered: CollectionNode[] = [];
   const seen = new Set<string>();
   const walk = (id: string) => {
@@ -77,10 +87,11 @@ type ViewMode = "graph" | "list";
 type ListSort = "custom" | "title" | "release" | "ttb";
 
 // List first, and the default: a numbered run is what most people open a
-// collection for. Play order is the specialist view, for orders that branch.
+// collection for. The graph tab is the specialist view, for orders that
+// branch — it takes the name of whichever graph is showing.
 const VIEWS: Array<{ key: ViewMode; label: string; icon: IconName }> = [
   { key: "list", label: "List", icon: "list-outline" },
-  { key: "graph", label: "Play order", icon: "git-branch-outline" },
+  { key: "graph", label: DEFAULT_COLLECTION_GRAPH_NAME, icon: "git-branch-outline" },
 ];
 
 const LIST_SORTS: Array<{ key: ListSort; label: string }> = [
@@ -122,6 +133,8 @@ export default function CollectionDetailScreen() {
   const [picking, setPicking] = useState(false);
   const [addingMissing, setAddingMissing] = useState(false);
   const [view, setView] = useState<ViewMode>("list");
+  // which of the collection's graphs the graph tab flattens; null = the first
+  const [graphId, setGraphId] = useState<string | null>(null);
   const [sort, setSort] = useState<ListSort>("custom");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CollectionNode[] | null>(null);
@@ -179,11 +192,18 @@ export default function CollectionDetailScreen() {
   const missing = detail.games.filter((g) => !g.userGameId);
   const accent = detail.accentColor ?? colors.accent;
 
-  // the graph view walks the play-order links; the list view sorts the same
+  // Graphs are made, named and arranged on the web; here you pick one to read.
+  // The fallback is for the persisted query cache: a collection saved to the
+  // phone before graphs existed rehydrates without the field, and reading it
+  // shouldn't crash in the moment before the refetch lands.
+  const graphs = detail.graphs ?? [];
+  const graph = graphs.find((g) => g.id === graphId) ?? graphs[0];
+
+  // the graph view walks that graph's arrows; the list view sorts the same
   // games by whatever you picked
   const rows =
     view === "graph"
-      ? orderNodes(detail)
+      ? orderNodes(detail.games, graph)
       : editing && draft
         ? draft
         : sortNodes(detail.games, sort);
@@ -259,17 +279,34 @@ export default function CollectionDetailScreen() {
                     size={14}
                     color={view === v.key ? colors.text : colors.textFaint}
                   />
-                  <Text style={[type.label, view === v.key ? undefined : { color: colors.textFaint }]}>
-                    {v.label}
+                  <Text
+                    numberOfLines={1}
+                    style={[type.label, view === v.key ? undefined : { color: colors.textFaint }]}
+                  >
+                    {v.key === "graph" ? (graph?.name ?? v.label) : v.label}
                   </Text>
                 </Pressable>
               ))}
             </View>
 
-            {view === "graph" && detail.links.length > 0 && (
+            {/* one chip per graph, once there's more than one to choose from */}
+            {view === "graph" && graphs.length > 1 && (
+              <ChipBar style={{ marginHorizontal: -space.md }}>
+                {graphs.map((g) => (
+                  <Chip
+                    key={g.id}
+                    label={g.name}
+                    active={g.id === graph?.id}
+                    onPress={() => setGraphId(g.id)}
+                  />
+                ))}
+              </ChipBar>
+            )}
+
+            {view === "graph" && graph && graph.links.length > 0 && (
               <View style={styles.orderNote}>
                 <Icon name="git-branch-outline" size={13} color={colors.textFaint} />
-                <Text style={type.micro}>Following the play-order links</Text>
+                <Text style={type.micro}>Following this graph's arrows</Text>
               </View>
             )}
 

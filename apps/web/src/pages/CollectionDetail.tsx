@@ -1,30 +1,23 @@
-import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useState } from "react";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BUILTIN_CATEGORIES, type CollectionLink, type CollectionNode } from "@gm/shared";
+import {
+  COLLECTION_GRAPH_NAME_MAX,
+  MAX_COLLECTION_GRAPHS,
+  type CollectionGraph,
+} from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { AddCollectionGame } from "../components/AddCollectionGame.js";
+import { CollectionGraphView } from "../components/CollectionGraph.js";
 import { CollectionList } from "../components/CollectionList.js";
 import { CollectionTimePanel } from "../components/CollectionTime.js";
 import { MissingGamesBar } from "../components/MissingGamesBar.js";
 import { usePreferences } from "../lib/prefs.js";
 
-const NODE_W = 92;
-const NODE_H = 122;
-
-/** Ring colour for a node's category; unknown/custom keys get a neutral grey. */
-function statusRing(status: string | null): string {
-  if (!status) return "#3f3f46";
-  return BUILTIN_CATEGORIES.find((c) => c.key === status)?.color ?? "#71717a";
-}
-
-interface LocalNode extends CollectionNode {}
-
-type View = "graph" | "list";
-
 export function CollectionDetailPage() {
   const { id } = useParams({ from: "/collection/$id" });
+  const { graph: graphParam } = useSearch({ from: "/collection/$id" });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -36,51 +29,31 @@ export function CollectionDetailPage() {
   // reachable.
   const canPublish = (prefs?.publishMode ?? "manual") !== "never";
 
-  // the list answers "what's 1, 2, 3", which is what people open a collection
-  // for; the graph answers "what branches into what" and is the specialist view
-  const [view, setView] = useState<View>("list");
   /**
-   * The graph opens read-only.
+   * Which view is open: the list, or one of the graphs.
    *
-   * It used to be permanently editable, which meant the only thing clicking a
-   * game could do was drag it — and a stray drag silently PUT a new layout.
-   * Reading a play order is the common case; rearranging one is not.
+   * In the URL rather than in state, like a game page's tab: you leave a graph
+   * by clicking a game on it, and Back should land on the graph you were
+   * reading rather than on the list. No `?graph=` means the list — a numbered
+   * run is what most people open a collection for, and the graphs are the
+   * specialist views, for orders that branch.
    */
-  const [editing, setEditing] = useState(false);
+  function openTab(graphId: string | null) {
+    navigate({
+      to: "/collection/$id",
+      params: { id },
+      search: graphId ? { graph: graphId } : {},
+      replace: true,
+      resetScroll: false,
+    });
+  }
+
   // picking which of the games you don't own to add — see MissingGamesBar
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [nodes, setNodes] = useState<LocalNode[]>([]);
-  const [links, setLinks] = useState<CollectionLink[]>([]);
-  const [connectFrom, setConnectFrom] = useState<string | null>(null);
-  const [connectMode, setConnectMode] = useState(false);
-  const dragRef = useRef<{ gameId: string; offsetX: number; offsetY: number } | null>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
-  const dirtyRef = useRef(false);
-
-  // sync server → local when not mid-edit
-  useEffect(() => {
-    if (collection.data && !dirtyRef.current) {
-      setNodes(collection.data.games);
-      setLinks(collection.data.links);
-    }
-  }, [collection.data]);
-
-  const saveLayout = useMutation({
-    mutationFn: (payload: { nodes: LocalNode[]; links: CollectionLink[] }) =>
-      api.saveCollectionLayout(id, {
-        nodes: payload.nodes.map((n) => ({ gameId: n.gameId, x: n.x, y: n.y })),
-        links: payload.links.map((l) => ({
-          fromGameId: l.fromGameId,
-          toGameId: l.toGameId,
-          label: l.label,
-        })),
-      }),
-    onSuccess: () => {
-      dirtyRef.current = false;
-      queryClient.invalidateQueries({ queryKey: ["collection", id] });
-    },
-  });
+  // held here, not in the graph, so it carries from one graph tab to the next
+  const [showLatest, setShowLatest] = useState(false);
+  const [addingGraph, setAddingGraph] = useState(false);
 
   const setPublic = useMutation({
     mutationFn: (isPublic: boolean) => api.updateCollection(id, { isPublic }),
@@ -88,15 +61,6 @@ export function CollectionDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["collection", id] });
       queryClient.invalidateQueries({ queryKey: ["collections"] });
       queryClient.invalidateQueries({ queryKey: ["public-collections"] });
-    },
-  });
-
-  const removeGame = useMutation({
-    mutationFn: (gameId: string) => api.removeCollectionGame(id, gameId),
-    onSuccess: () => {
-      dirtyRef.current = false;
-      queryClient.invalidateQueries({ queryKey: ["collection", id] });
-      queryClient.invalidateQueries({ queryKey: ["collections"] });
     },
   });
 
@@ -116,84 +80,6 @@ export function CollectionDetailPage() {
     },
   });
 
-  /**
-   * Open a game from the graph: your copy when you own it, otherwise the
-   * game's own catalog page. Same rule the list rows follow.
-   */
-  function openGame(node: LocalNode) {
-    if (node.userGameId) navigate({ to: "/game/$id", params: { id: node.userGameId } });
-    else navigate({ to: "/catalog/$gameId", params: { gameId: node.gameId } });
-  }
-
-  function svgPoint(e: React.PointerEvent): { x: number; y: number } {
-    const svg = svgRef.current!;
-    const rect = svg.getBoundingClientRect();
-    return { x: e.clientX - rect.left + svg.parentElement!.scrollLeft, y: e.clientY - rect.top };
-  }
-
-  function onNodePointerDown(e: React.PointerEvent, node: LocalNode) {
-    // in view mode a click opens the game; onClick handles it
-    if (!editing) return;
-    if (connectMode) {
-      if (!connectFrom) {
-        setConnectFrom(node.gameId);
-      } else if (connectFrom !== node.gameId) {
-        const exists = links.some(
-          (l) => l.fromGameId === connectFrom && l.toGameId === node.gameId,
-        );
-        if (!exists) {
-          const next = [
-            ...links,
-            { id: `local-${Date.now()}`, fromGameId: connectFrom, toGameId: node.gameId, label: null },
-          ];
-          setLinks(next);
-          dirtyRef.current = true;
-          saveLayout.mutate({ nodes, links: next });
-        }
-        setConnectFrom(null);
-      } else {
-        setConnectFrom(null);
-      }
-      return;
-    }
-    const point = svgPoint(e);
-    dragRef.current = { gameId: node.gameId, offsetX: point.x - node.x, offsetY: point.y - node.y };
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-  }
-
-  function onPointerMove(e: React.PointerEvent) {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const point = svgPoint(e);
-    dirtyRef.current = true;
-    setNodes((prev) =>
-      prev.map((n) =>
-        n.gameId === drag.gameId
-          ? {
-              ...n,
-              x: Math.max(0, Math.min(2000, point.x - drag.offsetX)),
-              y: Math.max(0, Math.min(1400, point.y - drag.offsetY)),
-            }
-          : n,
-      ),
-    );
-  }
-
-  function onPointerUp() {
-    if (dragRef.current) {
-      dragRef.current = null;
-      saveLayout.mutate({ nodes, links });
-    }
-  }
-
-  function deleteLink(linkId: string) {
-    if (!confirm("Remove this connection?")) return;
-    const next = links.filter((l) => l.id !== linkId);
-    setLinks(next);
-    dirtyRef.current = true;
-    saveLayout.mutate({ nodes, links: next });
-  }
-
   if (collection.isLoading) {
     return (
       <Shell>
@@ -210,13 +96,18 @@ export function CollectionDetailPage() {
   }
 
   const isOwner = collection.data.isOwner;
-  const inCollection = new Set(nodes.map((n) => n.gameId));
-  const nodeById = new Map(nodes.map((n) => [n.gameId, n]));
-  // someone else's published collection is always read-only, whatever the
-  // graph's edit toggle says
-  const canEdit = isOwner && editing;
-  const canvasW = Math.max(1000, ...nodes.map((n) => n.x + NODE_W + 60));
-  const canvasH = Math.max(560, ...nodes.map((n) => n.y + NODE_H + 60));
+  const games = collection.data.games;
+  const graphs = collection.data.graphs;
+  const inCollection = new Set(games.map((g) => g.gameId));
+  // a `?graph=` that no longer exists (deleted, or a stale link) is the list
+  const activeGraph = graphs.find((g) => g.id === graphParam) ?? null;
+
+  const tabClass = (active: boolean) =>
+    `-mb-px flex-none border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap transition ${
+      active
+        ? "border-indigo-500 text-indigo-300"
+        : "border-transparent text-zinc-500 hover:text-zinc-300"
+    }`;
 
   return (
     <Shell>
@@ -262,41 +153,6 @@ export function CollectionDetailPage() {
                 {collection.data.isPublic ? "★ Published" : "☆ Publish"}
               </button>
             )}
-            {view === "graph" && (
-              <button
-                onClick={() => {
-                  setEditing(!editing);
-                  setConnectMode(false);
-                  setConnectFrom(null);
-                }}
-                className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
-                  editing
-                    ? "border-indigo-500 bg-indigo-600/20 text-indigo-200"
-                    : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-                }`}
-              >
-                {editing ? "✓ Done arranging" : "✎ Arrange"}
-              </button>
-            )}
-            {view === "graph" && editing && (
-              <button
-                onClick={() => {
-                  setConnectMode(!connectMode);
-                  setConnectFrom(null);
-                }}
-                className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
-                  connectMode
-                    ? "border-indigo-500 bg-indigo-600/20 text-indigo-200"
-                    : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-                }`}
-              >
-                {connectMode
-                  ? connectFrom
-                    ? "Now click the game that comes AFTER"
-                    : "Click the game that comes FIRST"
-                  : "🔗 Connect play order"}
-              </button>
-            )}
             <button
               onClick={() => {
                 if (
@@ -326,16 +182,12 @@ export function CollectionDetailPage() {
           likely to have gaps as one you're browsing */}
       <MissingGamesBar
         collectionId={id}
-        games={nodes}
+        games={games}
         selecting={selecting}
         selected={selected}
         onStartSelecting={() => {
-          // the checkboxes live on the list, and dragging nodes around while
-          // choosing games would be two jobs at once
-          setView("list");
-          setEditing(false);
-          setConnectMode(false);
-          setConnectFrom(null);
+          // the checkboxes live on the list — a graph has nothing to tick
+          openTab(null);
           setSelected(new Set());
           setSelecting(true);
         }}
@@ -346,55 +198,104 @@ export function CollectionDetailPage() {
         onSelect={setSelected}
       />
 
-      {/* two ways to look at the same games. The list comes first because a
-          numbered run is what most people open a collection for; the graph is
-          the specialist view, for orders that branch */}
-      <div className="mb-4 flex gap-1 border-b border-zinc-800">
-        {(
-          [
-            { key: "list", label: "List" },
-            { key: "graph", label: "Play order" },
-          ] as Array<{ key: View; label: string }>
-        ).map((v) => (
+      {/* The list, then a tab per graph. The list comes first because a
+          numbered run is what most people open a collection for; each graph is
+          its own arrangement of the same games — play order, timeline,
+          release date — under whatever name you gave it. */}
+      {/* wraps rather than scrolls: a scrolling row clips the active tab's
+          underline where it overlaps this border */}
+      <div className="mb-4 flex flex-wrap items-end gap-1 border-b border-zinc-800">
+        <button onClick={() => openTab(null)} className={tabClass(!activeGraph)}>
+          List
+        </button>
+        {graphs.map((g) => (
           <button
-            key={v.key}
+            key={g.id}
             onClick={() => {
-              setView(v.key);
+              openTab(g.id);
               // the graph has no checkboxes to choose with
-              if (v.key === "graph") {
-                setSelecting(false);
-                setSelected(new Set());
-              }
+              setSelecting(false);
+              setSelected(new Set());
             }}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
-              view === v.key
-                ? "border-indigo-500 text-indigo-300"
-                : "border-transparent text-zinc-500 hover:text-zinc-300"
-            }`}
+            className={tabClass(activeGraph?.id === g.id)}
           >
-            {v.label}
+            {g.name}
           </button>
         ))}
+        {isOwner && (
+          <button
+            onClick={() => setAddingGraph(!addingGraph)}
+            disabled={graphs.length >= MAX_COLLECTION_GRAPHS}
+            aria-expanded={addingGraph}
+            title={
+              graphs.length >= MAX_COLLECTION_GRAPHS
+                ? `A collection can hold up to ${MAX_COLLECTION_GRAPHS} graphs`
+                : "Another arrangement of these games — a timeline, release order, anything"
+            }
+            className="-mb-px flex-none border-b-2 border-transparent px-3 py-2 text-sm font-medium whitespace-nowrap text-zinc-500 hover:text-indigo-300 disabled:opacity-40 disabled:hover:text-zinc-500"
+          >
+            ＋ New graph
+          </button>
+        )}
       </div>
 
-      {/* how long the run is, above both views — it's a fact about the
-          collection, not about the way you're looking at it */}
-      {nodes.length > 0 && <CollectionTimePanel time={collection.data.time} />}
+      {addingGraph && isOwner && (
+        <NewGraphForm
+          collectionId={id}
+          graphs={graphs}
+          // offered as the thing to copy, since it's the one you're looking at
+          current={activeGraph}
+          onCancel={() => setAddingGraph(false)}
+          onCreated={(graphId) => {
+            setAddingGraph(false);
+            setSelecting(false);
+            setSelected(new Set());
+            openTab(graphId);
+          }}
+        />
+      )}
 
-      {nodes.length === 0 ? (
+      {/* how long the run is, above every view — it's a fact about the
+          collection, not about the way you're looking at it */}
+      {games.length > 0 && <CollectionTimePanel time={collection.data.time} />}
+
+      {/* an empty collection still opens its graphs: naming them "Timeline" and
+          "Release date" before the first game goes in is a reasonable order
+          to work in, and the graph draws its own "nothing here yet" */}
+      {games.length === 0 && !activeGraph ? (
         <div className="rounded-2xl border border-dashed border-zinc-700 p-12 text-center">
           <p className="mb-2 text-lg font-semibold">No games yet</p>
           <p className="text-sm text-zinc-400">
             {isOwner
               ? `Use "Add game" above — your library, or anything on IGDB you don't own yet — then
-                 switch to Play order and hit Arrange to draw the path between them.`
+                 open a graph tab and hit Arrange to draw the path between them.`
               : "The author hasn't added any games to this one yet."}
           </p>
         </div>
-      ) : view === "list" ? (
+      ) : activeGraph ? (
+        <CollectionGraphView
+          // one instance per graph: the local layout, the Arrange toggle and a
+          // half-drawn arrow all belong to the graph they were started on
+          key={activeGraph.id}
+          collectionId={id}
+          graph={activeGraph}
+          games={games}
+          isOwner={isOwner}
+          canDelete={graphs.length > 1}
+          showLatest={showLatest}
+          onShowLatest={setShowLatest}
+          onDeleted={() => {
+            // the neighbouring graph, so deleting one doesn't throw you back
+            // to the list
+            const at = graphs.findIndex((g) => g.id === activeGraph.id);
+            const next = graphs[at + 1] ?? graphs[at - 1] ?? null;
+            openTab(next?.id ?? null);
+          }}
+        />
+      ) : (
         <CollectionList
           collectionId={id}
-          games={nodes}
+          games={games}
           accent={collection.data.accentColor ?? "#818cf8"}
           readOnly={!isOwner}
           selecting={selecting}
@@ -408,148 +309,105 @@ export function CollectionDetailPage() {
             })
           }
         />
-      ) : (
-        <div className="overflow-auto rounded-2xl border border-zinc-800 bg-zinc-950">
-          <svg
-            ref={svgRef}
-            width={canvasW}
-            height={canvasH}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            className="block"
-            style={{ touchAction: "none" }}
-          >
-            <defs>
-              <marker
-                id="arrow"
-                viewBox="0 0 10 10"
-                refX="9"
-                refY="5"
-                markerWidth="7"
-                markerHeight="7"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#818cf8" />
-              </marker>
-            </defs>
-
-            {/* edges */}
-            {links.map((link) => {
-              const from = nodeById.get(link.fromGameId);
-              const to = nodeById.get(link.toGameId);
-              if (!from || !to) return null;
-              const x1 = from.x + NODE_W / 2;
-              const y1 = from.y + NODE_H / 2;
-              const x2 = to.x + NODE_W / 2;
-              const y2 = to.y + NODE_H / 2;
-              return (
-                <g
-                  key={link.id}
-                  // only a hit target while arranging — otherwise brushing an
-                  // arrow on the way to a game would offer to delete it
-                  onClick={canEdit ? () => deleteLink(link.id) : undefined}
-                  className={canEdit ? "cursor-pointer" : undefined}
-                >
-                  {canEdit && (
-                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={14} />
-                  )}
-                  <line
-                    x1={x1}
-                    y1={y1}
-                    x2={x2}
-                    y2={y2}
-                    stroke="#818cf8"
-                    strokeWidth={2}
-                    markerEnd="url(#arrow)"
-                    opacity={0.8}
-                  />
-                </g>
-              );
-            })}
-
-            {/* nodes */}
-            {nodes.map((node) => (
-              <g
-                key={node.gameId}
-                transform={`translate(${node.x}, ${node.y})`}
-                onPointerDown={(e) => onNodePointerDown(e, node)}
-                // reading the graph, a click opens the game — your copy if you
-                // own it, the add search if you don't
-                onClick={canEdit ? undefined : () => openGame(node)}
-                role={canEdit ? undefined : "link"}
-                className={
-                  canEdit ? (connectMode ? "cursor-crosshair" : "cursor-grab") : "cursor-pointer"
-                }
-              >
-                <rect
-                  width={NODE_W}
-                  height={NODE_H}
-                  rx={8}
-                  fill="#18181b"
-                  stroke={
-                    connectFrom === node.gameId ? "#818cf8" : statusRing(node.status)
-                  }
-                  strokeWidth={connectFrom === node.gameId ? 3 : 2}
-                />
-                {node.coverSrc && (
-                  <image
-                    href={node.coverSrc}
-                    x={4}
-                    y={4}
-                    width={NODE_W - 8}
-                    height={NODE_H - 26}
-                    preserveAspectRatio="xMidYMid slice"
-                    clipPath="inset(0 round 5px)"
-                    style={{ pointerEvents: "none" }}
-                  />
-                )}
-                <text
-                  x={NODE_W / 2}
-                  y={NODE_H - 8}
-                  textAnchor="middle"
-                  fill="#d4d4d8"
-                  fontSize={9}
-                  style={{ pointerEvents: "none" }}
-                >
-                  {node.title.length > 16 ? `${node.title.slice(0, 15)}…` : node.title}
-                </text>
-                {/* a game you don't own — clicking opens it anyway */}
-                {!node.userGameId && (
-                  <circle cx={10} cy={10} r={5} fill="#3f3f46" style={{ pointerEvents: "none" }}>
-                    <title>Not in your library</title>
-                  </circle>
-                )}
-                {canEdit && (
-                  <g
-                    transform={`translate(${NODE_W - 16}, 4)`}
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      if (confirm(`Remove "${node.title}" from this collection?`))
-                        removeGame.mutate(node.gameId);
-                    }}
-                    className="cursor-pointer"
-                  >
-                    <rect width={12} height={12} rx={3} fill="#3f3f46" />
-                    <text x={6} y={9.5} textAnchor="middle" fill="#d4d4d8" fontSize={9}>
-                      ×
-                    </text>
-                  </g>
-                )}
-              </g>
-            ))}
-          </svg>
-        </div>
-      )}
-
-      {view === "graph" && nodes.length > 0 && (
-        <p className="mt-3 text-xs text-zinc-500">
-          {canEdit
-            ? `Drag boxes to arrange · "Connect play order" then click two games to draw an arrow ·
-               click an arrow to remove it · ring color = your status`
-            : "Click a game to open it · ring color = your status" +
-              (isOwner ? ' · "Arrange" to move things around' : "")}
-        </p>
       )}
     </Shell>
+  );
+}
+
+/**
+ * Name a new graph, and say what it starts as.
+ *
+ * "A fresh layout" is the default because it's the predictable one: every
+ * game on a grid in list order, no arrows. Copying another graph brings its
+ * layout *and* its arrows, which is the faster start when the new one is
+ * mostly the old one — a timeline that only moves the prequels.
+ */
+function NewGraphForm({
+  collectionId,
+  graphs,
+  current,
+  onCancel,
+  onCreated,
+}: {
+  collectionId: string;
+  graphs: CollectionGraph[];
+  current: CollectionGraph | null;
+  onCancel: () => void;
+  onCreated: (graphId: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [copyFrom, setCopyFrom] = useState("");
+
+  const create = useMutation({
+    mutationFn: () =>
+      api.createCollectionGraph(collectionId, {
+        name: name.trim(),
+        ...(copyFrom ? { copyFromGraphId: copyFrom } : {}),
+      }),
+    onSuccess: async (created) => {
+      // wait for the collection to come back with the new graph in it before
+      // switching — a tab pointing at a graph the page hasn't heard of yet
+      // would read as "no such graph" and fall back to the list
+      await queryClient.invalidateQueries({ queryKey: ["collection", collectionId] });
+      onCreated(created.id);
+    },
+  });
+
+  // the graph you're on first, since it's the likeliest one to want a copy of
+  const sources = current ? [current, ...graphs.filter((g) => g.id !== current.id)] : graphs;
+
+  return (
+    <form
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        if (name.trim()) create.mutate();
+      }}
+      className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900 p-4"
+    >
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex min-w-48 flex-1 flex-col gap-1 text-xs text-zinc-500">
+          Name
+          <input
+            autoFocus
+            value={name}
+            onChange={(ev) => setName(ev.target.value)}
+            maxLength={COLLECTION_GRAPH_NAME_MAX}
+            placeholder="Timeline, Release date…"
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-zinc-500">
+          Start from
+          <select
+            value={copyFrom}
+            onChange={(ev) => setCopyFrom(ev.target.value)}
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+          >
+            <option value="">A fresh layout</option>
+            {sources.map((g) => (
+              <option key={g.id} value={g.id}>
+                A copy of “{g.name}”
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="submit"
+          disabled={!name.trim() || create.isPending}
+          className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-semibold hover:bg-indigo-500 disabled:opacity-50"
+        >
+          {create.isPending ? "Creating…" : "Create graph"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800"
+        >
+          Cancel
+        </button>
+      </div>
+      {create.isError && <p className="mt-2 text-sm text-red-400">{create.error.message}</p>}
+    </form>
   );
 }

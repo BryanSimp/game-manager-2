@@ -98,6 +98,20 @@ export function formatHours(seconds: number | null): string | null {
   return `${Math.round(hours * 2) / 2}h`;
 }
 
+/** seconds → the hours string an hours field shows, e.g. 5400 → "1.5" */
+export function toHours(seconds: number | null, decimals = 1): string {
+  if (!seconds) return "";
+  const scale = 10 ** decimals;
+  return String(Math.round((seconds / 3600) * scale) / scale);
+}
+
+/** "" clears the figure; anything unparseable is treated as cleared too. */
+export function toSeconds(hours: string): number | null {
+  const value = Number(hours.trim());
+  if (!hours.trim() || Number.isNaN(value) || value <= 0) return null;
+  return Math.round(value * 3600);
+}
+
 /** Light title cleanup for pasted lists (full OCR noise filter arrives in Phase 3). */
 export function cleanTitle(raw: string): string {
   return raw

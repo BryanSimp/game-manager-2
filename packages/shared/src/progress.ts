@@ -22,6 +22,7 @@ export const PROGRESS_BASIS_LABELS: Record<ProgressBasis, string> = {
   main: "Main story",
   main_extra: "Main + extras",
   completionist: "Completionist",
+  custom: "Custom time",
 };
 
 /**
@@ -46,7 +47,20 @@ export function normalizeTtb(ttb: TtbTriple): TtbTriple {
   return { ttbMain: known[0]!, ttbMainExtra: known[1]!, ttbCompletionist: known[2]! };
 }
 
-export function ttbForBasis(ttb: TtbTriple, basis: ProgressBasis): number | null {
+/**
+ * The length an estimate divides up, for the basis a game is set to.
+ *
+ * `custom` reads the figure you typed and nothing else: it deliberately does
+ * *not* fall back to the main story when it's blank, because "custom, but I
+ * haven't said what" quietly showing IGDB's number would look like the custom
+ * time had been saved as that.
+ */
+export function ttbForBasis(
+  ttb: TtbTriple,
+  basis: ProgressBasis,
+  customSeconds?: number | null,
+): number | null {
+  if (basis === "custom") return customSeconds && customSeconds > 0 ? customSeconds : null;
   if (basis === "completionist") return ttb.ttbCompletionist ?? ttb.ttbMainExtra ?? ttb.ttbMain;
   if (basis === "main_extra") return ttb.ttbMainExtra ?? ttb.ttbMain;
   return ttb.ttbMain;

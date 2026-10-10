@@ -252,6 +252,54 @@ Phase 0–8 roadmap — read it before making design decisions.
   sessions are same-origin HTTP-only cookies and a second origin for the API
   would mean they were never sent. `docker-compose.prod.yml` stays what it
   was: the gamesmanager.app deployment, pulling private images.
+- **A collection has as many graphs as you name** (`collection_graphs`,
+  `collection_graph_nodes`, migration 0028). A collection used to *be* its
+  graph — two position columns on `collection_games` and a pile of links —
+  but the order you play a series in and the order its story happens in are
+  both worth drawing, and they disagree. A graph is its own row now: a name,
+  a node position per game, and its own arrows (`collection_links.graph_id`).
+  **Every graph covers every game in the collection** — they're different
+  views of one list, not different lists — so a game joining the collection
+  is placed on all of them (`placeOnGraphs`) and one leaving comes off all of
+  them. Positions are written eagerly rather than filled in lazily on read,
+  which is what keeps the old promise that reordering the flat list can't
+  move a node. **Every collection has at least one graph**: create makes
+  "Play order" in the same transaction, adopt copies them all, the migration
+  backfilled one per collection with its layout intact, and `DELETE` refuses
+  the last (409) — so both apps can draw a graph tab without first asking
+  whether anything is behind it. Names are unique per collection
+  (case-insensitively in the route, exactly in the index), capped at
+  `MAX_COLLECTION_GRAPHS`, and — being tabs on something publishable — go
+  through `content-filter.ts` on write and again in the publish re-scan.
+- **A graph node knows its game's other versions** (`services/game-versions.ts`,
+  with the graph walk in `services/version-family.ts`). "Resident Evil 4" is
+  at least two games and a graph draws one node, so each game on
+  `GET /api/collections/:id` carries `versions` — its original, its remakes
+  and remasters — and `latestVersionId`. They come from the `remake` links
+  *the asker* made on the Linked tab, never the author's and never the
+  catalog's, for the same reason links are per-user at all. The family is
+  everything connected by remake links in either direction, so two remasters
+  of one original find each other as `sibling`s with no link between them.
+  **"Latest" starts from the links, not the dates**: a version nothing
+  remakes is the end of its line, and those are the only candidates — an
+  undated remaster is still newer than what it remasters, because you said
+  so. Dates only break ties between ends, and a game that is itself an end
+  is only displaced by another end with a *known, later* date; without that
+  rule IGDB missing one date swaps a 2021 remaster for the 2011 one beside
+  it. `pnpm --filter @gm/api check:versions` runs 14 cases, no DB needed.
+- **The estimate can divide a time you typed** (`progress_basis = 'custom'`,
+  `user_games.progress_custom_seconds`, migration 0028). The three bases all
+  pick a figure the game already has, so a game with no play time anywhere
+  had three ways to say "unknown". The custom figure lives on `user_games`
+  and deliberately **not** in `user_time_to_beat`: that table is what you
+  say a game *took*, and it feeds the community average — this is a target,
+  and "I only want the first act" must not become anyone else's play time.
+  `ttbForBasis(ttb, basis, customSeconds)` is the one place the basis turns
+  into seconds, so the Progress tab, the library card and collection totals
+  all follow it; a custom basis with nothing typed is `null`, **not** a
+  fallback to the main story, or the blank field would look like it had been
+  saved as IGDB's number. The figure is kept when you switch basis, so
+  switching back doesn't mean typing it again.
 
 ## Commands
 
@@ -336,6 +384,8 @@ was dev-only). Never use `db push`.
 | 25 publish once, and games that know their DLC | see git log | **Publishing became a preference** (migration 0026): `publish_mode` is `manual`/`never`/`always`, applied by `POST /api/collections` and both checklist-create routes, with a Sharing panel on Preferences. `never` is enforced by the API (403 on a publish PATCH) as well as hidden in both apps; adopted copies stay private under every mode, and switching modes is never retroactive. **Games link to other games** (`user_game_links`): per-user `dlc`/`remaster`/`remake` links with `GET`/`POST`/`DELETE /api/games/:gameId/links`, stored one direction and flipped by a `direction` flag on the way in so a pair can't exist twice swapped (the inverse is a 409, a self-link a 400, a repeat an idempotent 200). Web gets `RelatedGames` on the game page — a "Link a game" button, a library-first/IGDB-underneath search, and the relation picked as a sentence ("… is DLC for this game") rather than a kind plus a direction toggle; sections appear as links are made, so a game with no DLC shows no empty shelf. Mobile shows the links read-only and can open either end. The library grid is deliberately untouched: a linked DLC keeps its own card |
 
 | 26 the Linked tab, and collections that fill your gaps | see git log | **Four link types, one row each** (migration 0027): DLC, Prequel, Sequel and Remake/Remaster, stored as three kinds (`dlc`, `sequel`, `remake` — `remaster` folded in) and read as six *roles* depending on which end you stand on (`GAME_LINK_ROLE_META`), so a prequel added on one game is the sequel on the other with nothing stored twice. `POST /api/games/:gameId/links` takes `{ role }`; one link per pair, and any other link between the two is a 409 naming the section. **A Linked tab** on `/game/$id` *and* `/catalog/$gameId`, so a DLC you don't own still says what it's DLC for: an "＋ Add a link ▾" type menu, a picker that links as many games as you like and marks ones already filed, and a section per role in **release-date or custom order** — remembered per section (`user_game_link_sorts`) and hand-set per end (`base_position`/`related_position`; `PUT /links/order`, `PUT /links/sort`). The old inline Related games block became a "🔗 N linked games ▾" dropdown under the title, and the game page's tab moved into the URL (`?tab=`) so Back returns to it. **Collections fill your gaps**: `add-to-library` takes `gameIds`, and `MissingGamesBar` offers add-all to Wishlist, Backlog or any other category, or *Choose games* checkboxes for some of them; mobile gets a one-sheet equivalent and reads the new link sections. The demo rebuild now clears links and link sorts too — it never had |
+
+| 27 graphs you name, versions on the graph, a time you type | see git log | **A collection holds several graphs** (migration 0028): `collection_graphs` + `collection_graph_nodes`, with `collection_links` gaining `graph_id` and `collection_games` losing `position_x/y` — backfilled so every collection keeps its one graph, as "Play order", exactly as it was laid out. `POST`/`PATCH`/`DELETE /api/collections/:id/graphs[/:graphId]` create (fresh grid, or `copyFromGraphId` for another graph's layout and arrows), rename and delete; `PUT …/graphs/:graphId/layout` replaced `PUT /:id/layout` and only touches its own graph. Web: a tab per graph beside **List**, a "＋ New graph" form, and the graph's own toolbar (`CollectionGraph.tsx`, lifted out of the page) — Arrange and Connect moved there from the page header, joined by Rename and Delete graph. The open tab is in the URL (`?graph=`), so Back from a game returns to the graph you clicked it on. Mobile picks which graph to flatten from a chip row. **Graphs show remakes and remasters**: a node whose game has linked versions wears a numbered badge; hovering it (or clicking the badge, which pins it) opens a card of the original, remakes and other versions, each a link; **Show latest versions** swaps every such node for the newest version you've linked. **A custom time for the estimate**: a fourth "based on" choice on the Progress tab with an hours field, for games with no play time and for playthroughs none of the three describe |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
@@ -459,24 +509,81 @@ file to be provided for reference).
   prune of old `activity` events (funnel events should stay) is the upgrade path.
 - Barcode scan flow verified end-to-end at the API level (real BOTW/GoW barcodes) but
   the camera screen itself needs an on-device Expo Go run — simulators have no camera.
-- Play-order graph *editing* is web-only; mobile flattens the graph to an ordered list.
-- **The graph opens read-only** (phase 16). It used to be permanently
+- Graph *editing* is web-only — arranging, connecting, and making, renaming or
+  deleting a graph. Mobile flattens one graph to an ordered list and offers a
+  chip per graph once there's more than one to choose from.
+- **A graph opens read-only** (phase 16). It used to be permanently
   editable, which meant the only thing clicking a game could do was drag it —
   and a stray drag silently PUT a new layout. A click now opens the game (your
-  copy if you own it, `/add?q=<title>` if you don't, the same rule the list
+  copy if you own it, its catalog page if you don't, the same rule the list
   rows follow); "Arrange" turns dragging, connecting and arrow-deletion back
   on. Someone else's published collection has no Arrange at all. The **List**
   tab is first and default: a numbered run is what most people open a
   collection for.
-- **A collection has two views, and two orderings to match.** The graph answers
-  "what branches into what" (`position_x/y` + `collection_links`); the list
-  answers "what's 1, 2, 3" (`collection_games.sort_order`, migration 0016).
-  They're deliberately independent — `PUT /:id/layout` only writes positions
-  and links, `PUT /:id/order` only writes `sort_order` — so rearranging the
-  graph can't scramble a numbered run you set by hand. Migration 0016
-  backfills `sort_order` from the existing layout (top-to-bottom,
-  left-to-right) so "Custom order" doesn't open as a jumble on collections
-  that already had a deliberate arrangement.
+- **A collection has a list and any number of graphs, and an ordering for
+  each.** A graph answers "what branches into what" (`collection_graph_nodes`
+  + `collection_links`, per graph); the list answers "what's 1, 2, 3"
+  (`collection_games.sort_order`, migration 0016). They're deliberately
+  independent — `PUT …/graphs/:graphId/layout` only writes that graph's
+  positions and links, `PUT /:id/order` only writes `sort_order` — so
+  rearranging one graph can't scramble another, or a numbered run you set by
+  hand. Migration 0016 backfilled `sort_order` from the layout of the day
+  (top-to-bottom, left-to-right) so "Custom order" didn't open as a jumble.
+- **A new graph starts as a grid in list order, or as a copy.** That's the
+  one moment the list order reaches a graph: `POST …/graphs` lays the games
+  out by `sort_order` when it isn't given a `copyFromGraphId`. After that the
+  two never talk. A copy brings the source's arrows as well as its layout,
+  which is the point — a timeline is usually the play order with the prequels
+  moved — but it does mean a "Release date" graph copied from "Play order"
+  starts with arrows you may want to redraw.
+- **Graph tabs can't be reordered.** They sit in creation order
+  (`collection_graphs.position`, which is written but has no endpoint to
+  change it). Renaming is the workaround; a `PUT …/graphs/order` taking the
+  ids, like the list's, is the obvious next step.
+- **A game added to a collection lands on every graph at the same grid slot**
+  (`gridSlot(n)`, n being how many games the collection held). That slot can
+  sit on top of a node you've dragged — it always could, with one graph — and
+  now it can on each graph separately. Nothing looks for free space.
+- **"Show latest versions" is a way of looking, not an edit.** It swaps what
+  a node *draws* and where a click on it goes; the collection still holds the
+  game it held, the list tab still shows that game, and the time totals are
+  still that game's. It's paused while arranging, because Arrange edits the
+  collection's real games and a ✕ that removes the 2005 original shouldn't be
+  sitting on a picture of the 2023 remake. And a node is **not** swapped when
+  the newer version has a node of its own on the graph: a collection that
+  lists both wants both shown, not the remake twice. The toggle is page
+  state — it survives switching graph tabs, not a reload.
+- **Versions on a graph are the viewer's own links.** On someone else's
+  published collection you see the remakes *you* have linked, and none of the
+  author's — a brand-new account sees no badges at all. That's the price of
+  links being per-user (see `user_game_links`); seeding them from IGDB's
+  `remakes`/`remasters` would fix the empty first impression and is the same
+  follow-up already noted for the Linked tab.
+- **Versions show on graphs only.** The list view, the collection cards and
+  mobile don't draw them; `versions`/`latestVersionId` are on every game in
+  the payload if one of them wants to.
+- **The versions card needs a pointer, or a click on the badge.** Hover opens
+  it; clicking the numbered badge pins it open (Escape or a click elsewhere
+  closes it), which is the only way in on a touch screen. The nodes are SVG
+  groups and aren't in the tab order, so there's no keyboard route to it —
+  the same is true of opening a game from a graph at all.
+- **A custom estimate time is per game, and private.** It never reaches
+  `user_time_to_beat`, the community average, or the "How long to beat" card,
+  which still shows the game's real figures. It *does* reach collection
+  totals: a game on the custom basis contributes the time you typed to every
+  collection it's in, for you. The dashboard's backlog total is unaffected,
+  but only because it has always summed the main-story figure and ignored the
+  basis entirely.
+- **Custom time is set on the web.** Mobile has no basis picker at all (it
+  never did), so it can't choose the custom basis or enter a time — but its
+  read-only estimate comes from the same API and follows whatever the web
+  set.
+- **`progress_basis` is still a pg enum**, unlike `user_games.status`, so
+  `custom` was an `ALTER TYPE … ADD VALUE`. Postgres allows that inside the
+  migrator's transaction but won't let the same transaction *use* the new
+  value — which is why migration 0028 adds it and touches nothing with it. A
+  future migration that needs to write a new enum value has to be a separate
+  migrate run, or the column should become text first.
 - The list's other sorts (title, release date, time to beat) are derived, and
   games missing the field sink to the bottom rather than sorting as zero —
   an unknown release date isn't "the year 0". Reordering is only offered on
@@ -522,7 +629,8 @@ file to be provided for reference).
   result line says how many were added and how many were already yours.
 - **Collections publish and adopt like checklists do** (migration 0015:
   `collections.is_public`, `adopted_from_id`). Adopting takes a **deep copy** —
-  games, node positions and play-order links — not a live reference: your edits
+  games, every graph with its name, node positions and arrows — not a live
+  reference: your edits
   mustn't reach the original, and the author rearranging their order mustn't
   rearrange a marathon you're halfway through. A copy starts private (
   publishing someone else's list is their call) and gets `(2)`, `(3)`… appended

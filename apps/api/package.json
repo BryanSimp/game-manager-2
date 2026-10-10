@@ -13,7 +13,8 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:seed-demo": "tsx scripts/seed-demo.ts",
     "check:titles": "tsx scripts/check-product-titles.ts",
-    "check:content": "tsx scripts/check-content-filter.ts"
+    "check:content": "tsx scripts/check-content-filter.ts",
+    "check:versions": "tsx scripts/check-version-family.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

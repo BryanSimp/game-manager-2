@@ -39,6 +39,7 @@ import type {
   CollectionDetail,
   CollectionLayoutInput,
   CollectionListImport,
+  CreateCollectionGraphInput,
   CollectionSummary,
   GameLinkOrderInput,
   GameLinkSortInput,
@@ -511,8 +512,44 @@ export class ApiClient {
     return this.request(`/api/collections/${id}/games/${gameId}`, { method: "DELETE" });
   }
 
-  saveCollectionLayout(id: string, layout: CollectionLayoutInput): Promise<{ ok: true }> {
-    return this.request(`/api/collections/${id}/layout`, {
+  /**
+   * Add a graph to a collection — a second arrangement of the same games,
+   * under its own name. Pass `copyFromGraphId` to start from another graph's
+   * layout and arrows rather than a fresh grid.
+   */
+  createCollectionGraph(
+    id: string,
+    input: CreateCollectionGraphInput,
+  ): Promise<{ id: string; name: string }> {
+    return this.request(`/api/collections/${id}/graphs`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  renameCollectionGraph(
+    id: string,
+    graphId: string,
+    name: string,
+  ): Promise<{ id: string; name: string }> {
+    return this.request(`/api/collections/${id}/graphs/${graphId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  /** Delete a graph. Refused for a collection's last one. */
+  deleteCollectionGraph(id: string, graphId: string): Promise<{ ok: true }> {
+    return this.request(`/api/collections/${id}/graphs/${graphId}`, { method: "DELETE" });
+  }
+
+  /** Save one graph's node positions and arrows. Other graphs are untouched. */
+  saveCollectionLayout(
+    id: string,
+    graphId: string,
+    layout: CollectionLayoutInput,
+  ): Promise<{ ok: true }> {
+    return this.request(`/api/collections/${id}/graphs/${graphId}/layout`, {
       method: "PUT",
       body: JSON.stringify(layout),
     });
