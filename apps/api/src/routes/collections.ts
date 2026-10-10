@@ -3,6 +3,7 @@ import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   COLLECTION_GRAPH_NAME_MAX,
+  COLLECTION_NAME_MAX,
   DEFAULT_COLLECTION_GRAPH_NAME,
   MAX_COLLECTION_GRAPHS,
   OWNERSHIP_FORMATS,
@@ -62,7 +63,14 @@ type ListImportResult = {
 };
 
 const collectionSchema = z.object({
-  name: z.string().min(1).max(100),
+  // Trimmed before it's measured: PATCH writes this straight to the row, so
+  // without it a rename to "   " was a collection with a blank title, and
+  // "Zelda " sat beside "Zelda" as a different name.
+  name: z
+    .string()
+    .trim()
+    .min(1, "Give the collection a name")
+    .max(COLLECTION_NAME_MAX, `Keep the name to ${COLLECTION_NAME_MAX} characters or fewer`),
   description: z.string().max(2000).nullable().optional(),
   accentColor: z
     .string()

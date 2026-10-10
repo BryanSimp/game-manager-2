@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BUILTIN_CATEGORIES,
+  COLLECTION_NAME_MAX,
   DEFAULT_COLLECTION_GRAPH_NAME,
   type AddCollectionGameInput,
   type CollectionGraph,
@@ -138,6 +139,8 @@ export default function CollectionDetailScreen() {
   const [sort, setSort] = useState<ListSort>("custom");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CollectionNode[] | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
   const badgeOpacity = useBadgeOpacity();
   // unknown means the preferences are still loading — show the control rather
   // than flicker it away and back
@@ -174,6 +177,15 @@ export default function CollectionDetailScreen() {
       invalidate();
     },
   });
+  const rename = useMutation({
+    mutationFn: (name: string) => api.updateCollection(id, { name }),
+    onSuccess: () => {
+      setRenaming(false);
+      invalidate();
+      // a published collection is listed by name on the browse tab too
+      queryClient.invalidateQueries({ queryKey: ["public-collections"] });
+    },
+  });
 
   function move(index: number, delta: number) {
     setDraft((prev) => {
@@ -208,14 +220,69 @@ export default function CollectionDetailScreen() {
         ? draft
         : sortNodes(detail.games, sort);
 
+  function submitRename() {
+    const name = draftName.trim();
+    // blank or unchanged is "never mind", not an error
+    if (!name || name === detail.name) setRenaming(false);
+    else rename.mutate(name);
+  }
+
   return (
     <Screen>
+      {/* the collection's own name in the header, where this screen used to
+          say "Collection" — which is also what makes a rename visible here */}
+      <Stack.Screen options={{ title: detail.name }} />
       <FlatList
         data={rows}
         keyExtractor={(g) => g.gameId}
+        // so Save registers on the first tap while the keyboard is up
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ padding: space.md, paddingBottom: 96 + insets.bottom }}
         ListHeaderComponent={
           <View style={{ marginBottom: space.sm, gap: space.sm }}>
+            {/* Inline at the top of the list rather than in a bottom sheet: a
+                sheet this short sits entirely under the keyboard, and you'd
+                be typing a name you couldn't see. */}
+            {renaming && (
+              <>
+                <View style={styles.headerRow}>
+                  <Field
+                    style={{ flex: 1 }}
+                    value={draftName}
+                    onChangeText={(text) => {
+                      setDraftName(text);
+                      rename.reset();
+                    }}
+                    autoFocus
+                    // most renames replace the whole name
+                    selectTextOnFocus
+                    maxLength={COLLECTION_NAME_MAX}
+                    placeholder="Collection name"
+                    accessibilityLabel="Collection name"
+                    returnKeyType="done"
+                    onSubmitEditing={submitRename}
+                  />
+                  <Button
+                    label="Save"
+                    busy={rename.isPending}
+                    disabled={!draftName.trim()}
+                    onPress={submitRename}
+                    style={styles.headerBtn}
+                  />
+                  <IconButton
+                    name="close"
+                    accessibilityLabel="Cancel renaming"
+                    onPress={() => setRenaming(false)}
+                  />
+                </View>
+                {rename.isError && (
+                  <Text style={[type.caption, { color: colors.danger }]}>
+                    {rename.error instanceof Error ? rename.error.message : "Couldn't rename it"}
+                  </Text>
+                )}
+              </>
+            )}
+
             {detail.description ? <Text style={type.prose}>{detail.description}</Text> : null}
 
             <CollectionTimeLine time={detail.time} />
@@ -248,6 +315,19 @@ export default function CollectionDetailScreen() {
                   tone={detail.isPublic ? "primary" : "ghost"}
                   busy={setPublic.isPending}
                   onPress={() => setPublic.mutate(!detail.isPublic)}
+                  style={styles.headerBtn}
+                />
+              )}
+              {detail.isOwner && !renaming && (
+                <Button
+                  label="Rename"
+                  icon="create-outline"
+                  tone="ghost"
+                  onPress={() => {
+                    setDraftName(detail.name);
+                    rename.reset();
+                    setRenaming(true);
+                  }}
                   style={styles.headerBtn}
                 />
               )}

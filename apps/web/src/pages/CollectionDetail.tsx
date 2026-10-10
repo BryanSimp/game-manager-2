@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   COLLECTION_GRAPH_NAME_MAX,
+  COLLECTION_NAME_MAX,
   MAX_COLLECTION_GRAPHS,
   type CollectionGraph,
 } from "@gm/shared";
@@ -54,6 +55,20 @@ export function CollectionDetailPage() {
   // held here, not in the graph, so it carries from one graph tab to the next
   const [showLatest, setShowLatest] = useState(false);
   const [addingGraph, setAddingGraph] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+
+  const rename = useMutation({
+    mutationFn: (name: string) => api.updateCollection(id, { name }),
+    onSuccess: () => {
+      setRenaming(false);
+      // the name is quoted on your collection cards, in every game's
+      // add-to-collection picker and — once published — on the browse list
+      queryClient.invalidateQueries({ queryKey: ["collection", id] });
+      queryClient.invalidateQueries({ queryKey: ["collections"] });
+      queryClient.invalidateQueries({ queryKey: ["public-collections"] });
+    },
+  });
 
   const setPublic = useMutation({
     mutationFn: (isPublic: boolean) => api.updateCollection(id, { isPublic }),
@@ -112,25 +127,87 @@ export function CollectionDetailPage() {
   return (
     <Shell>
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <h1 className="mr-auto flex items-center gap-2 text-xl font-bold">
-          {collection.data.isPublic && (
-            <span className="text-amber-400" title="Published — anyone can browse and copy this">
-              ★
-            </span>
-          )}
-          {collection.data.name}
-          {collection.data.adoptedFromId && (
-            <span
-              className="rounded-full border border-zinc-700 px-2 py-0.5 text-xs font-normal text-zinc-500"
-              title="Your own copy — edits here don't affect the original"
+        {renaming ? (
+          // the title becomes its own field, in place — the same rename a
+          // graph gets in its toolbar, so the two read as one gesture
+          <form
+            className="mr-auto flex flex-wrap items-center gap-2"
+            onSubmit={(ev) => {
+              ev.preventDefault();
+              const name = draftName.trim();
+              // blank or unchanged is "never mind", not an error
+              if (!name || name === collection.data!.name) setRenaming(false);
+              else rename.mutate(name);
+            }}
+          >
+            <input
+              autoFocus
+              value={draftName}
+              onChange={(ev) => setDraftName(ev.target.value)}
+              // most renames replace the whole name, so start with it selected
+              onFocus={(ev) => ev.target.select()}
+              onKeyDown={(ev) => {
+                if (ev.key === "Escape") setRenaming(false);
+              }}
+              maxLength={COLLECTION_NAME_MAX}
+              aria-label="Collection name"
+              className="w-80 max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-lg font-semibold outline-none focus:border-indigo-500"
+            />
+            <button
+              type="submit"
+              disabled={rename.isPending}
+              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold hover:bg-indigo-500 disabled:opacity-50"
             >
-              copied
-            </span>
-          )}
-          {!isOwner && collection.data.authorName && (
-            <span className="text-sm font-normal text-zinc-500">by {collection.data.authorName}</span>
-          )}
-        </h1>
+              {rename.isPending ? "Saving…" : "Save"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setRenaming(false)}
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <h1 className="mr-auto flex items-center gap-2 text-xl font-bold">
+            {collection.data.isPublic && (
+              <span className="text-amber-400" title="Published — anyone can browse and copy this">
+                ★
+              </span>
+            )}
+            {collection.data.name}
+            {/* beside the name rather than among the buttons on the right:
+                a graph has a Rename of its own down there, and this one has
+                to be unmistakably the collection's */}
+            {isOwner && (
+              <button
+                onClick={() => {
+                  setDraftName(collection.data!.name);
+                  rename.reset();
+                  setRenaming(true);
+                }}
+                aria-label="Rename collection"
+                title="Rename collection"
+                className="rounded-md px-1.5 py-0.5 text-base font-normal text-zinc-500 hover:bg-zinc-800 hover:text-indigo-300"
+              >
+                ✎
+              </button>
+            )}
+            {collection.data.adoptedFromId && (
+              <span
+                className="rounded-full border border-zinc-700 px-2 py-0.5 text-xs font-normal text-zinc-500"
+                title="Your own copy — edits here don't affect the original"
+              >
+                copied
+              </span>
+            )}
+            {!isOwner && collection.data.authorName && (
+              <span className="text-sm font-normal text-zinc-500">
+                by {collection.data.authorName}
+              </span>
+            )}
+          </h1>
+        )}
 
         {isOwner ? (
           <>
@@ -176,6 +253,12 @@ export function CollectionDetailPage() {
           </button>
         )}
       </div>
+
+      {/* a name you already use, or one the content filter won't take — the
+          field stays open above so it can be fixed rather than retyped */}
+      {renaming && rename.isError && (
+        <p className="-mt-2 mb-4 text-sm text-red-400">{rename.error.message}</p>
+      )}
 
       {/* games in here you haven't got: add all of them, or pick some. Yours
           or someone else's collection alike — a reading list you made is as

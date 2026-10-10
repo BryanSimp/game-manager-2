@@ -102,6 +102,9 @@ export type ProgressBasis = (typeof PROGRESS_BASES)[number];
 /** The longest custom length accepted: 10,000 hours, in seconds. */
 export const MAX_CUSTOM_PROGRESS_SECONDS = 36_000_000;
 
+/** The longest name a collection can have — one number for the API and both apps' fields. */
+export const COLLECTION_NAME_MAX = 100;
+
 /** What a collection's first graph is called until you rename it. */
 export const DEFAULT_COLLECTION_GRAPH_NAME = "Play order";
 /** How many graphs one collection can hold — they're tabs, and a row of tabs has an end. */

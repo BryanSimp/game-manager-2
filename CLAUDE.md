@@ -387,6 +387,8 @@ was dev-only). Never use `db push`.
 
 | 27 graphs you name, versions on the graph, a time you type | see git log | **A collection holds several graphs** (migration 0028): `collection_graphs` + `collection_graph_nodes`, with `collection_links` gaining `graph_id` and `collection_games` losing `position_x/y` — backfilled so every collection keeps its one graph, as "Play order", exactly as it was laid out. `POST`/`PATCH`/`DELETE /api/collections/:id/graphs[/:graphId]` create (fresh grid, or `copyFromGraphId` for another graph's layout and arrows), rename and delete; `PUT …/graphs/:graphId/layout` replaced `PUT /:id/layout` and only touches its own graph. Web: a tab per graph beside **List**, a "＋ New graph" form, and the graph's own toolbar (`CollectionGraph.tsx`, lifted out of the page) — Arrange and Connect moved there from the page header, joined by Rename and Delete graph. The open tab is in the URL (`?graph=`), so Back from a game returns to the graph you clicked it on. Mobile picks which graph to flatten from a chip row. **Graphs show remakes and remasters**: a node whose game has linked versions wears a numbered badge; hovering it (or clicking the badge, which pins it) opens a card of the original, remakes and other versions, each a link; **Show latest versions** swaps every such node for the newest version you've linked. **A custom time for the estimate**: a fourth "based on" choice on the Progress tab with an hours field, for games with no play time and for playthroughs none of the three describe |
 
+| 27b rename a collection | see git log | **A collection can be renamed.** `PATCH /api/collections/:id` always took a `name`; nothing in either app sent one. Web: a ✎ beside the title turns it into a field in place — Enter saves, Escape cancels, and a name you already use (409) or one the content filter refuses (400) keeps the field open with the reason under it. It sits by the title rather than among the header buttons because a graph has a Rename of its own in its toolbar. Mobile: a Rename button and a field inline at the top of the list — not a bottom sheet, which a keyboard covers when the sheet is this short — and the screen's header now shows the collection's name where it used to say "Collection". `collectionSchema.name` trims before it measures (`COLLECTION_NAME_MAX`): PATCH writes the parsed value straight to the row, so a rename to spaces was a blank title and "Zelda " passed as a different name from "Zelda" |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
 (password resets, registration toggle, account actions — the *list* landed in
@@ -529,6 +531,14 @@ file to be provided for reference).
   rearranging one graph can't scramble another, or a numbered run you set by
   hand. Migration 0016 backfilled `sort_order` from the layout of the day
   (top-to-bottom, left-to-right) so "Custom order" didn't open as a jumble.
+- **A collection's name is the only thing about it you can edit.**
+  `description` and `accent_color` are real columns the API reads and writes
+  — the cards show a description when there is one, and the list view takes
+  its accent from the colour — but no form in either app sets them, at
+  creation or after. Rename landed alone (phase 27b) because it was the one
+  asked for; an edit form that covers all three is the obvious shape if the
+  other two are ever wanted. Collection names are unique per user *exactly*,
+  not case-insensitively like graph names: "zelda" beside "Zelda" is allowed.
 - **A new graph starts as a grid in list order, or as a copy.** That's the
   one moment the list order reaches a graph: `POST …/graphs` lays the games
   out by `sort_order` when it isn't given a `copyFromGraphId`. After that the
