@@ -1,6 +1,6 @@
 import { and, count, eq, inArray } from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
-import { MAIN_LIST_KIND, EXTRA_LIST_KIND } from "@gm/shared";
+import { DEFAULT_COLLECTION_GRAPH_NAME, MAIN_LIST_KIND, EXTRA_LIST_KIND } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { clearDemoCache, demoUser } from "./demo.js";
 import { createManualGame, upsertGameFromIgdb } from "./catalog.js";
@@ -652,6 +652,13 @@ async function runSeed(log: (line: string) => void) {
       })
       .returning({ id: schema.collections.id });
     if (!created) continue;
+    // every collection has a graph; the API makes this one on create, and a
+    // seed that writes rows directly has to do the same
+    const [graph] = await db
+      .insert(schema.collectionGraphs)
+      .values({ collectionId: created.id, name: DEFAULT_COLLECTION_GRAPH_NAME, position: 1 })
+      .returning({ id: schema.collectionGraphs.id });
+    if (!graph) continue;
 
     // games you own, then the ones you don't — the second group is what makes
     // "not in your library" visible on the tour
@@ -661,15 +668,20 @@ async function runSeed(log: (line: string) => void) {
       const gameId = gameIds.get(title) ?? (await resolveGame(title, useIgdb, log));
       if (!gameId) continue;
       ids.push(gameId);
-      await db
+      const joined = await db
         .insert(schema.collectionGames)
+        .values({ collectionId: created.id, gameId, sortOrder: i + 1 })
+        .onConflictDoNothing()
+        .returning({ gameId: schema.collectionGames.gameId });
+      if (joined.length === 0) continue;
+      await db
+        .insert(schema.collectionGraphNodes)
         .values({
-          collectionId: created.id,
+          graphId: graph.id,
           gameId,
           // a readable left-to-right chain rather than a pile at the origin
           positionX: 40 + i * 150,
           positionY: 60 + (i % 2) * 90,
-          sortOrder: i + 1,
         })
         .onConflictDoNothing();
     }
@@ -677,6 +689,7 @@ async function runSeed(log: (line: string) => void) {
     for (let i = 0; i < ids.length - 1; i++) {
       await db.insert(schema.collectionLinks).values({
         collectionId: created.id,
+        graphId: graph.id,
         fromGameId: ids[i]!,
         toGameId: ids[i + 1]!,
       });

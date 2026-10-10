@@ -51,7 +51,16 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/consoles", component: ConsolesPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/console/$platformId", component: ConsoleDetailPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/collections", component: CollectionsPage }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/collection/$id", component: CollectionDetailPage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/collection/$id",
+    component: CollectionDetailPage,
+    // ?graph= is the graph tab you're on (none means the list), so Back from a
+    // game you clicked on a graph returns to that graph
+    validateSearch: (search: Record<string, unknown>): { graph?: string } => ({
+      graph: typeof search.graph === "string" && search.graph ? search.graph : undefined,
+    }),
+  }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/add",

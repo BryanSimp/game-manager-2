@@ -1,7 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { OWNERSHIP_FORMATS } from "@gm/shared";
+import {
+  COLLECTION_GRAPH_NAME_MAX,
+  DEFAULT_COLLECTION_GRAPH_NAME,
+  MAX_COLLECTION_GRAPHS,
+  OWNERSHIP_FORMATS,
+  type CollectionGraph,
+} from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { upsertGameFromIgdb } from "../services/catalog.js";
@@ -10,6 +16,7 @@ import { isValidCategory } from "../services/categories.js";
 import { resolveTtbFor } from "../services/community.js";
 import { rememberConsoles } from "../services/consoles.js";
 import { inspectAll } from "../services/content-filter.js";
+import { versionsFor } from "../services/game-versions.js";
 import { matchTitle } from "../services/matcher.js";
 import { extractTitles } from "../services/noise-filter.js";
 import { publishModeFor } from "../services/preferences.js";
@@ -103,6 +110,14 @@ const layoutSchema = z.object({
     .max(400),
 });
 
+const graphNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Give the graph a name")
+  .max(COLLECTION_GRAPH_NAME_MAX, `Keep the name to ${COLLECTION_GRAPH_NAME_MAX} characters or fewer`);
+
+const GRAPH_NAME_TAKEN = "This collection already has a graph with that name";
+
 /** Postgres unique-violation, however deeply drizzle has wrapped it. */
 function isUniqueViolation(err: unknown): boolean {
   for (let e = err; e instanceof Error; e = (e as { cause?: unknown }).cause) {
@@ -117,6 +132,38 @@ async function ownedCollection(userId: string, id: string) {
     .from(schema.collections)
     .where(and(eq(schema.collections.id, id), eq(schema.collections.userId, userId)));
   return row ?? null;
+}
+
+/**
+ * Where the nth game (0-based) lands on a graph nobody has arranged yet: a
+ * loose grid, five across, so new nodes don't stack at the origin.
+ */
+function gridSlot(n: number): { positionX: number; positionY: number } {
+  return { positionX: 80 + (n % 5) * 150, positionY: 80 + Math.floor(n / 5) * 190 };
+}
+
+/** A collection's graphs, in tab order. */
+function graphsOf(collectionId: string) {
+  return db
+    .select()
+    .from(schema.collectionGraphs)
+    .where(eq(schema.collectionGraphs.collectionId, collectionId))
+    .orderBy(asc(schema.collectionGraphs.position), asc(schema.collectionGraphs.createdAt));
+}
+
+/**
+ * Put a game that has just joined a collection onto every one of its graphs.
+ *
+ * Each graph is a view of the whole collection, so a new game needs a place on
+ * all of them — at the next free grid slot, where you'll see it and can drag
+ * it to where it belongs. `n` is how many games the collection held before.
+ */
+async function placeOnGraphs(graphIds: string[], gameId: string, n: number): Promise<void> {
+  if (graphIds.length === 0) return;
+  await db
+    .insert(schema.collectionGraphNodes)
+    .values(graphIds.map((graphId) => ({ graphId, gameId, ...gridSlot(n) })))
+    .onConflictDoNothing();
 }
 
 function gameCover(game: {
@@ -157,6 +204,7 @@ async function collectionTimes(
       status: schema.userGames.status,
       completed100: schema.userGames.completed100,
       progressBasis: schema.userGames.progressBasis,
+      progressCustomSeconds: schema.userGames.progressCustomSeconds,
       ttbEnabled: schema.userGames.ttbEnabled,
     })
     .from(schema.collectionGames)
@@ -183,6 +231,7 @@ async function collectionTimes(
     const time = gameTime({
       ttb: ttb.get(row.game.id) ?? row.game,
       basis: row.progressBasis ?? "main",
+      customSeconds: row.progressCustomSeconds,
       status: row.status,
       completed100: row.completed100 ?? false,
       ttbEnabled: row.ttbEnabled ?? true,
@@ -500,26 +549,61 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         games.map((g) => ({
           collectionId: copy.id,
           gameId: g.gameId,
-          positionX: g.positionX,
-          positionY: g.positionY,
           sortOrder: g.sortOrder,
         })),
       );
     }
 
-    const links = await db
-      .select()
-      .from(schema.collectionLinks)
-      .where(eq(schema.collectionLinks.collectionId, source.id));
-    if (links.length > 0) {
-      await db.insert(schema.collectionLinks).values(
-        links.map((l) => ({
-          collectionId: copy.id,
-          fromGameId: l.fromGameId,
-          toGameId: l.toGameId,
-          label: l.label,
-        })),
-      );
+    // every graph comes across, names and all — "Timeline" and "Release date"
+    // are as much the author's work as the list is. Each needs a new id, so
+    // its nodes and arrows are re-pointed through `graphIdFor`.
+    const sourceGraphs = await graphsOf(source.id);
+    const graphIdFor = new Map<string, string>();
+    for (const graph of sourceGraphs) {
+      const [created] = await db
+        .insert(schema.collectionGraphs)
+        .values({ collectionId: copy.id, name: graph.name, position: graph.position })
+        .returning({ id: schema.collectionGraphs.id });
+      if (created) graphIdFor.set(graph.id, created.id);
+    }
+    if (graphIdFor.size === 0) {
+      // can't happen through the API, which never lets a collection reach zero
+      // graphs — but a copy must not be the one collection without a tab
+      await db
+        .insert(schema.collectionGraphs)
+        .values({ collectionId: copy.id, name: DEFAULT_COLLECTION_GRAPH_NAME, position: 1 });
+    } else {
+      const sourceGraphIds = [...graphIdFor.keys()];
+      const nodes = await db
+        .select()
+        .from(schema.collectionGraphNodes)
+        .where(inArray(schema.collectionGraphNodes.graphId, sourceGraphIds));
+      if (nodes.length > 0) {
+        await db.insert(schema.collectionGraphNodes).values(
+          nodes.map((n) => ({
+            graphId: graphIdFor.get(n.graphId)!,
+            gameId: n.gameId,
+            positionX: n.positionX,
+            positionY: n.positionY,
+          })),
+        );
+      }
+
+      const links = await db
+        .select()
+        .from(schema.collectionLinks)
+        .where(inArray(schema.collectionLinks.graphId, sourceGraphIds));
+      if (links.length > 0) {
+        await db.insert(schema.collectionLinks).values(
+          links.map((l) => ({
+            collectionId: copy.id,
+            graphId: graphIdFor.get(l.graphId)!,
+            fromGameId: l.fromGameId,
+            toGameId: l.toGameId,
+            label: l.label,
+          })),
+        );
+      }
     }
 
     logEvent("collection_created", user.id, { collectionId: copy.id, adopted: true });
@@ -547,17 +631,26 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     const mode = await publishModeFor(user.id);
     const isPublic =
       mode === "never" ? false : (parsed.data.isPublic ?? mode === "always");
-    const [created] = await db
-      .insert(schema.collections)
-      .values({
-        userId: user.id,
-        name: parsed.data.name.trim(),
-        description: parsed.data.description ?? null,
-        accentColor: parsed.data.accentColor ?? null,
-        isPublic,
-      })
-      .onConflictDoNothing()
-      .returning();
+    // the collection and its first graph together, so a collection with no
+    // graph tab can't be left behind by a failure between the two
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(schema.collections)
+        .values({
+          userId: user.id,
+          name: parsed.data.name.trim(),
+          description: parsed.data.description ?? null,
+          accentColor: parsed.data.accentColor ?? null,
+          isPublic,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (!row) return null;
+      await tx
+        .insert(schema.collectionGraphs)
+        .values({ collectionId: row.id, name: DEFAULT_COLLECTION_GRAPH_NAME, position: 1 });
+      return row;
+    });
     if (!created) {
       return reply.status(409).send({ message: "You already have a collection with that name" });
     }
@@ -585,10 +678,16 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
 
     // Publishing re-checks the whole collection, not just the fields in this
     // request: a collection written before the filter existed would otherwise
-    // walk straight into the public list on an isPublic-only PATCH.
+    // walk straight into the public list on an isPublic-only PATCH. Graph
+    // names are part of "the whole collection" — they're the tabs a visitor
+    // reads.
     const toCheck =
       parsed.data.isPublic === true
-        ? [parsed.data.name ?? existing.name, parsed.data.description ?? existing.description]
+        ? [
+            parsed.data.name ?? existing.name,
+            parsed.data.description ?? existing.description,
+            ...(await graphsOf(existing.id)).map((g) => g.name),
+          ]
         : [parsed.data.name, parsed.data.description];
     const issue = inspectAll(toCheck);
     if (issue) {
@@ -657,13 +756,12 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     const nodes = await db
       .select({
         game: schema.games,
-        x: schema.collectionGames.positionX,
-        y: schema.collectionGames.positionY,
         sortOrder: schema.collectionGames.sortOrder,
         userGameId: schema.userGames.id,
         status: schema.userGames.status,
         completed100: schema.userGames.completed100,
         progressBasis: schema.userGames.progressBasis,
+        progressCustomSeconds: schema.userGames.progressCustomSeconds,
         ttbEnabled: schema.userGames.ttbEnabled,
       })
       .from(schema.collectionGames)
@@ -695,6 +793,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       const t = gameTime({
         ttb: ttb.get(n.game.id) ?? n.game,
         basis: n.progressBasis ?? "main",
+        customSeconds: n.progressCustomSeconds,
         status: n.status,
         completed100: n.completed100 ?? false,
         ttbEnabled: n.ttbEnabled ?? true,
@@ -704,10 +803,59 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
       addGameTime(time, t);
     }
 
-    const links = await db
-      .select()
-      .from(schema.collectionLinks)
-      .where(eq(schema.collectionLinks.collectionId, collection.id));
+    /*
+     * The graphs: one named arrangement each, all over the same games. A
+     * node's place is stored per graph; a game with no stored place on one
+     * (nothing writes that state, but a read shouldn't depend on it) falls
+     * back to a grid slot in list order rather than piling up at the origin.
+     */
+    const graphRows = await graphsOf(collection.id);
+    const graphIds = graphRows.map((g) => g.id);
+    const placed =
+      graphIds.length > 0
+        ? await db
+            .select()
+            .from(schema.collectionGraphNodes)
+            .where(inArray(schema.collectionGraphNodes.graphId, graphIds))
+        : [];
+    const links =
+      graphIds.length > 0
+        ? await db
+            .select()
+            .from(schema.collectionLinks)
+            .where(inArray(schema.collectionLinks.graphId, graphIds))
+        : [];
+    const inListOrder = [...nodes].sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.game.title.localeCompare(b.game.title),
+    );
+    const graphs: CollectionGraph[] = graphRows.map((graph) => {
+      const at = new Map(
+        placed.filter((p) => p.graphId === graph.id).map((p) => [p.gameId, p] as const),
+      );
+      return {
+        id: graph.id,
+        name: graph.name,
+        nodes: inListOrder.map((n, i) => {
+          const spot = at.get(n.game.id) ?? gridSlot(i);
+          return { gameId: n.game.id, x: spot.positionX, y: spot.positionY };
+        }),
+        links: links
+          .filter((l) => l.graphId === graph.id)
+          .map((l) => ({
+            id: l.id,
+            fromGameId: l.fromGameId,
+            toGameId: l.toGameId,
+            label: l.label,
+          })),
+      };
+    });
+
+    // remakes, remasters and originals you've linked to any of these games —
+    // yours even on someone else's collection, like every other per-user field
+    const versions = await versionsFor(
+      user.id,
+      nodes.map((n) => n.game.id),
+    );
 
     const votes = await collectionVoteCounts([collection.id], user.id);
 
@@ -726,8 +874,6 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         gameId: n.game.id,
         title: n.game.title,
         coverSrc: gameCover(n.game),
-        x: n.x,
-        y: n.y,
         sortOrder: n.sortOrder,
         releaseDate: n.game.releaseDate,
         // the resolved figure, not games.ttb_main — see collectionTimes
@@ -738,13 +884,10 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         endless: nodeTimes.get(n.game.id)?.endless ?? false,
         userGameId: n.userGameId,
         status: n.status,
+        versions: versions.get(n.game.id)?.versions ?? [],
+        latestVersionId: versions.get(n.game.id)?.latestVersionId ?? null,
       })),
-      links: links.map((l) => ({
-        id: l.id,
-        fromGameId: l.fromGameId,
-        toGameId: l.toGameId,
-        label: l.label,
-      })),
+      graphs,
     };
   });
 
@@ -780,23 +923,31 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     }
     if (!gameId) return reply.status(400).send({ message: "gameId or igdbId required" });
 
-    // place new nodes in a loose grid so they don't stack at the origin
     const [countRow] = await db
       .select({ n: count() })
       .from(schema.collectionGames)
       .where(eq(schema.collectionGames.collectionId, collection.id));
     const n = countRow?.n ?? 0;
-    await db
+    const added = await db
       .insert(schema.collectionGames)
       .values({
         collectionId: collection.id,
         gameId,
-        positionX: 80 + (n % 5) * 150,
-        positionY: 80 + Math.floor(n / 5) * 190,
         // new games land at the end of the flat list
         sortOrder: n + 1,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ gameId: schema.collectionGames.gameId });
+    // only a game that actually joined needs placing — one that was already
+    // here has a spot on every graph, and it's wherever you dragged it
+    if (added.length > 0) {
+      const graphs = await graphsOf(collection.id);
+      await placeOnGraphs(
+        graphs.map((g) => g.id),
+        gameId,
+        n,
+      );
+    }
     return { ok: true, gameId };
   });
 
@@ -855,6 +1006,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
         .where(eq(schema.collectionGames.collectionId, collection.id));
       const present = new Set(existingRows.map((r) => r.gameId));
       let n = existingRows.length;
+      const graphIds = (await graphsOf(collection.id)).map((g) => g.id);
 
       const results: ListImportResult[] = [];
       for (const title of titles) {
@@ -900,14 +1052,13 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
           .values({
             collectionId: collection.id,
             gameId,
-            // the same loose grid single adds use, so the graph opens legible
-            positionX: 80 + (n % 5) * 150,
-            positionY: 80 + Math.floor(n / 5) * 190,
             // pasted order is the play order — that's the whole point of
             // pasting a list rather than adding twenty games by search
             sortOrder: n + 1,
           })
           .onConflictDoNothing();
+        // the same loose grid single adds use, so every graph opens legible
+        await placeOnGraphs(graphIds, gameId, n);
         present.add(gameId);
         n++;
         results.push({
@@ -942,6 +1093,18 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
             eq(schema.collectionGames.gameId, request.params.gameId),
           ),
         );
+      // off every graph too: its node, and any arrow that touched it
+      const graphIds = (await graphsOf(collection.id)).map((g) => g.id);
+      if (graphIds.length > 0) {
+        await db
+          .delete(schema.collectionGraphNodes)
+          .where(
+            and(
+              inArray(schema.collectionGraphNodes.graphId, graphIds),
+              eq(schema.collectionGraphNodes.gameId, request.params.gameId),
+            ),
+          );
+      }
       await db
         .delete(schema.collectionLinks)
         .where(
@@ -1118,53 +1281,279 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     },
   );
 
-  /** Replace node positions + edges in one shot (called on graph edits). */
-  app.put<{ Params: { id: string } }>("/api/collections/:id/layout", async (request, reply) => {
+  // ---- graphs ----
+  //
+  // A collection's graphs are named arrangements of the same games: "Play
+  // order", "Timeline", "Release date". They're created, renamed and deleted
+  // here; which games are *in* the collection is still the collection's
+  // business, and every graph covers all of them.
+
+  /**
+   * Add a graph to a collection.
+   *
+   * It starts either as a fresh grid in list order, or — with
+   * `copyFromGraphId` — as a copy of another graph's layout and arrows, since
+   * a timeline is usually the play order with a few games moved.
+   */
+  app.post<{ Params: { id: string } }>("/api/collections/:id/graphs", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
     const collection = await ownedCollection(user.id, request.params.id);
     if (!collection) return reply.status(404).send({ message: "Collection not found" });
-    const parsed = layoutSchema.safeParse(request.body);
+
+    const parsed = z
+      .object({ name: graphNameSchema, copyFromGraphId: z.string().uuid().optional() })
+      .safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ message: parsed.error.issues[0]?.message });
     }
+    const name = parsed.data.name;
+    // a graph's name is a tab on a collection that may be published, so it's
+    // filtered like the collection's own name
+    const issue = inspectAll([name]);
+    if (issue) {
+      logEvent("content_blocked", user.id, { surface: "collection", kind: issue.kind });
+      return reply.status(400).send({ message: issue.message });
+    }
 
-    // only games actually in the collection
+    const existing = await graphsOf(collection.id);
+    if (existing.length >= MAX_COLLECTION_GRAPHS) {
+      return reply
+        .status(409)
+        .send({ message: `A collection can hold up to ${MAX_COLLECTION_GRAPHS} graphs` });
+    }
+    // the database's unique index is exact; two tabs differing only by case
+    // are just as hard to tell apart
+    if (existing.some((g) => g.name.toLowerCase() === name.toLowerCase())) {
+      return reply.status(409).send({ message: GRAPH_NAME_TAKEN });
+    }
+    const source = parsed.data.copyFromGraphId
+      ? existing.find((g) => g.id === parsed.data.copyFromGraphId)
+      : null;
+    if (parsed.data.copyFromGraphId && !source) {
+      return reply.status(404).send({ message: "That graph isn't in this collection" });
+    }
+
     const members = await db
       .select({ gameId: schema.collectionGames.gameId })
       .from(schema.collectionGames)
-      .where(eq(schema.collectionGames.collectionId, collection.id));
+      .innerJoin(schema.games, eq(schema.games.id, schema.collectionGames.gameId))
+      .where(eq(schema.collectionGames.collectionId, collection.id))
+      .orderBy(asc(schema.collectionGames.sortOrder), asc(schema.games.title));
     const memberIds = new Set(members.map((m) => m.gameId));
 
-    for (const node of parsed.data.nodes) {
-      if (!memberIds.has(node.gameId)) continue;
-      await db
-        .update(schema.collectionGames)
-        .set({ positionX: node.x, positionY: node.y })
-        .where(
-          and(
-            eq(schema.collectionGames.collectionId, collection.id),
-            eq(schema.collectionGames.gameId, node.gameId),
-          ),
-        );
-    }
+    const sourceNodes = source
+      ? await db
+          .select()
+          .from(schema.collectionGraphNodes)
+          .where(eq(schema.collectionGraphNodes.graphId, source.id))
+      : [];
+    const sourceLinks = source
+      ? await db
+          .select()
+          .from(schema.collectionLinks)
+          .where(eq(schema.collectionLinks.graphId, source.id))
+      : [];
+    const copied = new Map(sourceNodes.map((n) => [n.gameId, n] as const));
 
-    await db
-      .delete(schema.collectionLinks)
-      .where(eq(schema.collectionLinks.collectionId, collection.id));
-    const validLinks = parsed.data.links.filter(
-      (l) => memberIds.has(l.fromGameId) && memberIds.has(l.toGameId) && l.fromGameId !== l.toGameId,
-    );
-    if (validLinks.length > 0) {
-      await db.insert(schema.collectionLinks).values(
-        validLinks.map((l) => ({
-          collectionId: collection.id,
-          fromGameId: l.fromGameId,
-          toGameId: l.toGameId,
-          label: l.label ?? null,
-        })),
-      );
+    let created;
+    try {
+      created = await db.transaction(async (tx) => {
+        const [graph] = await tx
+          .insert(schema.collectionGraphs)
+          .values({
+            collectionId: collection.id,
+            name,
+            position: Math.max(0, ...existing.map((g) => g.position)) + 1,
+          })
+          .returning();
+        if (!graph) return null;
+
+        if (members.length > 0) {
+          await tx.insert(schema.collectionGraphNodes).values(
+            members.map((m, i) => {
+              const from = copied.get(m.gameId);
+              return {
+                graphId: graph.id,
+                gameId: m.gameId,
+                ...(from ? { positionX: from.positionX, positionY: from.positionY } : gridSlot(i)),
+              };
+            }),
+          );
+        }
+        const links = sourceLinks.filter(
+          (l) => memberIds.has(l.fromGameId) && memberIds.has(l.toGameId),
+        );
+        if (links.length > 0) {
+          await tx.insert(schema.collectionLinks).values(
+            links.map((l) => ({
+              collectionId: collection.id,
+              graphId: graph.id,
+              fromGameId: l.fromGameId,
+              toGameId: l.toGameId,
+              label: l.label,
+            })),
+          );
+        }
+        return graph;
+      });
+    } catch (err) {
+      // two tabs racing to create the same name
+      if (isUniqueViolation(err)) return reply.status(409).send({ message: GRAPH_NAME_TAKEN });
+      throw err;
     }
-    return { ok: true };
+    if (!created) return reply.status(500).send({ message: "Couldn't create that graph" });
+    reply.status(201);
+    return { id: created.id, name: created.name };
   });
+
+  /** Rename a graph. The name is all a graph has besides its layout. */
+  app.patch<{ Params: { id: string; graphId: string } }>(
+    "/api/collections/:id/graphs/:graphId",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const collection = await ownedCollection(user.id, request.params.id);
+      if (!collection) return reply.status(404).send({ message: "Collection not found" });
+
+      const parsed = z.object({ name: graphNameSchema }).safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+      }
+      const name = parsed.data.name;
+
+      const graphs = await graphsOf(collection.id);
+      const graph = graphs.find((g) => g.id === request.params.graphId);
+      if (!graph) return reply.status(404).send({ message: "Graph not found" });
+
+      const issue = inspectAll([name]);
+      if (issue) {
+        logEvent("content_blocked", user.id, { surface: "collection", kind: issue.kind });
+        return reply.status(400).send({ message: issue.message });
+      }
+      if (graphs.some((g) => g.id !== graph.id && g.name.toLowerCase() === name.toLowerCase())) {
+        return reply.status(409).send({ message: GRAPH_NAME_TAKEN });
+      }
+
+      try {
+        await db
+          .update(schema.collectionGraphs)
+          .set({ name })
+          .where(eq(schema.collectionGraphs.id, graph.id));
+      } catch (err) {
+        if (isUniqueViolation(err)) return reply.status(409).send({ message: GRAPH_NAME_TAKEN });
+        throw err;
+      }
+      return { id: graph.id, name };
+    },
+  );
+
+  /**
+   * Delete a graph — its layout and arrows go with it; the games stay in the
+   * collection and on every other graph.
+   *
+   * The last one can't be deleted. A collection always has a graph to open,
+   * which is what lets both apps draw a tab without first asking whether
+   * there's anything behind it.
+   */
+  app.delete<{ Params: { id: string; graphId: string } }>(
+    "/api/collections/:id/graphs/:graphId",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const collection = await ownedCollection(user.id, request.params.id);
+      if (!collection) return reply.status(404).send({ message: "Collection not found" });
+
+      const graphs = await graphsOf(collection.id);
+      const graph = graphs.find((g) => g.id === request.params.graphId);
+      if (!graph) return reply.status(404).send({ message: "Graph not found" });
+      if (graphs.length <= 1) {
+        return reply.status(409).send({
+          message: "A collection keeps at least one graph — rename this one instead",
+        });
+      }
+      await db.delete(schema.collectionGraphs).where(eq(schema.collectionGraphs.id, graph.id));
+      return { ok: true };
+    },
+  );
+
+  /** Replace one graph's node positions + edges in one shot (called on graph edits). */
+  app.put<{ Params: { id: string; graphId: string } }>(
+    "/api/collections/:id/graphs/:graphId/layout",
+    async (request, reply) => {
+      const user = await requireUser(request, reply);
+      if (!user) return;
+      const collection = await ownedCollection(user.id, request.params.id);
+      if (!collection) return reply.status(404).send({ message: "Collection not found" });
+      const graph = (await graphsOf(collection.id)).find((g) => g.id === request.params.graphId);
+      if (!graph) return reply.status(404).send({ message: "Graph not found" });
+      const parsed = layoutSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+      }
+
+      // only games actually in the collection
+      const members = await db
+        .select({ gameId: schema.collectionGames.gameId })
+        .from(schema.collectionGames)
+        .where(eq(schema.collectionGames.collectionId, collection.id));
+      const memberIds = new Set(members.map((m) => m.gameId));
+
+      // one row per game: an upsert can't touch the same row twice in a
+      // statement, and a doubled node in the payload shouldn't be a 500
+      const nodes = new Map<string, { x: number; y: number }>();
+      for (const node of parsed.data.nodes) {
+        if (memberIds.has(node.gameId)) nodes.set(node.gameId, { x: node.x, y: node.y });
+      }
+      const links = new Map<string, (typeof parsed.data.links)[number]>();
+      for (const link of parsed.data.links) {
+        if (
+          memberIds.has(link.fromGameId) &&
+          memberIds.has(link.toGameId) &&
+          link.fromGameId !== link.toGameId
+        ) {
+          links.set(`${link.fromGameId}>${link.toGameId}`, link);
+        }
+      }
+
+      // together or not at all — the arrows are deleted and rewritten, and a
+      // failure between the two would leave a graph with none
+      await db.transaction(async (tx) => {
+        if (nodes.size > 0) {
+          await tx
+            .insert(schema.collectionGraphNodes)
+            .values(
+              [...nodes].map(([gameId, at]) => ({
+                graphId: graph.id,
+                gameId,
+                positionX: at.x,
+                positionY: at.y,
+              })),
+            )
+            .onConflictDoUpdate({
+              target: [schema.collectionGraphNodes.graphId, schema.collectionGraphNodes.gameId],
+              set: {
+                positionX: sql`excluded.position_x`,
+                positionY: sql`excluded.position_y`,
+              },
+            });
+        }
+        await tx
+          .delete(schema.collectionLinks)
+          .where(eq(schema.collectionLinks.graphId, graph.id));
+        if (links.size > 0) {
+          await tx.insert(schema.collectionLinks).values(
+            [...links.values()].map((l) => ({
+              collectionId: collection.id,
+              graphId: graph.id,
+              fromGameId: l.fromGameId,
+              toGameId: l.toGameId,
+              label: l.label ?? null,
+            })),
+          );
+        }
+      });
+      return { ok: true };
+    },
+  );
 }

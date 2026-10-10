@@ -25,7 +25,7 @@ import {
   useGameLinks,
 } from "../components/LinkedGames.js";
 import { AddCollectionToLibrary } from "../components/AddCollectionToLibrary.js";
-import { STATUS_META, formatHours, statusChip } from "../lib/format.js";
+import { STATUS_META, formatHours, statusChip, toHours, toSeconds } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 
 type Tab = "overview" | "progress" | "linked";
@@ -565,19 +565,6 @@ function Ttb({ label, value }: { label: string; value: string | null }) {
       <span className="font-medium text-zinc-200">{value}</span>
     </div>
   );
-}
-
-/** seconds → the hours string the editor shows, e.g. 5400 → "1.5" */
-function toHours(seconds: number | null): string {
-  if (!seconds) return "";
-  return String(Math.round((seconds / 3600) * 10) / 10);
-}
-
-/** "" clears the figure; anything unparseable is treated as cleared too. */
-function toSeconds(hours: string): number | null {
-  const value = Number(hours.trim());
-  if (!hours.trim() || Number.isNaN(value) || value <= 0) return null;
-  return Math.round(value * 3600);
 }
 
 /**

@@ -95,6 +95,7 @@ export interface GameTime {
 export function gameTime({
   ttb,
   basis,
+  customSeconds,
   status,
   completed100,
   ttbEnabled = true,
@@ -102,12 +103,14 @@ export function gameTime({
 }: {
   ttb: TtbTriple;
   basis: ProgressBasis;
+  /** the length typed for the `custom` basis; ignored by the other three */
+  customSeconds?: number | null;
   status: string | null;
   completed100: boolean;
   ttbEnabled?: boolean;
   missions?: MissionCounts;
 }): GameTime {
-  const totalSeconds = ttbForBasis(ttb, basis);
+  const totalSeconds = ttbForBasis(ttb, basis, customSeconds);
   const finished = status === "finished" || completed100;
   const endless = !ttbEnabled;
   const base = { totalSeconds, finished, endless };

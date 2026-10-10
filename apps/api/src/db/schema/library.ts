@@ -36,6 +36,11 @@ export const userGames = pgTable(
     ttbEnabled: boolean("ttb_enabled").notNull().default(true),
     // which how-long-to-beat figure the mission time estimate divides up
     progressBasis: progressBasisEnum("progress_basis").notNull().default("main"),
+    // the length the 'custom' basis uses, in seconds. Lives here rather than in
+    // user_time_to_beat on purpose: that table is what you say the game *took*,
+    // and it feeds the community average — this is a target you picked, and
+    // "I only want the first act" must not become anyone else's play time.
+    progressCustomSeconds: integer("progress_custom_seconds"),
     // synced from Steam (GetOwnedGames playtime_forever)
     steamPlaytimeMinutes: integer("steam_playtime_minutes"),
     // "100% completed" sub-state of finished (all collectibles/endings/etc.)

@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import {
+  MAX_CUSTOM_PROGRESS_SECONDS,
   OWNERSHIP_FORMATS,
   PROGRESS_BASES,
   estimateProgress,
@@ -63,6 +64,16 @@ const updateSchema = z.object({
   ttbEnabled: z.boolean().optional(),
   completed100: z.boolean().optional(),
   progressBasis: z.enum(PROGRESS_BASES).optional(),
+  // The length the `custom` basis divides up, in seconds; null clears it.
+  // Deliberately not tied to the basis in the same request: the figure is
+  // kept when you switch to another basis, so the two are set independently.
+  progressCustomSeconds: z
+    .number()
+    .int()
+    .min(60, "A custom time needs to be at least a minute")
+    .max(MAX_CUSTOM_PROGRESS_SECONDS, "That's longer than a custom time can be")
+    .nullable()
+    .optional(),
 });
 
 const bulkUpdateSchema = z
@@ -214,8 +225,9 @@ function entryToJson(
     total: missions?.total ?? 0,
     done: missions?.done ?? 0,
     // the estimate divides whatever figure we're actually showing, so a
-    // community-supplied length drives it exactly like an IGDB one
-    totalSeconds: ttbForBasis(ttb ?? game, entry.progressBasis),
+    // community-supplied length drives it exactly like an IGDB one — and a
+    // custom basis divides the length you typed instead of any of them
+    totalSeconds: ttbForBasis(ttb ?? game, entry.progressBasis, entry.progressCustomSeconds),
   });
   return {
     id: entry.id,
@@ -225,6 +237,7 @@ function entryToJson(
     ttbEnabled: entry.ttbEnabled,
     completed100: entry.completed100,
     progressBasis: entry.progressBasis,
+    progressCustomSeconds: entry.progressCustomSeconds,
     estimatedRemainingSeconds: estimate.remainingSeconds,
     missionsTotal: estimate.total,
     missionsDone: estimate.done,
@@ -413,7 +426,11 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
 
     const basis = row.user_games.progressBasis;
     const ttbMap = await resolveTtbFor(user.id, [row.games]);
-    const totalSeconds = ttbForBasis(ttbMap.get(row.games.id) ?? row.games, basis);
+    const totalSeconds = ttbForBasis(
+      ttbMap.get(row.games.id) ?? row.games,
+      basis,
+      row.user_games.progressCustomSeconds,
+    );
 
     // the user's own mission list for this game — oldest first, so adding a
     // second one doesn't silently move the estimate
@@ -474,7 +491,8 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!existing) return reply.status(404).send({ message: "Not found" });
 
     const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
-    const { status, rating, notes, ttbEnabled, completed100, progressBasis } = parsed.data;
+    const { status, rating, notes, ttbEnabled, completed100, progressBasis, progressCustomSeconds } =
+      parsed.data;
     if (status !== undefined) {
       if (!(await assertCategory(user.id, status, reply))) return;
       patch.status = status;
@@ -487,6 +505,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (ttbEnabled !== undefined) patch.ttbEnabled = ttbEnabled;
     if (completed100 !== undefined) patch.completed100 = completed100;
     if (progressBasis !== undefined) patch.progressBasis = progressBasis;
+    if (progressCustomSeconds !== undefined) patch.progressCustomSeconds = progressCustomSeconds;
 
     await db.update(schema.userGames).set(patch).where(eq(schema.userGames.id, existing.id));
     return { ok: true };

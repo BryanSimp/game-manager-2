@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   EXTRA_LIST_KIND,
   MAIN_LIST_KIND,
+  MAX_CUSTOM_PROGRESS_SECONDS,
   PROGRESS_BASES,
   PROGRESS_BASIS_LABELS,
   type ChecklistDetail,
@@ -12,7 +13,7 @@ import {
   type ProgressBasis,
 } from "@gm/shared";
 import { api } from "../lib/api.js";
-import { formatHours } from "../lib/format.js";
+import { formatHours, toHours, toSeconds } from "../lib/format.js";
 import { usePreferences } from "../lib/prefs.js";
 import { AchievementsPanel } from "./AchievementsPanel.js";
 import { VoteButtons } from "./VoteButtons.js";
@@ -37,37 +38,57 @@ export function ProgressPanel({ entry }: { entry: LibraryEntry }) {
     queryFn: () => api.getEntryProgress(entryId),
   });
 
+  // what the estimate divides just changed, and the estimate is quoted in
+  // more places than this tab: the game's own card, the library's sort, and
+  // every collection total this game is part of
+  const estimateChanged = () => {
+    queryClient.invalidateQueries({ queryKey: ["progress", entryId] });
+    queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
+    queryClient.invalidateQueries({ queryKey: ["library"] });
+    queryClient.invalidateQueries({ queryKey: ["collection"] });
+    queryClient.invalidateQueries({ queryKey: ["collections"] });
+  };
+
   const setBasis = useMutation({
     mutationFn: (progressBasis: ProgressBasis) => api.updateEntry(entryId, { progressBasis }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["progress", entryId] });
-      queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
-    },
+    onSuccess: estimateChanged,
   });
 
   const p = progress.data;
   const hasMissions = !!p && p.total > 0;
+  const custom = entry.progressBasis === "custom";
 
   return (
     <div className="max-w-2xl">
       <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-sm font-semibold text-zinc-300">Time remaining</p>
-          <label className="flex items-center gap-2 text-xs text-zinc-500">
-            based on
-            <select
-              value={entry.progressBasis}
-              onChange={(ev) => setBasis.mutate(ev.target.value as ProgressBasis)}
-              className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-indigo-500"
-            >
-              {PROGRESS_BASES.map((b) => (
-                <option key={b} value={b}>
-                  {PROGRESS_BASIS_LABELS[b]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-zinc-500">
+            <label className="flex items-center gap-2">
+              based on
+              <select
+                value={entry.progressBasis}
+                onChange={(ev) => setBasis.mutate(ev.target.value as ProgressBasis)}
+                className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-indigo-500"
+              >
+                {PROGRESS_BASES.map((b) => (
+                  <option key={b} value={b}>
+                    {PROGRESS_BASIS_LABELS[b]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {custom && <CustomTimeField entry={entry} onSaved={estimateChanged} />}
+          </div>
         </div>
+
+        {custom && (
+          <p className="mt-2 text-xs text-zinc-500">
+            {entry.progressCustomSeconds
+              ? "Your own figure — it drives this estimate and nothing else. It isn't shared, and it doesn't change the game's play times."
+              : "Type how long you expect this playthrough to take. Useful when nobody has a play time for the game, or when none of the three fits how you're playing it."}
+          </p>
+        )}
 
         {!hasMissions ? (
           <p className="mt-2 text-sm text-zinc-500">
@@ -97,8 +118,10 @@ export function ProgressPanel({ entry }: { entry: LibraryEntry }) {
             </div>
             {!p.totalSeconds && (
               <p className="mt-2 text-xs text-amber-400/80">
-                No {PROGRESS_BASIS_LABELS[entry.progressBasis].toLowerCase()} time is known for
-                this game, so only mission counts are shown.
+                {custom
+                  ? "Enter a custom time above to turn these counts into hours."
+                  : `No ${PROGRESS_BASIS_LABELS[entry.progressBasis].toLowerCase()} time is known for
+                     this game, so only mission counts are shown. Pick “Custom time” to enter your own.`}
               </p>
             )}
           </>
@@ -108,6 +131,81 @@ export function ProgressPanel({ entry }: { entry: LibraryEntry }) {
       <Lists gameId={gameId} entryId={entryId} />
       <AchievementsPanel entryId={entryId} />
     </div>
+  );
+}
+
+/**
+ * The hours the "Custom time" basis divides up.
+ *
+ * Saved explicitly rather than on every keystroke: each save moves the
+ * estimate, the library's sort and any collection total this game is in, and
+ * "1", "12", "12." and "12.5" are four different answers on the way to one.
+ * Clearing the field and saving removes the figure.
+ */
+function CustomTimeField({ entry, onSaved }: { entry: LibraryEntry; onSaved: () => void }) {
+  // two decimals, so 12.25 reads back as 12.25 rather than 12.3
+  const stored = toHours(entry.progressCustomSeconds, 2);
+  const [value, setValue] = useState(stored);
+  // follow the saved figure when it changes underneath this field
+  useEffect(() => setValue(stored), [stored]);
+
+  const seconds = toSeconds(value);
+  const blank = value.trim() === "";
+  const invalid = !blank && seconds === null;
+  const tooLong = seconds !== null && seconds > MAX_CUSTOM_PROGRESS_SECONDS;
+  const tooShort = seconds !== null && seconds < 60;
+
+  const save = useMutation({
+    mutationFn: () => api.updateEntry(entry.id, { progressCustomSeconds: seconds }),
+    onSuccess: onSaved,
+  });
+
+  const problem = invalid
+    ? "Enter a number of hours"
+    : tooLong
+      ? "That's longer than a custom time can be"
+      : tooShort
+        ? "Needs to be at least a minute"
+        : save.isError
+          ? save.error.message
+          : null;
+
+  return (
+    <form
+      className="flex items-center gap-1.5"
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        if (!invalid && !tooLong && !tooShort) save.mutate();
+      }}
+    >
+      <input
+        value={value}
+        onChange={(ev) => {
+          setValue(ev.target.value);
+          save.reset();
+        }}
+        // nothing saved yet means you just picked "Custom time" — the next
+        // thing you'll do is type the number
+        autoFocus={!entry.progressCustomSeconds}
+        inputMode="decimal"
+        placeholder="hours"
+        aria-label="Custom time, in hours"
+        aria-invalid={problem ? true : undefined}
+        title={problem ?? undefined}
+        className={`w-20 rounded-md border bg-zinc-800 px-2 py-1 text-right text-xs text-zinc-200 outline-none focus:border-indigo-500 ${
+          problem ? "border-red-500/70" : "border-zinc-700"
+        }`}
+      />
+      <span>h</span>
+      <button
+        type="submit"
+        disabled={value.trim() === stored || invalid || tooLong || tooShort || save.isPending}
+        className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40"
+      >
+        {save.isPending ? "Saving…" : "Save"}
+      </button>
+      {problem && <span className="text-red-400">{problem}</span>}
+    </form>
   );
 }
 
