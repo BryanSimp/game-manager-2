@@ -204,6 +204,13 @@
       "when": 1791651154141,
       "tag": "0028_familiar_quentin_quire",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791859754999,
+      "tag": "0029_workable_ghost_rider",
+      "breakpoints": true
     }
   ]
 }

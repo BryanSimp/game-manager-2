@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
-import { GAME_STATUSES, type GameStatus, type LibraryEntry } from "@gm/shared";
+import { GAME_STATUSES, cardLength, type GameStatus, type LibraryEntry } from "@gm/shared";
 import { authClient } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, STATUS_COLORS, statusStyle } from "@/lib/ui";
@@ -87,10 +87,12 @@ export default function LibraryScreen() {
     .sort((a, b) => {
       if (sort === "title") return a.game.title.localeCompare(b.game.title);
       if (sort === "rating") return (b.rating ?? -1) - (a.rating ?? -1);
-      // shortest main story first; games without a time-to-beat sink to the bottom
+      // shortest first, by the length each row shows — the main story, or a
+      // custom time set to display; games with neither sink to the bottom
       if (sort === "ttb")
         return (
-          (a.game.ttbMain ?? Number.MAX_SAFE_INTEGER) - (b.game.ttbMain ?? Number.MAX_SAFE_INTEGER)
+          (cardLength(a).seconds ?? Number.MAX_SAFE_INTEGER) -
+          (cardLength(b).seconds ?? Number.MAX_SAFE_INTEGER)
         );
       return b.createdAt.localeCompare(a.createdAt);
     });
@@ -284,7 +286,8 @@ export default function LibraryScreen() {
 function LibraryRow({ entry, onPress }: { entry: LibraryEntry; onPress: () => void }) {
   const prefs = usePreferences();
   const status = statusStyle(entry.status, prefs?.badgeOpacity ?? 100);
-  const ttb = formatHours(entry.game.ttbMain);
+  // the main story, or the custom time when the web app set it to display
+  const ttb = formatHours(cardLength(entry).seconds);
   return (
     <Pressable
       accessibilityRole="button"

@@ -74,6 +74,10 @@ const updateSchema = z.object({
     .max(MAX_CUSTOM_PROGRESS_SECONDS, "That's longer than a custom time can be")
     .nullable()
     .optional(),
+  // Put that length on the library card. Independent of the two above for the
+  // same reason they're independent of each other: it's kept across a change
+  // of basis, and only read while the basis is `custom`.
+  progressCustomDisplay: z.boolean().optional(),
 });
 
 const bulkUpdateSchema = z
@@ -238,6 +242,7 @@ function entryToJson(
     completed100: entry.completed100,
     progressBasis: entry.progressBasis,
     progressCustomSeconds: entry.progressCustomSeconds,
+    progressCustomDisplay: entry.progressCustomDisplay,
     estimatedRemainingSeconds: estimate.remainingSeconds,
     missionsTotal: estimate.total,
     missionsDone: estimate.done,
@@ -491,8 +496,16 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!existing) return reply.status(404).send({ message: "Not found" });
 
     const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
-    const { status, rating, notes, ttbEnabled, completed100, progressBasis, progressCustomSeconds } =
-      parsed.data;
+    const {
+      status,
+      rating,
+      notes,
+      ttbEnabled,
+      completed100,
+      progressBasis,
+      progressCustomSeconds,
+      progressCustomDisplay,
+    } = parsed.data;
     if (status !== undefined) {
       if (!(await assertCategory(user.id, status, reply))) return;
       patch.status = status;
@@ -506,6 +519,7 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (completed100 !== undefined) patch.completed100 = completed100;
     if (progressBasis !== undefined) patch.progressBasis = progressBasis;
     if (progressCustomSeconds !== undefined) patch.progressCustomSeconds = progressCustomSeconds;
+    if (progressCustomDisplay !== undefined) patch.progressCustomDisplay = progressCustomDisplay;
 
     await db.update(schema.userGames).set(patch).where(eq(schema.userGames.id, existing.id));
     return { ok: true };

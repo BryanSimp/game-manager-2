@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import type { LibraryEntry } from "@gm/shared";
+import { cardLength, type LibraryEntry } from "@gm/shared";
 import { formatHours, statusChip, statusLabel } from "../lib/format.js";
 import { useCategories } from "../lib/categories.js";
 import { usePreferences } from "../lib/prefs.js";
@@ -41,7 +41,10 @@ export function GameCard({
   // once a game has a mission list, the badge counts down rather than showing
   // the same full length whatever your progress
   const estimating = entry.estimatedRemainingSeconds !== null;
-  const ttb = formatHours(entry.estimatedRemainingSeconds ?? entry.game.ttbMain);
+  // with no list to count down, the badge is the game's length — the main
+  // story, or your own figure when you've asked for that to be shown instead
+  const length = cardLength(entry);
+  const ttb = formatHours(entry.estimatedRemainingSeconds ?? length.seconds);
   const showTime = prefs?.showTimeBadge ?? true;
   const showPlatforms = prefs?.showPlatformBadge ?? true;
   const showRating = prefs?.showRating ?? true;
@@ -97,7 +100,9 @@ export function GameCard({
             title={
               estimating
                 ? `~${ttb} left · ${entry.missionsDone}/${entry.missionsTotal} missions done`
-                : "How long to beat — main story"
+                : length.custom
+                  ? "Your custom time"
+                  : "How long to beat — main story"
             }
             className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-xs ${
               estimating ? "bg-indigo-600/80 text-white" : "bg-black/70 text-zinc-200"

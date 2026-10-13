@@ -300,6 +300,33 @@ Phase 0–8 roadmap — read it before making design decisions.
   fallback to the main story, or the blank field would look like it had been
   saved as IGDB's number. The figure is kept when you switch basis, so
   switching back doesn't mean typing it again.
+- **A custom time reaches the library card only when you tick it**
+  (`user_games.progress_custom_display`, migration 0029 — "Display on game",
+  beside the hours field). A card with no mission list quotes the main story,
+  so the game you type a custom time *for* — one nobody has a play time for —
+  showed nothing at all. `cardLength(entry)` (`packages/shared/src/progress.ts`)
+  is the one place that picks the figure a card goes by: your custom time
+  when the basis is `custom`, the tick is on and something is typed,
+  otherwise the main story. The web card, the phone's library and console
+  rows and both apps' "shortest first" sort all call it, so a game showing
+  18h also sorts as 18h. It is **opt-in and per game** because the figure is
+  a target as often as a length — "I only want the first act" replacing a
+  game's real time on its card should be something you asked for — which is
+  also why the migration leaves it off for custom times that already exist.
+  And it is read **only while the basis is still `custom`**: the tick, like
+  the figure, outlives a switch to another basis, but a card showing a time
+  whose control is no longer on screen would have nothing to explain it.
+- **The library's platform filter is a tick list, and any-of.** Tick as many
+  platforms as you like and a game on *any* of them shows — "what can I play
+  on these" — rather than only the games you own on every one, which would
+  empty the grid the moment two consoles were ticked. It's `DropdownCheckItem`
+  (`components/Dropdown.tsx`, `role="menuitemcheckbox"`), which doesn't close
+  the menu, so several ticks are one visit. The parent rule carries over:
+  ticking PC covers its storefronts, which then show ticked and greyed
+  ("Included in PC (all)"), and any that were ticked on their own are dropped
+  from the set so "PC + Steam" isn't counted as two platforms that filter like
+  one. An empty set means all, and the "All platforms" row at the top is how
+  you get back there.
 
 ## Commands
 
@@ -388,6 +415,8 @@ was dev-only). Never use `db push`.
 | 27 graphs you name, versions on the graph, a time you type | see git log | **A collection holds several graphs** (migration 0028): `collection_graphs` + `collection_graph_nodes`, with `collection_links` gaining `graph_id` and `collection_games` losing `position_x/y` — backfilled so every collection keeps its one graph, as "Play order", exactly as it was laid out. `POST`/`PATCH`/`DELETE /api/collections/:id/graphs[/:graphId]` create (fresh grid, or `copyFromGraphId` for another graph's layout and arrows), rename and delete; `PUT …/graphs/:graphId/layout` replaced `PUT /:id/layout` and only touches its own graph. Web: a tab per graph beside **List**, a "＋ New graph" form, and the graph's own toolbar (`CollectionGraph.tsx`, lifted out of the page) — Arrange and Connect moved there from the page header, joined by Rename and Delete graph. The open tab is in the URL (`?graph=`), so Back from a game returns to the graph you clicked it on. Mobile picks which graph to flatten from a chip row. **Graphs show remakes and remasters**: a node whose game has linked versions wears a numbered badge; hovering it (or clicking the badge, which pins it) opens a card of the original, remakes and other versions, each a link; **Show latest versions** swaps every such node for the newest version you've linked. **A custom time for the estimate**: a fourth "based on" choice on the Progress tab with an hours field, for games with no play time and for playthroughs none of the three describe |
 
 | 27b rename a collection | see git log | **A collection can be renamed.** `PATCH /api/collections/:id` always took a `name`; nothing in either app sent one. Web: a **✎ Rename** button in the header row turns the title into a field in place — Enter saves, Escape cancels, and a name you already use (409) or one the content filter refuses (400) keeps the field open with the reason under it. It shipped first as an unlabelled grey pencil beside the title, chosen to keep it apart from the graph's own rename, and the owner of the app couldn't find it — so it's a labelled button now and the graph's is **Rename graph**. An icon-only control with no text is not a place to put a feature someone has just asked for. Mobile: a Rename button and a field inline at the top of the list — not a bottom sheet, which a keyboard covers when the sheet is this short — and the screen's header now shows the collection's name where it used to say "Collection". `collectionSchema.name` trims before it measures (`COLLECTION_NAME_MAX`): PATCH writes the parsed value straight to the row, so a rename to spaces was a blank title and "Zelda " passed as a different name from "Zelda" |
+
+| 28 a custom time on the card, platforms you tick | see git log | **A custom time can go on the library card** (migration 0029, `user_games.progress_custom_display`): a "Display on game" tick beside the hours field on the Progress tab. A game with no mission list quotes its main story on its card, so the game a custom time gets typed *for* — one with no play time anywhere — showed nothing. `cardLength()` in shared `progress.ts` picks the figure for the web card, the phone's library and console rows, and both apps' "shortest first" sort. Opt-in, per game, and only read while the basis is still `custom`. The Progress tab says why when a ticked time still isn't showing (the game is marked endless, or time badges are off in Preferences), and the no-times "How long to beat" card gained the **Endless game** checkbox the full card always had — a no-times game marked endless from the bulk bar could never be unmarked. **The library's platform filter is a tick list**: any number of platforms, a game on *any* of them matches, and ticking a platform covers its storefronts. `DropdownCheckItem` is the new piece of `Dropdown.tsx`; `Dropdown` itself now slides its panel back inside the window when the edge it's aligned to would push it off, and the filter button is a fixed width so that ticking doesn't move the open menu |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
@@ -585,9 +614,41 @@ file to be provided for reference).
   but only because it has always summed the main-story figure and ignored the
   basis entirely.
 - **Custom time is set on the web.** Mobile has no basis picker at all (it
-  never did), so it can't choose the custom basis or enter a time — but its
-  read-only estimate comes from the same API and follows whatever the web
-  set.
+  never did), so it can't choose the custom basis, enter a time or tick
+  "Display on game" — but its read-only estimate comes from the same API and
+  follows whatever the web set, and its library and console rows show a
+  displayed custom time through the same `cardLength`.
+- **"Display on game" changes what the card quotes, not what the game is.**
+  The "How long to beat" card, the dashboard's backlog total and the
+  community average still use the game's real figures. On the card it only
+  replaces the *length*: a game with a mission list shows its countdown
+  whether the box is ticked or not — and on the custom basis that countdown
+  is already divided out of the custom time — so the tick is what decides the
+  badge for a game with no list, which is most of them.
+- **A ticked custom time can still be kept off the card** by the two things
+  that keep every time off it: the game being marked endless
+  (`ttb_enabled = false`) and `preferences.show_time_badge` being off. The
+  Progress tab names whichever applies under the tick, because "I ticked it
+  and nothing happened" is the one way the control can look broken. The
+  endless case is why the no-times "How long to beat" card now carries the
+  **Endless game** checkbox too: the bulk bar can only ever *mark* a game
+  endless, and the slim card had no box to untick.
+- **The platform tick list is web-only, and it's the only filter that became
+  one.** Mobile's filter sheet still picks a single console, and the tag
+  filter is still a single-choice select — on purpose: several tags is a real
+  any-or-all question ("co-op *and* short"), where platforms have one
+  sensible answer. What's ticked is page state
+  like the other filters, not a preference or a URL parameter, and a ticked
+  platform that leaves the library (a bulk "Remove platform" while filtered
+  to it) is dropped from the filter rather than left filtering to nothing.
+- **`Dropdown` slides its panel on screen with an offset, not a transform.**
+  It measures once when it opens and moves the panel in from whichever edge
+  it would cross (never further left than the gutter). A `translateX` looked
+  right and still widened the page: Chrome counts a transformed box's
+  *original* position toward the document's scroll width, which is the
+  sideways scrollbar the nudge exists to prevent. It isn't re-measured while
+  open, which is why the platform button is a fixed `w-36` — a button that
+  resized with its label would move the menu after the measurement.
 - **`progress_basis` is still a pg enum**, unlike `user_games.status`, so
   `custom` was an `ALTER TYPE … ADD VALUE`. Postgres allows that inside the
   migrator's transaction but won't let the same transaction *use* the new

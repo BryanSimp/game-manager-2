@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LibraryEntry, OwnershipFormat } from "@gm/shared";
+import { cardLength, type LibraryEntry, type OwnershipFormat } from "@gm/shared";
 import { api } from "@/lib/api";
 import { formatHours, resolveImage, statusStyle } from "@/lib/ui";
 import { formatReleaseDate } from "@/lib/platforms";
@@ -328,7 +328,7 @@ function GameRow({
   onPress: () => void;
 }) {
   const status = statusStyle(entry.status, badgeOpacity);
-  const ttb = formatHours(entry.game.ttbMain);
+  const ttb = formatHours(cardLength(entry).seconds);
   // on PC's page, say which store each game came from
   const here = entry.platforms.filter(
     (p) => p.platformId === platformId || p.parentPlatformId === platformId,
