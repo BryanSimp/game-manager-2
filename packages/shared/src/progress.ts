@@ -67,6 +67,34 @@ export function ttbForBasis(
 }
 
 /**
+ * The full length a library card quotes for a game, and whether it's the one
+ * you typed.
+ *
+ * Normally that's the main story. A game on the `custom` basis shows your own
+ * figure instead once you've asked it to ("Display on game") — which, short
+ * of writing it a mission list to count down, is the only way a game nobody
+ * has a play time for gets a time on its card.
+ * The basis has to still be `custom`: the figure and the flag both outlive a
+ * switch to another basis, and a card showing a time whose control is no
+ * longer on screen would have nothing to explain it.
+ *
+ * Shared so the web card, the phone's rows and both "shortest first" sorts
+ * agree on which number a game goes by.
+ */
+export function cardLength(entry: {
+  progressBasis: ProgressBasis;
+  progressCustomSeconds: number | null;
+  progressCustomDisplay: boolean;
+  game: { ttbMain: number | null };
+}): { seconds: number | null; custom: boolean } {
+  const typed = entry.progressCustomSeconds;
+  if (entry.progressBasis === "custom" && entry.progressCustomDisplay && typed && typed > 0) {
+    return { seconds: typed, custom: true };
+  }
+  return { seconds: entry.game.ttbMain, custom: false };
+}
+
+/**
  * Where a displayed play time came from.
  *
  * 'igdb' and 'manual' are stored on the shared catalog row (`games.ttb_source`).

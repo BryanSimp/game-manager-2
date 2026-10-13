@@ -41,6 +41,10 @@ export const userGames = pgTable(
     // and it feeds the community average — this is a target you picked, and
     // "I only want the first act" must not become anyone else's play time.
     progressCustomSeconds: integer("progress_custom_seconds"),
+    // show that length on the game's library card in place of the main-story
+    // time. Opt-in per game: the figure is a target, and a card that quietly
+    // swapped the game's real length for it would be showing a different fact.
+    progressCustomDisplay: boolean("progress_custom_display").notNull().default(false),
     // synced from Steam (GetOwnedGames playtime_forever)
     steamPlaytimeMinutes: integer("steam_playtime_minutes"),
     // "100% completed" sub-state of finished (all collectibles/endings/etc.)

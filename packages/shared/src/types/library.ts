@@ -61,6 +61,12 @@ export interface LibraryEntry {
    */
   progressCustomSeconds: number | null;
   /**
+   * Whether that custom length goes on the game's library card. Kept across
+   * a change of basis like the figure is, but only read while the basis is
+   * `custom` — see `cardLength`.
+   */
+  progressCustomDisplay: boolean;
+  /**
    * Play time left, from the mission checklist. null when the game has no
    * mission list or no time for the chosen basis — the library sort treats
    * that as "unknown" rather than "zero".
@@ -204,6 +210,8 @@ export interface UpdateEntryInput {
   progressBasis?: ProgressBasis;
   /** seconds; null clears it. Only read while the basis is `custom`. */
   progressCustomSeconds?: number | null;
+  /** put the custom length on the game's library card */
+  progressCustomDisplay?: boolean;
 }
 export interface BulkUpdateInput {
   ids: string[];

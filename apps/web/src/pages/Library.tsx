@@ -1,11 +1,17 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { BulkUpdateInput, LibraryEntry, OwnershipFormat } from "@gm/shared";
+import {
+  cardLength,
+  type BulkUpdateInput,
+  type LibraryEntry,
+  type OwnershipFormat,
+} from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { GameCard } from "../components/GameCard.js";
 import { ConsoleSelect } from "../components/ConsolePicker.js";
+import { Dropdown, DropdownCheckItem } from "../components/Dropdown.js";
 import { statusChip, statusLabel } from "../lib/format.js";
 import { useCategories } from "../lib/categories.js";
 import { usePreferences } from "../lib/prefs.js";
@@ -63,8 +69,12 @@ function sortEntries(entries: LibraryEntry[], sort: SortKey): LibraryEntry[] {
     case "added":
       return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     case "ttb":
+      // the length each card is showing, so a game displaying your custom time
+      // sorts by it instead of sinking as "unknown" with a time on its badge
       return list.sort(
-        (a, b) => (a.game.ttbMain ?? Number.MAX_SAFE_INTEGER) - (b.game.ttbMain ?? Number.MAX_SAFE_INTEGER),
+        (a, b) =>
+          (cardLength(a).seconds ?? Number.MAX_SAFE_INTEGER) -
+          (cardLength(b).seconds ?? Number.MAX_SAFE_INTEGER),
       );
     case "estimated":
       // games you've part-finished float up; anything without a mission list
@@ -86,7 +96,8 @@ export function LibraryPage() {
   const [filterDraft, setFilterDraft] = useState<string | null>(null);
   const statusFilter = filterDraft ?? prefs?.defaultLibraryFilter ?? "all";
   const [only100, setOnly100] = useState(false);
-  const [platformFilter, setPlatformFilter] = useState<string>("all");
+  // every platform you've ticked; empty means all of them
+  const [platformFilter, setPlatformFilter] = useState<ReadonlySet<string>>(new Set());
   const [tagFilter, setTagFilter] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("title");
   const [search, setSearch] = useState("");
@@ -146,10 +157,29 @@ export function LibraryPage() {
     });
   }
 
+  /**
+   * Tick or untick one platform in the filter. Ticking a platform that has
+   * storefronts drops any of them that were ticked on their own: the parent
+   * already covers them, and leaving them in would call "PC + Steam" two
+   * platforms when it filters exactly like one.
+   */
+  function togglePlatform(id: string, childIds: string[] = []) {
+    releaseHold();
+    setPlatformFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else {
+        next.add(id);
+        for (const child of childIds) next.delete(child);
+      }
+      return next;
+    });
+  }
+
   // Filter options derived from what's actually in the library. Storefronts
-  // are listed under the platform they belong to, and picking the parent (PC)
+  // are listed under the platform they belong to, and ticking the parent (PC)
   // matches its stores too — a Steam game is a PC game.
-  const { platformOptions, tagOptions } = useMemo(() => {
+  const { platformGroups, tagOptions } = useMemo(() => {
     const parents = new Map<string, { label: string; children: Map<string, string> }>();
     const tags = new Map<string, string>();
     for (const e of library.data ?? []) {
@@ -171,32 +201,57 @@ export function LibraryPage() {
       }
       for (const t of e.tags) tags.set(t.id, t.name);
     }
-    const options: Array<[string, string]> = [];
-    for (const [id, parent] of [...parents.entries()].sort((a, b) =>
-      a[1].label.localeCompare(b[1].label),
-    )) {
-      options.push([id, parent.children.size > 0 ? `${parent.label} (all)` : parent.label]);
-      for (const [childId, name] of [...parent.children.entries()].sort((a, b) =>
-        a[1].localeCompare(b[1]),
-      )) {
-        options.push([childId, `   ↳ ${name}`]);
-      }
-    }
+    const groups = [...parents.entries()]
+      .sort((a, b) => a[1].label.localeCompare(b[1].label))
+      .map(([id, parent]) => ({
+        id,
+        label: parent.children.size > 0 ? `${parent.label} (all)` : parent.label,
+        children: [...parent.children.entries()]
+          .sort((a, b) => a[1].localeCompare(b[1]))
+          .map(([childId, name]) => ({ id: childId, label: name })),
+      }));
     return {
-      platformOptions: options,
+      platformGroups: groups,
       tagOptions: [...tags.entries()].sort((a, b) => a[1].localeCompare(b[1])),
     };
   }, [library.data]);
+
+  // The ticked platforms that are still on offer. One that has left the
+  // library since — a bulk "Remove platform" while filtered to it — would
+  // otherwise filter to nothing, with no ticked box left to say why.
+  const { activePlatforms, platformLabel, platformTitle } = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const group of platformGroups) {
+      names.set(group.id, group.label);
+      for (const child of group.children) names.set(child.id, child.label);
+    }
+    // in menu order, so the button's tooltip lists them the way the menu does
+    const active = new Set([...names.keys()].filter((id) => platformFilter.has(id)));
+    const ticked = [...active].map((id) => names.get(id)!);
+    return {
+      activePlatforms: active,
+      platformLabel:
+        ticked.length === 0
+          ? "All platforms"
+          : ticked.length === 1
+            ? ticked[0]!
+            : `${ticked.length} platforms`,
+      platformTitle: ticked.join(", "),
+    };
+  }, [platformGroups, platformFilter]);
 
   const { entries, offFilter } = useMemo(() => {
     const matches = (e: LibraryEntry) => {
       if (statusFilter !== "all" && e.status !== statusFilter) return false;
       if (statusFilter === "finished" && only100 && !e.completed100) return false;
-      // a parent platform matches its storefronts as well as itself
+      // any one of the ticked platforms is a match, and a parent platform
+      // matches its storefronts as well as itself
       if (
-        platformFilter !== "all" &&
+        activePlatforms.size > 0 &&
         !e.platforms.some(
-          (p) => p.platformId === platformFilter || p.parentPlatformId === platformFilter,
+          (p) =>
+            activePlatforms.has(p.platformId) ||
+            (p.parentPlatformId !== null && activePlatforms.has(p.parentPlatformId)),
         )
       )
         return false;
@@ -221,7 +276,7 @@ export function LibraryPage() {
       entries: sorted.sort((a, b) => (rank.get(a.id) ?? last) - (rank.get(b.id) ?? last)),
       offFilter: new Set(sorted.filter((e) => !matches(e)).map((e) => e.id)),
     };
-  }, [library.data, statusFilter, only100, platformFilter, tagFilter, search, sort, heldOrder]);
+  }, [library.data, statusFilter, only100, activePlatforms, tagFilter, search, sort, heldOrder]);
 
   const counts = new Map<string, number>();
   for (const e of library.data ?? []) {
@@ -248,22 +303,69 @@ export function LibraryPage() {
           placeholder="Filter by title…"
           className="w-44 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
         />
-        {platformOptions.length > 0 && (
-          <select
-            value={platformFilter}
-            onChange={(e) => {
-              releaseHold();
-              setPlatformFilter(e.target.value);
-            }}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm"
+        {platformGroups.length > 0 && (
+          <Dropdown
+            label={<span className="min-w-0 flex-1 truncate text-left">{platformLabel}</span>}
+            title={
+              activePlatforms.size > 0
+                ? `Showing games on: ${platformTitle}`
+                : "Tick as many platforms as you like — a game on any of them is shown"
+            }
+            // a fixed width, like the selects beside it: the label changes with
+            // every tick, and a button that resized would slide the open menu
+            // sideways under the pointer in a toolbar that's right-aligned
+            buttonClassName={`inline-flex w-36 items-center rounded-lg border px-2 py-1.5 text-sm ${
+              activePlatforms.size > 0
+                ? "border-indigo-500 bg-indigo-600/20 text-indigo-200"
+                : "border-zinc-700 bg-zinc-800"
+            }`}
           >
-            <option value="all">All platforms</option>
-            {platformOptions.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
-              </option>
-            ))}
-          </select>
+            {() => (
+              <div className="max-h-80 overflow-y-auto">
+                <DropdownCheckItem
+                  checked={activePlatforms.size === 0}
+                  onToggle={() => {
+                    releaseHold();
+                    setPlatformFilter(new Set());
+                  }}
+                >
+                  All platforms
+                </DropdownCheckItem>
+                <div className="mx-2 my-1.5 border-t border-zinc-800" />
+                {platformGroups.map((group) => {
+                  const whole = activePlatforms.has(group.id);
+                  return (
+                    <Fragment key={group.id}>
+                      <DropdownCheckItem
+                        checked={whole}
+                        onToggle={() =>
+                          togglePlatform(
+                            group.id,
+                            group.children.map((child) => child.id),
+                          )
+                        }
+                      >
+                        {group.label}
+                      </DropdownCheckItem>
+                      {group.children.map((child) => (
+                        <DropdownCheckItem
+                          key={child.id}
+                          indent
+                          // the platform above already takes in its stores
+                          checked={whole || activePlatforms.has(child.id)}
+                          disabled={whole}
+                          title={whole ? `Included in ${group.label}` : undefined}
+                          onToggle={() => togglePlatform(child.id)}
+                        >
+                          {child.label}
+                        </DropdownCheckItem>
+                      ))}
+                    </Fragment>
+                  );
+                })}
+              </div>
+            )}
+          </Dropdown>
         )}
         {tagOptions.length > 0 && (
           <select

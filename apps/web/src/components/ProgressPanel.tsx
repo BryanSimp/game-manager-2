@@ -54,9 +54,17 @@ export function ProgressPanel({ entry }: { entry: LibraryEntry }) {
     onSuccess: estimateChanged,
   });
 
+  const prefs = usePreferences();
   const p = progress.data;
   const hasMissions = !!p && p.total > 0;
   const custom = entry.progressBasis === "custom";
+  // ticking "Display on game" and then seeing nothing is the one way this
+  // control can look broken, so name whatever else is keeping the badge off
+  const badgeBlocked = !entry.ttbEnabled
+    ? "This game is marked endless, which keeps any time off its card — untick “Endless game” under How long to beat to show it."
+    : prefs && !prefs.showTimeBadge
+      ? "Time badges are switched off in Preferences, so no card shows a time until they're back on."
+      : null;
 
   return (
     <div className="max-w-2xl">
@@ -79,15 +87,21 @@ export function ProgressPanel({ entry }: { entry: LibraryEntry }) {
               </select>
             </label>
             {custom && <CustomTimeField entry={entry} onSaved={estimateChanged} />}
+            {custom && <DisplayOnGameToggle entry={entry} onSaved={estimateChanged} />}
           </div>
         </div>
 
         {custom && (
           <p className="mt-2 text-xs text-zinc-500">
-            {entry.progressCustomSeconds
-              ? "Your own figure — it drives this estimate and nothing else. It isn't shared, and it doesn't change the game's play times."
-              : "Type how long you expect this playthrough to take. Useful when nobody has a play time for the game, or when none of the three fits how you're playing it."}
+            {!entry.progressCustomSeconds
+              ? "Type how long you expect this playthrough to take. Useful when nobody has a play time for the game, or when none of the three fits how you're playing it."
+              : entry.progressCustomDisplay
+                ? "Your own figure — it drives this estimate and the time on this game's library card. It isn't shared, and it doesn't change the game's play times."
+                : "Your own figure — it drives this estimate and nothing else. It isn't shared, and it doesn't change the game's play times."}
           </p>
+        )}
+        {custom && entry.progressCustomDisplay && badgeBlocked && (
+          <p className="mt-1 text-xs text-amber-400/80">{badgeBlocked}</p>
         )}
 
         {!hasMissions ? (
@@ -206,6 +220,50 @@ function CustomTimeField({ entry, onSaved }: { entry: LibraryEntry; onSaved: () 
       </button>
       {problem && <span className="text-red-400">{problem}</span>}
     </form>
+  );
+}
+
+/**
+ * "Display on game": put the custom time on the game's library card.
+ *
+ * A card with no mission list quotes the main story, and a game nobody has a
+ * play time for quotes nothing — so a custom time typed for exactly that game
+ * was invisible everywhere but this tab. It's a tick rather than automatic
+ * because the figure is a target as often as it's a length: "I only want the
+ * first act" shouldn't replace the game's real time on its card unasked.
+ *
+ * Saves on the click, like the other tickboxes on a game's page.
+ */
+function DisplayOnGameToggle({ entry, onSaved }: { entry: LibraryEntry; onSaved: () => void }) {
+  // null until you click, so the saved value shows through — and the tick
+  // doesn't wait on the refetch that follows a save to move
+  const [draft, setDraft] = useState<boolean | null>(null);
+  useEffect(() => setDraft(null), [entry.progressCustomDisplay]);
+
+  const save = useMutation({
+    mutationFn: (progressCustomDisplay: boolean) =>
+      api.updateEntry(entry.id, { progressCustomDisplay }),
+    onSuccess: onSaved,
+    onError: () => setDraft(null),
+  });
+
+  return (
+    <label
+      className="flex cursor-pointer items-center gap-1.5 text-zinc-400"
+      title="Show this time on the game's card in your library, in place of the main-story time. A game with a mission list counts down from it either way."
+    >
+      <input
+        type="checkbox"
+        checked={draft ?? entry.progressCustomDisplay}
+        disabled={save.isPending}
+        onChange={(ev) => {
+          setDraft(ev.target.checked);
+          save.mutate(ev.target.checked);
+        }}
+      />
+      Display on game
+      {save.isError && <span className="text-red-400">{save.error.message}</span>}
+    </label>
   );
 }
 

@@ -650,6 +650,14 @@ function TimeToBeatCard({
         >
           + Add your play time
         </button>
+        {/* here as well as on the full card: a game with no times can still be
+            marked endless (the library's bulk bar does it), and that hides a
+            custom time set to display — with no box to untick, it was a
+            state you could get into and never out of */}
+        <label className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
+          <input type="checkbox" checked={!entry.ttbEnabled} onChange={onToggleEndless} />
+          Endless game (exclude from backlog time)
+        </label>
       </div>
     );
   }
