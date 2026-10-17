@@ -31,6 +31,7 @@ export default function AddGameScreen() {
     queryFn: () => api.searchGames(query),
     enabled: query.length >= 2,
   });
+  const steam = search.data?.steam;
 
   const add = useMutation({
     mutationFn: (r: SearchResult) =>
@@ -54,7 +55,7 @@ export default function AddGameScreen() {
             style={styles.search}
             value={input}
             onChangeText={setInput}
-            placeholder="Search for a game…"
+            placeholder="Search, or paste a Steam link or app ID"
             autoFocus
             autoCapitalize="none"
             returnKeyType="search"
@@ -72,6 +73,16 @@ export default function AddGameScreen() {
             <Icon name="alert-circle-outline" size={15} color={colors.warning} />
             <Text style={[type.caption, { flex: 1, color: colors.warning }]}>
               IGDB isn't configured — ask the admin to add credentials in web Settings.
+            </Text>
+          </View>
+        )}
+        {steam && !steam.found && (
+          <View style={styles.note}>
+            <Icon name="information-circle-outline" size={15} color={colors.textMuted} />
+            <Text style={[type.caption, { flex: 1 }]}>
+              {steam.storeName
+                ? `Nothing links Steam app ${steam.appId} to a game, so this searched for its store name, “${steam.storeName}”, instead.`
+                : `Couldn't find Steam app ${steam.appId}. Check the number, or search by name.`}
             </Text>
           </View>
         )}
@@ -105,6 +116,11 @@ export default function AddGameScreen() {
                   {item.title}
                   {item.releaseYear ? ` (${item.releaseYear})` : ""}
                 </Text>
+                {item.steamAppId ? (
+                  <Text style={[type.micro, { marginTop: 3, color: colors.accentText }]}>
+                    Steam app {item.steamAppId}
+                  </Text>
+                ) : null}
                 {item.platforms.length > 0 && (
                   <Text style={[type.micro, { marginTop: 3 }]} numberOfLines={1}>
                     {item.platforms.join(" · ")}
@@ -157,6 +173,16 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 6,
     backgroundColor: "#451a03",
+    borderRadius: radius.sm,
+    padding: space.sm,
+  },
+  note: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: radius.sm,
     padding: space.sm,
   },

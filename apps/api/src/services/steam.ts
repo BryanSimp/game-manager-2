@@ -103,38 +103,81 @@ export async function getOwnedGames(steamId: string): Promise<SteamOwnedGame[]> 
 }
 
 /**
- * Release year for an app, from the public storefront API (no key, not part
- * of the Web API). Used only to break ties between identically-named games —
- * "Deadlock" is a 1996 strategy game *and* a 2024 Valve shooter, and title
- * similarity alone can't tell them apart.
+ * An app's name and release year, from the public storefront API (no key,
+ * not part of the Web API). Two readers: the import's release-year tiebreak
+ * and a search by app id that nothing else could resolve.
  *
- * Cached for the process lifetime; misses are cached too so a store page that
- * doesn't exist isn't re-requested on every import.
+ * Cached for the process lifetime, and an app the store says doesn't exist is
+ * cached too, so it isn't re-requested on every import. A failed *request* is
+ * not cached — a 429 now shouldn't hide the app until the next restart.
  */
-const releaseYearCache = new Map<number, number | null>();
+interface StoreApp {
+  name: string | null;
+  releaseYear: number | null;
+}
+const STORE_CACHE_MAX = 5000;
+const storeAppCache = new Map<number, StoreApp | null>();
 
-export async function getAppReleaseYear(appId: number): Promise<number | null> {
-  const cached = releaseYearCache.get(appId);
+async function getStoreApp(appId: number): Promise<StoreApp | null> {
+  const cached = storeAppCache.get(appId);
   if (cached !== undefined) return cached;
-  const year = await throttled(async () => {
+  const result = await throttled(async () => {
     try {
       const res = await fetch(
-        `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=release_date`,
+        `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=basic,release_date`,
       );
-      if (!res.ok) return null;
+      if (!res.ok) return undefined;
       const body = (await res.json()) as Record<
         string,
-        { success?: boolean; data?: { release_date?: { date?: string } } }
+        { success?: boolean; data?: { name?: string; release_date?: { date?: string } } }
       >;
-      const date = body[String(appId)]?.data?.release_date?.date;
-      const match = date?.match(/\b(\d{4})\b/);
-      return match ? Number(match[1]) : null;
+      const data = body[String(appId)]?.data;
+      if (!data) return null; // `success: false` — no such app
+      const match = data.release_date?.date?.match(/\b(\d{4})\b/);
+      return { name: data.name?.trim() || null, releaseYear: match ? Number(match[1]) : null };
     } catch {
-      return null; // the store API is best-effort; a miss just means no tiebreak
+      return undefined; // the store API is best-effort
     }
   });
-  releaseYearCache.set(appId, year);
-  return year;
+  if (result === undefined) return null;
+  // searches can ask about any number at all, so the cache can't grow forever
+  if (storeAppCache.size >= STORE_CACHE_MAX) storeAppCache.clear();
+  storeAppCache.set(appId, result);
+  return result;
+}
+
+/**
+ * Release year for an app. Used only to break ties between identically-named
+ * games — "Deadlock" is a 1996 strategy game *and* a 2024 Valve shooter, and
+ * title similarity alone can't tell them apart.
+ */
+export async function getAppReleaseYear(appId: number): Promise<number | null> {
+  return (await getStoreApp(appId))?.releaseYear ?? null;
+}
+
+/**
+ * The storefront API allows roughly 200 requests per five minutes per IP, and
+ * every user of this server shares that one IP. Imports cap their own use per
+ * run; a search is whatever anyone types, so it draws on a budget well under
+ * the limit instead — an exhausted budget only costs the name fallback.
+ */
+const SEARCH_BUDGET = { max: 60, windowMs: 5 * 60_000 };
+const searchLookups: number[] = [];
+
+function takeSearchBudget(): boolean {
+  const now = Date.now();
+  while (searchLookups.length > 0 && searchLookups[0]! <= now - SEARCH_BUDGET.windowMs) {
+    searchLookups.shift();
+  }
+  if (searchLookups.length >= SEARCH_BUDGET.max) return false;
+  searchLookups.push(now);
+  return true;
+}
+
+/** Steam's name for an app, for a search by app id; null when unknown. */
+export async function getStoreAppName(appId: number): Promise<string | null> {
+  if (!storeAppCache.has(appId) && !takeSearchBudget()) return null;
+  return (await getStoreApp(appId))?.name ?? null;
 }
 
 /** Achievement definitions for a game; empty when the game has none. */

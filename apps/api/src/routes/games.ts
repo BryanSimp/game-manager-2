@@ -5,17 +5,27 @@ import {
   GAME_LINK_ROLES,
   GAME_LINK_ROLE_META,
   GAME_LINK_SORTS,
+  parseSteamAppQuery,
   type CatalogGame,
   type GameLink,
   type GameLinkRole,
   type GameLinkSection,
   type GameLinkSort,
   type GameLinks,
+  type SearchResponse,
+  type SearchResult,
 } from "@gm/shared";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
-import { igdbConfigured, igdbCoverUrl, searchIgdb } from "../services/igdb.js";
+import {
+  getIgdbGameBySteamAppId,
+  igdbConfigured,
+  igdbCoverUrl,
+  searchIgdb,
+  type IgdbGame,
+} from "../services/igdb.js";
+import { getStoreAppName } from "../services/steam.js";
 import { upsertGameFromIgdb } from "../services/catalog.js";
 import { ownedConsoleIds } from "../services/consoles.js";
 import { MIN_RATINGS, communityRatings, resolveTtbFor } from "../services/community.js";
@@ -41,47 +51,103 @@ export function registerGameRoutes(app: FastifyInstance): void {
       .where(eq(schema.userGames.userId, user.id));
     const ownedIgdb = new Set(owned.map((o) => o.igdbId).filter((v) => v !== null));
     const ownedGames = new Set(owned.map((o) => o.gameId));
+    const igdb = await igdbConfigured();
 
-    if (await igdbConfigured()) {
-      const igdbResults = (await searchIgdb(q, 20, year)) ?? [];
-      return {
-        igdb: true,
-        results: igdbResults.map((g) => ({
-          igdbId: g.id,
-          gameId: null,
-          title: g.name,
-          releaseYear: g.first_release_date
-            ? new Date(g.first_release_date * 1000).getFullYear()
-            : null,
-          coverSrc: g.cover ? igdbCoverUrl(g.cover.image_id) : null,
-          platforms: g.platforms?.map((p) => p.name) ?? [],
-          summary: g.summary ?? null,
-          inLibrary: ownedIgdb.has(g.id),
-        })),
-      };
+    const fromIgdb = (g: IgdbGame): SearchResult => ({
+      igdbId: g.id,
+      gameId: null,
+      title: g.name,
+      releaseYear: g.first_release_date
+        ? new Date(g.first_release_date * 1000).getFullYear()
+        : null,
+      coverSrc: g.cover ? igdbCoverUrl(g.cover.image_id) : null,
+      platforms: g.platforms?.map((p) => p.name) ?? [],
+      summary: g.summary ?? null,
+      inLibrary: ownedIgdb.has(g.id),
+    });
+    const fromCatalog = (g: typeof schema.games.$inferSelect): SearchResult => ({
+      igdbId: g.igdbId,
+      gameId: g.id,
+      title: g.title,
+      releaseYear: g.releaseDate ? Number(g.releaseDate.slice(0, 4)) : null,
+      coverSrc: g.coverImageId ? `/api/images/${g.coverImageId}` : g.coverUrl,
+      platforms: [],
+      summary: g.summary,
+      inLibrary: ownedGames.has(g.id),
+    });
+
+    /** IGDB when it's configured; the local catalog when it isn't. */
+    async function titleSearch(text: string, limit = 20): Promise<SearchResult[]> {
+      if (igdb) return ((await searchIgdb(text, limit, year)) ?? []).map(fromIgdb);
+      const local = await db
+        .select()
+        .from(schema.games)
+        .where(ilike(schema.games.title, `%${text}%`))
+        .limit(limit);
+      return local
+        .filter((g) => !year || g.releaseDate?.startsWith(String(year)))
+        .map(fromCatalog);
     }
 
-    // fallback: local catalog search when IGDB isn't configured
-    const local = await db
-      .select()
-      .from(schema.games)
-      .where(ilike(schema.games.title, `%${q}%`))
-      .limit(20);
-    return {
-      igdb: false,
-      results: local
-        .filter((g) => !year || g.releaseDate?.startsWith(String(year)))
-        .map((g) => ({
-          igdbId: g.igdbId,
-          gameId: g.id,
-          title: g.title,
-          releaseYear: g.releaseDate ? Number(g.releaseDate.slice(0, 4)) : null,
-          coverSrc: g.coverImageId ? `/api/images/${g.coverImageId}` : g.coverUrl,
-          platforms: [],
-          summary: g.summary,
-          inLibrary: ownedGames.has(g.id),
-        })),
+    /**
+     * The one game a Steam app id belongs to. IGDB's external-id table first,
+     * since it's the same answer the Steam import trusts; then the catalog's
+     * own `steam_app_id`, which an import or a "Wrong game?" fix wrote.
+     */
+    async function steamAppGame(appId: number): Promise<SearchResult | null> {
+      if (igdb) {
+        const game = await getIgdbGameBySteamAppId(appId);
+        if (game) return fromIgdb(game);
+      }
+      const [row] = await db
+        .select()
+        .from(schema.games)
+        .where(eq(schema.games.steamAppId, appId))
+        .limit(1);
+      return row ? fromCatalog(row) : null;
+    }
+
+    const steamQuery = parseSteamAppQuery(q);
+    if (!steamQuery) {
+      const response: SearchResponse = { igdb, results: await titleSearch(q) };
+      return response;
+    }
+
+    // Searching by Steam app id — some games only turn up for the exact right
+    // spelling, and a store link has none to get wrong. A bare number is a
+    // title as well ("1942"), so it's searched as one either way and the app,
+    // if there is one, goes on top.
+    const { appId, explicit } = steamQuery;
+    const [exact, asTitle] = await Promise.all([
+      steamAppGame(appId),
+      explicit ? Promise.resolve([]) : titleSearch(q),
+    ]);
+    if (exact) {
+      const response: SearchResponse = {
+        igdb,
+        results: dedupeResults([{ ...exact, steamAppId: appId }, ...asTitle]).slice(0, 20),
+        steam: { appId, found: true, storeName: null },
+      };
+      return response;
+    }
+
+    // Nothing links the app to a game, so ask Steam what it's called and
+    // search for that — a guess, and the response says so.
+    const storeName = await getStoreAppName(appId);
+    if (!storeName) {
+      // a number nobody knows is only a title search, not a failed lookup
+      const response: SearchResponse = explicit
+        ? { igdb, results: [], steam: { appId, found: false, storeName: null } }
+        : { igdb, results: asTitle };
+      return response;
+    }
+    const byName = await titleSearch(storeName.replace(/[™®©]/g, " "), 10);
+    const response: SearchResponse = {
+      igdb,
+      results: dedupeResults([...byName, ...asTitle]).slice(0, 20),
+      steam: { appId, found: false, storeName },
     };
+    return response;
     },
   );
 
@@ -442,6 +508,15 @@ export function registerGameRoutes(app: FastifyInstance): void {
       .leftJoin(parentPlatform, eq(schema.platforms.parentPlatformId, parentPlatform.id))
       .orderBy(schema.platforms.sortOrder);
     return rows.map((p) => ({ ...p, owned: owned.has(p.id) }));
+  });
+}
+
+/** First occurrence wins, so a Steam app's own game keeps its place on top. */
+function dedupeResults(results: SearchResult[]): SearchResult[] {
+  const seen = new Set<string>();
+  return results.filter((r) => {
+    const key = r.igdbId !== null ? `igdb:${r.igdbId}` : `game:${r.gameId ?? r.title}`;
+    return !seen.has(key) && seen.add(key);
   });
 }
 

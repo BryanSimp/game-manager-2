@@ -417,6 +417,7 @@ was dev-only). Never use `db push`.
 | 27b rename a collection | see git log | **A collection can be renamed.** `PATCH /api/collections/:id` always took a `name`; nothing in either app sent one. Web: a **✎ Rename** button in the header row turns the title into a field in place — Enter saves, Escape cancels, and a name you already use (409) or one the content filter refuses (400) keeps the field open with the reason under it. It shipped first as an unlabelled grey pencil beside the title, chosen to keep it apart from the graph's own rename, and the owner of the app couldn't find it — so it's a labelled button now and the graph's is **Rename graph**. An icon-only control with no text is not a place to put a feature someone has just asked for. Mobile: a Rename button and a field inline at the top of the list — not a bottom sheet, which a keyboard covers when the sheet is this short — and the screen's header now shows the collection's name where it used to say "Collection". `collectionSchema.name` trims before it measures (`COLLECTION_NAME_MAX`): PATCH writes the parsed value straight to the row, so a rename to spaces was a blank title and "Zelda " passed as a different name from "Zelda" |
 
 | 28 a custom time on the card, platforms you tick | see git log | **A custom time can go on the library card** (migration 0029, `user_games.progress_custom_display`): a "Display on game" tick beside the hours field on the Progress tab. A game with no mission list quotes its main story on its card, so the game a custom time gets typed *for* — one with no play time anywhere — showed nothing. `cardLength()` in shared `progress.ts` picks the figure for the web card, the phone's library and console rows, and both apps' "shortest first" sort. Opt-in, per game, and only read while the basis is still `custom`. The Progress tab says why when a ticked time still isn't showing (the game is marked endless, or time badges are off in Preferences), and the no-times "How long to beat" card gained the **Endless game** checkbox the full card always had — a no-times game marked endless from the bulk bar could never be unmarked. **The library's platform filter is a tick list**: any number of platforms, a game on *any* of them matches, and ticking a platform covers its storefronts. `DropdownCheckItem` is the new piece of `Dropdown.tsx`; `Dropdown` itself now slides its panel back inside the window when the edge it's aligned to would push it off, and the filter button is a fixed width so that ticking doesn't move the open menu |
+| 28b search by Steam app id | see git log | **The game search takes a Steam app id or link** (a feedback request: some games only turn up for the exact right spelling). `parseSteamAppQuery` (shared `steam.ts`) reads store, community, SteamDB and `s.team` links, `steam://` URLs and "app 123"; `GET /api/games/search` resolves it through IGDB's `external_games` (`getIgdbGameBySteamAppId`, one request), then the catalog's own `steam_app_id`, and only then asks the Steam store what the app is called and searches for that, saying so. The exact game comes back first with `steamAppId` set and a "Steam app N" badge on web and mobile. Server-side, so every picker that searches games (add, collections, Linked tab, "Wrong game?", import review) gets it. `check:steam` covers 30 inputs, most of them titles that must stay titles |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
@@ -822,6 +823,32 @@ file to be provided for reference).
   half-applying it.
 - Wikimedia Commons results are a plain text search: the odd unrelated file
   turns up, and the picker says so rather than pretending otherwise.
+- **A search can be a Steam app id** (`parseSteamAppQuery`, shared). A link,
+  a `steam://` URL or "app 123" is *only* an app lookup — the raw text is
+  worthless as a title. A bare number is an app *and* a title ("1942",
+  "2048"), so it's searched both ways with the app on top, and a number
+  nothing knows about comes back as a plain title search with no `steam`
+  block — never as a failed lookup. Resolution order is IGDB's
+  `external_games` (the mapping the Steam import trusts), then
+  `games.steam_app_id`, then Steam's store name searched as a title. That
+  last step is a guess and the response says so (`steam.found: false`,
+  `storeName`); when even the store doesn't know the app, the web page
+  offers Steam's name for a manual add rather than the pasted URL.
+- **The store-name fallback runs on a budget**: 60 uncached lookups per five
+  minutes, server-wide (`getStoreAppName` in `services/steam.ts`). Steam's
+  storefront API allows ~200 per five minutes per IP and every user shares
+  the server's IP, which the Steam import's release-year tiebreak also
+  draws on — both now go through one cache (`getStoreApp`). An exhausted
+  budget only costs the fallback, never the exact match.
+- **Searching by app id doesn't link the app id to the game.** The search is
+  read-only and `POST /api/library` only takes an `igdbId`, so a game added
+  this way has no `games.steam_app_id` until a Steam import matches it — and
+  no achievements sync before then. Writing it on add would need the server
+  to re-verify the mapping (the client can't be trusted to name an app id
+  for a shared catalog row). IGDB also sometimes maps an app to an *edition*
+  (Steam's 2420110 is "Horizon Forbidden West: Complete Edition"), which a
+  title search hides with `version_parent = null`; that's IGDB's answer for
+  that app and it's shown as-is.
 - Steam import rules are per user and keyed by appid. Blocking doesn't remove
   a game that's already in the library — it only stops the next import from
   putting it back.

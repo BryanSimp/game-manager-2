@@ -5,3 +5,4 @@ export * from "./schemas/feedback.js";
 export * from "./schemas/user.js";
 export * from "./types/library.js";
 export * from "./progress.js";
+export * from "./steam.js";
