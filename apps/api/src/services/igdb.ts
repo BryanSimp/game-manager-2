@@ -107,8 +107,15 @@ export async function igdbTest(): Promise<void> {
   await igdbRequest<{ id: number }>("games", "fields id; limit 1;");
 }
 
-const GAME_FIELDS =
-  "fields name, summary, first_release_date, cover.image_id, genres.name, platforms.name; ";
+const GAME_FIELD_LIST = [
+  "name",
+  "summary",
+  "first_release_date",
+  "cover.image_id",
+  "genres.name",
+  "platforms.name",
+];
+const GAME_FIELDS = `fields ${GAME_FIELD_LIST.join(", ")}; `;
 
 export async function searchIgdb(
   query: string,
@@ -153,6 +160,24 @@ export async function findIgdbGameBySteamAppId(appId: number): Promise<number | 
     return game?.id ?? null;
   } catch {
     return null; // fall back to matching by name
+  }
+}
+
+/**
+ * The same lookup, returning the whole game rather than its id — what a search
+ * by app id needs to draw a result, in one request instead of two.
+ */
+export async function getIgdbGameBySteamAppId(appId: number): Promise<IgdbGame | null> {
+  try {
+    const fields = ["id", ...GAME_FIELD_LIST].map((f) => `game.${f}`).join(", ");
+    const rows = await igdbRequest<{ id: number; game?: IgdbGame }>(
+      "external_games",
+      `fields ${fields}; where external_game_source = ${IGDB_STEAM_SOURCE} & uid = "${appId}"; limit 1;`,
+    );
+    const game = rows?.[0]?.game;
+    return game && typeof game === "object" && game.name ? game : null;
+  } catch {
+    return null; // the search falls back to Steam's name for the app
   }
 }
 

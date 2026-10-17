@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AddGameInput, OwnershipFormat, SearchResult } from "@gm/shared";
+import { parseSteamAppQuery, type AddGameInput, type OwnershipFormat, type SearchResult } from "@gm/shared";
 import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { ConsoleSelect } from "../components/ConsolePicker.js";
@@ -48,6 +48,10 @@ export function AddGamePage() {
     queryFn: () => api.searchGames(query, { year }),
     enabled: query.length >= 2,
   });
+  const steam = search.data?.steam;
+  // a pasted store link is no one's idea of a title, so "add it manually"
+  // offers Steam's name for the app instead — or nothing, when there isn't one
+  const manualTitle = parseSteamAppQuery(query)?.explicit ? (steam?.storeName ?? null) : query;
 
   /** What quick add pins onto every add; null platform means "leave it". */
   function quickFields(): Partial<AddGameInput> {
@@ -94,7 +98,7 @@ export function AddGamePage() {
           autoFocus
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Search for a game…"
+          placeholder="Search for a game, or paste a Steam link or app ID…"
           className="min-w-0 flex-1 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-lg outline-none focus:border-indigo-500 sm:max-w-xl"
         />
         <input
@@ -184,6 +188,22 @@ export function AddGamePage() {
         </p>
       )}
 
+      {steam && !steam.found && (
+        <p className="mb-4 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-400">
+          {steam.storeName ? (
+            <>
+              Nothing links Steam app {steam.appId} to a game, so this searched for its store
+              name, <span className="text-zinc-200">“{steam.storeName}”</span>, instead.
+            </>
+          ) : (
+            <>
+              Couldn't find Steam app {steam.appId}. Check the number, or search for the game by
+              name.
+            </>
+          )}
+        </p>
+      )}
+
       {search.isLoading && <p className="text-zinc-500">Searching…</p>}
       {search.isError && <p className="text-red-400">Search failed: {String(search.error)}</p>}
       {search.data?.results.length === 0 && year && (
@@ -210,6 +230,11 @@ export function AddGamePage() {
                   {r.title}{" "}
                   {r.releaseYear && <span className="font-normal text-zinc-500">({r.releaseYear})</span>}
                 </p>
+                {r.steamAppId && (
+                  <span className="mt-0.5 inline-block rounded bg-sky-950 px-1.5 py-0.5 text-[11px] font-medium text-sky-300">
+                    Steam app {r.steamAppId}
+                  </span>
+                )}
                 <p className="truncate text-xs text-zinc-500">{r.platforms.join(" · ")}</p>
               </div>
               <button
@@ -228,14 +253,16 @@ export function AddGamePage() {
         })}
       </div>
 
-      {query.length >= 2 && search.data && (
+      {query.length >= 2 && search.data && manualTitle && (
         <div className="mt-6 border-t border-zinc-800 pt-4">
           <button
-            disabled={addManual.isPending || addedTitles.has(query)}
-            onClick={() => addManual.mutate(query)}
+            disabled={addManual.isPending || addedTitles.has(manualTitle)}
+            onClick={() => addManual.mutate(manualTitle)}
             className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
           >
-            {addedTitles.has(query) ? "✓ Added" : `Add "${query}" manually (no metadata)`}
+            {addedTitles.has(manualTitle)
+              ? "✓ Added"
+              : `Add "${manualTitle}" manually (no metadata)`}
           </button>
         </div>
       )}

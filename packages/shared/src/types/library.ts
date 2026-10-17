@@ -150,10 +150,28 @@ export interface SearchResult {
   platforms: string[];
   summary: string | null;
   inLibrary: boolean;
+  /** set on the one result a searched Steam app id resolved to */
+  steamAppId?: number;
+}
+/**
+ * What a search for a Steam app id found. Present when the query was a store
+ * link or `steam://` URL, or a bare number that turned out to be a real app —
+ * a number nothing knows about is just a title search, and says nothing.
+ */
+export interface SearchSteamApp {
+  appId: number;
+  /** the app resolved to exactly one game, which is the first result */
+  found: boolean;
+  /**
+   * Steam's own name for the app, asked for only when nothing resolved it.
+   * The results after it are then title matches for this name — a guess.
+   */
+  storeName: string | null;
 }
 export interface SearchResponse {
   igdb: boolean;
   results: SearchResult[];
+  steam?: SearchSteamApp;
 }
 export interface SearchOptions {
   /** narrow to games first released in this year */
