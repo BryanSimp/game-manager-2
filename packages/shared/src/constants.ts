@@ -119,6 +119,38 @@ export const COLLECTION_GRAPH_NAME_MAX = 40;
 export const GITHUB_REPO_URL = "https://github.com/BryanSimp/game-manager-2";
 
 /**
+ * What every personal API key starts with. Readable in a config file, and
+ * the way `/api/mcp` tells a key apart from an OAuth access token before it
+ * has looked either up.
+ */
+export const API_KEY_PREFIX = "gm_";
+
+/** The longest name an API key can have ("Claude Code on the laptop"). */
+export const API_KEY_NAME_MAX = 40;
+
+/** How many API keys one account may hold — one per device is plenty. */
+export const MAX_API_KEYS = 20;
+
+/**
+ * The OAuth scope that lets a connected app (claude.ai) call `/api/mcp`.
+ * There's only one because there's only one thing to grant: reading.
+ */
+export const MCP_SCOPE = "library:read";
+
+/**
+ * Every scope the consent screen may be asked about, in plain words. The
+ * OpenID three are accepted so a client that asks for them out of habit can
+ * still connect; none of them reaches the library on its own.
+ */
+export const OAUTH_SCOPE_LABELS: Record<string, string> = {
+  [MCP_SCOPE]: "Read your library, collections, progress and stats. It can't change anything.",
+  offline_access: "Stay connected until you disconnect it, without asking you to sign in again.",
+  openid: "Know which Game Manager account you are.",
+  profile: "See your display name.",
+  email: "See your email address.",
+};
+
+/**
  * What happens to a list or collection the moment you create it.
  *
  *  - `manual`  — private until you press Publish. The original behaviour.

@@ -1,4 +1,5 @@
 export * from "./constants.js";
+export * from "./schemas/api-keys.js";
 export * from "./schemas/auth.js";
 export * from "./schemas/contact.js";
 export * from "./schemas/feedback.js";

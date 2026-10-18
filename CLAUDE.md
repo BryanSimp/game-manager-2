@@ -327,6 +327,72 @@ Phase 0–8 roadmap — read it before making design decisions.
   from the set so "PC + Steam" isn't counted as two platforms that filter like
   one. An empty set means all, and the "All platforms" row at the top is how
   you get back there.
+- **Claude reads the library over MCP** (`routes/mcp.ts`, `POST /api/mcp`,
+  Streamable HTTP via `@modelcontextprotocol/sdk`). **Stateless**: every
+  request builds a fresh `McpServer` whose tools are closed over the caller's
+  user id, so there are no MCP sessions to mix up between users; GET/DELETE
+  are a 405. **Read-only twice over**: no tool writes, and the credential that
+  reaches the route works nowhere else. The tools
+  (`services/mcp-tools.ts`) read through the *same* loaders the web routes
+  use — `loadLibraryEntries`/`loadEntryProgress` (`routes/library.ts`),
+  `loadDashboard`, `loadCollections`/`loadCollectionDetail`,
+  `loadMyChecklists`, `gameLinksFor` — which were extracted from their route
+  handlers for exactly this, so a tool's numbers can't drift from the app's.
+  Results are compact JSON with category *names*, hours rather than seconds,
+  and no UI-only fields; the one id kept is a library entry's, because
+  `get_game` takes it. `get_collection` refuses other people's public
+  collections even though the route would open them — the tools describe
+  your library, nothing else.
+- **API keys are better-auth's api-key plugin** (`@better-auth/api-key`,
+  table `api_key`, migration 0030), but the browser never talks to the plugin:
+  `routes/api-keys.ts` wraps it (create calls `auth.api.createApiKey`
+  server-side with the session's user id and only a name) and shadows
+  `/api/auth/api-key/*` with a 404, so nobody can pick their own prefix,
+  expiry or quota. `enableSessionForAPIKeys` stays **off** — a key is not a
+  session, and `GET /api/library` with one is a 401 (`check:mcp` asserts it).
+  Keys start `gm_`, which is how `/api/mcp` tells a key from an OAuth token
+  without a lookup. The plugin's own quota is disabled (its default is 10
+  requests a *day*); `/api/mcp` uses `mcpRateLimit` instead, keyed per IP —
+  keying on the presented credential would hand every made-up token a fresh
+  bucket. `check:mcp` is the one check script that needs a database: it
+  drives `buildServer()` in-process with throwaway users and deletes them
+  (and the OAuth clients it registered) afterwards.
+- **claude.ai connects over OAuth 2.1** — better-auth's
+  `@better-auth/oauth-provider` (migration 0031; the older `mcp` plugin is
+  being retired in its favour). This process is both the authorization
+  server and the resource server, so: **opaque tokens, JWT plugin off**
+  (`disableJwtPlugin`) — `/api/mcp` looks a token up in the table the plugin
+  wrote it to, there are no signing keys, and disconnecting is immediate.
+  **`storeTokens` is our own `hashOAuthToken`** (`services/oauth.ts`), so
+  the verifier hashes with the function the plugin stored with instead of
+  copying the plugin's private default. Prefixes `gmat_`/`gmrt_` (API keys
+  are `gm_`) are how `mcp-auth.ts` routes a bearer without guessing.
+  `library:read` is the only scope that opens `/api/mcp` (403
+  `insufficient_scope` otherwise); `offline_access` buys a refresh token;
+  `openid`/`profile`/`email` are accepted at registration and authorize —
+  `clientRegistrationAllowedScopes` has to say so, or the plugin narrows
+  registration to the defaults — but not advertised. **Registration is
+  unauthenticated** (claude.ai registers itself), so a `hooks.before` in
+  `auth.ts` allowlists redirect URIs (`isAllowedRedirectUri`: Claude's two
+  callbacks, loopback, `OAUTH_REDIRECT_URIS`), and every client/consent
+  management endpoint the plugin exposes is in `DISABLED_PATHS` — otherwise
+  any signed-in user could create a client with an arbitrary redirect.
+  Discovery (`/.well-known/oauth-protected-resource` and
+  `oauth-authorization-server`, bare and path-inserted) is
+  `routes/well-known.ts`, outside `/api`, hence the extra Traefik router,
+  nginx `location` and Vite proxy entry. **Form bodies**: RFC 6749 token
+  requests are form-encoded, which Fastify doesn't parse; `/api/auth/oauth2/*`
+  is its own encapsulated route with a form parser that keeps the raw string,
+  so every other route still 415s a form. **Login and two-factor are
+  unchanged**: `oauthProviderClient()` copies the page's signed query into
+  auth requests, and the plugin resumes the flow when a session cookie is
+  set — for a 2FA account that's the code check, not the password
+  (`check:mcp` proves both halves). Pages follow `{ redirect: true, url }`
+  with `followOAuthRedirect` (`lib/oauth.ts`). The consent page
+  (`/oauth/consent`) names the app *and* where it'll send you back to —
+  the name is self-asserted, the redirect host is what the allowlist vouched
+  for. Connected apps are listed and disconnected (consent + every token)
+  under Preferences → API keys (`routes/oauth-connections.ts`).
 
 ## Commands
 
@@ -419,6 +485,9 @@ was dev-only). Never use `db push`.
 | 28 a custom time on the card, platforms you tick | see git log | **A custom time can go on the library card** (migration 0029, `user_games.progress_custom_display`): a "Display on game" tick beside the hours field on the Progress tab. A game with no mission list quotes its main story on its card, so the game a custom time gets typed *for* — one with no play time anywhere — showed nothing. `cardLength()` in shared `progress.ts` picks the figure for the web card, the phone's library and console rows, and both apps' "shortest first" sort. Opt-in, per game, and only read while the basis is still `custom`. The Progress tab says why when a ticked time still isn't showing (the game is marked endless, or time badges are off in Preferences), and the no-times "How long to beat" card gained the **Endless game** checkbox the full card always had — a no-times game marked endless from the bulk bar could never be unmarked. **The library's platform filter is a tick list**: any number of platforms, a game on *any* of them matches, and ticking a platform covers its storefronts. `DropdownCheckItem` is the new piece of `Dropdown.tsx`; `Dropdown` itself now slides its panel back inside the window when the edge it's aligned to would push it off, and the filter button is a fixed width so that ticking doesn't move the open menu |
 | 28b search by Steam app id | see git log | **The game search takes a Steam app id or link** (a feedback request: some games only turn up for the exact right spelling). `parseSteamAppQuery` (shared `steam.ts`) reads store, community, SteamDB and `s.team` links, `steam://` URLs and "app 123"; `GET /api/games/search` resolves it through IGDB's `external_games` (`getIgdbGameBySteamAppId`, one request), then the catalog's own `steam_app_id`, and only then asks the Steam store what the app is called and searches for that, saying so. The exact game comes back first with `steamAppId` set and a "Steam app N" badge on web and mobile. Server-side, so every picker that searches games (add, collections, Linked tab, "Wrong game?", import review) gets it. `check:steam` covers 30 inputs, most of them titles that must stay titles |
 
+| 29 MCP server + API keys | see git log | **Claude can read your library.** `POST /api/mcp` is a stateless, read-only MCP server with seven tools — `list_library`, `get_game`, `get_dashboard`, `list_collections`, `get_collection`, `list_categories`, `get_backlog_candidates` — answering from the loaders the web routes use (extracted into exported functions for it). Authenticated by **personal API keys** (better-auth's api-key plugin, migration 0030) made on **Preferences → API keys**: named per device, shown once with the `claude mcp add` command filled in, listed with last-used dates, revoked inline. A key works only at `/api/mcp`. `check:mcp` covers auth, cross-user isolation and every tool against a real database (44 checks) |
+| 29b claude.ai over OAuth | see git log | **claude.ai's custom connector can sign in.** better-auth's OAuth 2.1 provider (migration 0031) with dynamic client registration fenced by a redirect-URI allowlist, opaque `gmat_`/`gmrt_` tokens hashed with our own function, and discovery at `/.well-known/oauth-protected-resource` + `oauth-authorization-server` (new Traefik router, nginx `location`, Vite proxy). `/api/mcp` takes an API key *or* an access token granted `library:read`, and a 401 carries `WWW-Authenticate: Bearer resource_metadata=…`. The existing login page continues the flow (two-factor included); `/oauth/consent` asks Allow/Deny; Preferences → API keys lists connected apps and disconnects them. `check:mcp` grew to 71 checks: discovery, registration allowlist, a 2FA account's sign-in, consent/deny, PKCE token exchange, refresh, insufficient scope, disconnect |
+
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
 flip, can ride on `services/email.ts` now), data export (JSON/CSV), admin panel
 (password resets, registration toggle, account actions — the *list* landed in
@@ -427,6 +496,35 @@ phase 22, read-only).
 file to be provided for reference).
 
 ## Deferred / known gaps
+
+- **The OAuth flow hasn't met the real claude.ai yet.** Everything up to it
+  is verified — `check:mcp` runs the whole flow in-process, and a browser run
+  went login → consent → code → token → `/api/mcp` with a loopback client —
+  but claude.ai can only reach a deployed, public instance. If it fails
+  there, the usual suspects are discovery returning the SPA's HTML (routing),
+  `BETTER_AUTH_URL` not being the exact public origin, Cloudflare challenging
+  server-to-server calls, and claude.ai asking for a scope or redirect URI
+  this server doesn't allow (the 400 from `/oauth2/register` says which).
+- **OAuth rows accumulate.** Every claude.ai connect registers a fresh
+  client (DCR is per-connector, unauthenticated, ownerless), and expired
+  access tokens are never pruned. Nothing reads stale rows, so it's disk,
+  not correctness — a periodic prune of clients with no consent and tokens
+  past `expires_at` is the upgrade path, alongside the analytics one below.
+- **The consent page trusts the app's name only as far as it can.** A
+  self-registered client can call itself "Claude"; what the allowlist
+  guarantees is where the code goes, which is why the page and the
+  connected-apps list both show the redirect host. Loopback is on the list
+  for Claude Code, which means any local process can complete a flow you
+  start on your own machine — the same trust a local CLI already has.
+- **`resource` isn't part of the signed authorize query** — the plugin drops
+  it from the query it signs — so the audience check (`validAudiences`)
+  happens at the token endpoint only. Opaque tokens don't carry an audience
+  anyway; `/api/mcp` is the only resource there is.
+- **API keys and connected apps are web-only**, like 2FA setup. Mobile
+  neither lists nor revokes them.
+- better-auth logs `Failed to validate API key` at ERROR for every bad key
+  presented to `/api/mcp`. That's the plugin, not a fault; a log filter is
+  the fix if it gets noisy.
 
 - **`publish_mode` decides the default, not the ceiling — except under
   `never`, where it is the ceiling.** An explicit `isPublic` in a create

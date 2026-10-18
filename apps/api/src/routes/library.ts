@@ -256,34 +256,122 @@ function entryToJson(
   };
 }
 
+/**
+ * One user's library entries — all of them, or just `entryId` — each in the
+ * shape `GET /api/library` returns, next to the row it was built from.
+ *
+ * The two library GETs and the MCP tools (`services/mcp-tools.ts`) all read
+ * through here, so "what does this person's library say" has one answer.
+ * The row rides along for the fields the JSON doesn't carry (Steam play time).
+ * Never pass another user's id: the scoping *is* the `userId` argument.
+ */
+export async function loadLibraryEntries(userId: string, entryId?: string) {
+  const rows = await db
+    .select()
+    .from(schema.userGames)
+    .innerJoin(schema.games, eq(schema.userGames.gameId, schema.games.id))
+    .where(
+      entryId
+        ? and(eq(schema.userGames.id, entryId), eq(schema.userGames.userId, userId))
+        : eq(schema.userGames.userId, userId),
+    )
+    .orderBy(asc(schema.games.title));
+  if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.user_games.id);
+  const platformMap = await entryPlatforms(ids);
+  const tagMap = await entryTags(ids);
+  const missionMap = await missionCountsByGame(userId);
+  const ttbMap = await resolveTtbFor(
+    userId,
+    rows.map((r) => r.games),
+  );
+  return rows.map((r) => ({
+    row: r.user_games,
+    entry: entryToJson(
+      r.user_games,
+      r.games,
+      platformMap.get(r.user_games.id) ?? [],
+      tagMap.get(r.user_games.id) ?? [],
+      missionMap.get(r.games.id),
+      ttbMap.get(r.games.id),
+    ),
+  }));
+}
+
+export type LoadedLibraryEntry = Awaited<ReturnType<typeof loadLibraryEntries>>[number];
+
+/**
+ * The time-remaining estimate for one entry: the user's mission checklist for
+ * the game, with the chosen how-long-to-beat figure spread across it. Null
+ * when the entry isn't theirs. `GET /api/library/:id/progress` is this.
+ */
+export async function loadEntryProgress(userId: string, entryId: string) {
+  const [row] = await db
+    .select()
+    .from(schema.userGames)
+    .innerJoin(schema.games, eq(schema.userGames.gameId, schema.games.id))
+    .where(and(eq(schema.userGames.id, entryId), eq(schema.userGames.userId, userId)));
+  if (!row) return null;
+
+  const basis = row.user_games.progressBasis;
+  const ttbMap = await resolveTtbFor(userId, [row.games]);
+  const totalSeconds = ttbForBasis(
+    ttbMap.get(row.games.id) ?? row.games,
+    basis,
+    row.user_games.progressCustomSeconds,
+  );
+
+  // the user's own mission list for this game — oldest first, so adding a
+  // second one doesn't silently move the estimate
+  const [list] = await db
+    .select({
+      id: schema.checklistTemplates.id,
+      title: schema.checklistTemplates.title,
+      total: sql<number>`count(${schema.checklistItems.id})::int`,
+      done: sql<number>`count(${schema.userChecklistItems.userId})::int`,
+    })
+    .from(schema.checklistTemplates)
+    .leftJoin(
+      schema.checklistItems,
+      eq(schema.checklistItems.templateId, schema.checklistTemplates.id),
+    )
+    .leftJoin(
+      schema.userChecklistItems,
+      and(
+        eq(schema.userChecklistItems.itemId, schema.checklistItems.id),
+        eq(schema.userChecklistItems.userId, userId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.checklistTemplates.gameId, row.games.id),
+        eq(schema.checklistTemplates.authorUserId, userId),
+        eq(schema.checklistTemplates.kind, "missions"),
+      ),
+    )
+    .groupBy(schema.checklistTemplates.id, schema.checklistTemplates.createdAt)
+    .orderBy(asc(schema.checklistTemplates.createdAt))
+    .limit(1);
+
+  const estimate = estimateProgress({
+    total: list?.total ?? 0,
+    done: list?.done ?? 0,
+    totalSeconds,
+  });
+  return {
+    basis,
+    checklistId: list?.id ?? null,
+    checklistTitle: list?.title ?? null,
+    ...estimate,
+  };
+}
+
 export function registerLibraryRoutes(app: FastifyInstance): void {
   app.get("/api/library", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const rows = await db
-      .select()
-      .from(schema.userGames)
-      .innerJoin(schema.games, eq(schema.userGames.gameId, schema.games.id))
-      .where(eq(schema.userGames.userId, user.id))
-      .orderBy(asc(schema.games.title));
-    const ids = rows.map((r) => r.user_games.id);
-    const platformMap = await entryPlatforms(ids);
-    const tagMap = await entryTags(ids);
-    const missionMap = await missionCountsByGame(user.id);
-    const ttbMap = await resolveTtbFor(
-      user.id,
-      rows.map((r) => r.games),
-    );
-    return rows.map((r) =>
-      entryToJson(
-        r.user_games,
-        r.games,
-        platformMap.get(r.user_games.id) ?? [],
-        tagMap.get(r.user_games.id) ?? [],
-        missionMap.get(r.games.id),
-        ttbMap.get(r.games.id),
-      ),
-    );
+    const loaded = await loadLibraryEntries(user.id);
+    return loaded.map((l) => l.entry);
   });
 
   app.post("/api/library", async (request, reply) => {
@@ -395,24 +483,9 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
   app.get<{ Params: { id: string } }>("/api/library/:id", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const [row] = await db
-      .select()
-      .from(schema.userGames)
-      .innerJoin(schema.games, eq(schema.userGames.gameId, schema.games.id))
-      .where(and(eq(schema.userGames.id, request.params.id), eq(schema.userGames.userId, user.id)));
-    if (!row) return reply.status(404).send({ message: "Not found" });
-    const platformMap = await entryPlatforms([row.user_games.id]);
-    const tagMap = await entryTags([row.user_games.id]);
-    const missionMap = await missionCountsByGame(user.id);
-    const ttbMap = await resolveTtbFor(user.id, [row.games]);
-    return entryToJson(
-      row.user_games,
-      row.games,
-      platformMap.get(row.user_games.id) ?? [],
-      tagMap.get(row.user_games.id) ?? [],
-      missionMap.get(row.games.id),
-      ttbMap.get(row.games.id),
-    );
+    const [loaded] = await loadLibraryEntries(user.id, request.params.id);
+    if (!loaded) return reply.status(404).send({ message: "Not found" });
+    return loaded.entry;
   });
 
   /**
@@ -422,64 +495,9 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
   app.get<{ Params: { id: string } }>("/api/library/:id/progress", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const [row] = await db
-      .select()
-      .from(schema.userGames)
-      .innerJoin(schema.games, eq(schema.userGames.gameId, schema.games.id))
-      .where(and(eq(schema.userGames.id, request.params.id), eq(schema.userGames.userId, user.id)));
-    if (!row) return reply.status(404).send({ message: "Not found" });
-
-    const basis = row.user_games.progressBasis;
-    const ttbMap = await resolveTtbFor(user.id, [row.games]);
-    const totalSeconds = ttbForBasis(
-      ttbMap.get(row.games.id) ?? row.games,
-      basis,
-      row.user_games.progressCustomSeconds,
-    );
-
-    // the user's own mission list for this game — oldest first, so adding a
-    // second one doesn't silently move the estimate
-    const [list] = await db
-      .select({
-        id: schema.checklistTemplates.id,
-        title: schema.checklistTemplates.title,
-        total: sql<number>`count(${schema.checklistItems.id})::int`,
-        done: sql<number>`count(${schema.userChecklistItems.userId})::int`,
-      })
-      .from(schema.checklistTemplates)
-      .leftJoin(
-        schema.checklistItems,
-        eq(schema.checklistItems.templateId, schema.checklistTemplates.id),
-      )
-      .leftJoin(
-        schema.userChecklistItems,
-        and(
-          eq(schema.userChecklistItems.itemId, schema.checklistItems.id),
-          eq(schema.userChecklistItems.userId, user.id),
-        ),
-      )
-      .where(
-        and(
-          eq(schema.checklistTemplates.gameId, row.games.id),
-          eq(schema.checklistTemplates.authorUserId, user.id),
-          eq(schema.checklistTemplates.kind, "missions"),
-        ),
-      )
-      .groupBy(schema.checklistTemplates.id, schema.checklistTemplates.createdAt)
-      .orderBy(asc(schema.checklistTemplates.createdAt))
-      .limit(1);
-
-    const estimate = estimateProgress({
-      total: list?.total ?? 0,
-      done: list?.done ?? 0,
-      totalSeconds,
-    });
-    return {
-      basis,
-      checklistId: list?.id ?? null,
-      checklistTitle: list?.title ?? null,
-      ...estimate,
-    };
+    const progress = await loadEntryProgress(user.id, request.params.id);
+    if (!progress) return reply.status(404).send({ message: "Not found" });
+    return progress;
   });
 
   app.patch<{ Params: { id: string } }>("/api/library/:id", async (request, reply) => {

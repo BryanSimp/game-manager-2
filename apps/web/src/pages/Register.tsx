@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { registerSchema } from "@gm/shared";
 import { authClient } from "../lib/auth.js";
 import { AuthCard, Field, FormError, SubmitButton } from "../components/AuthCard.js";
+import { followOAuthRedirect, isOAuthFlow } from "../lib/oauth.js";
 
 export function RegisterPage() {
   const navigate = useNavigate();
@@ -21,12 +22,14 @@ export function RegisterPage() {
       return;
     }
     setBusy(true);
-    const { error: authError } = await authClient.signUp.email(parsed.data);
+    const { data, error: authError } = await authClient.signUp.email(parsed.data);
     setBusy(false);
     if (authError) {
       setError(authError.message ?? "Registration failed");
       return;
     }
+    // signing up from a connected app's sign-in carries on to that app
+    if (followOAuthRedirect(data)) return;
     navigate({ to: "/" });
   }
 
@@ -47,9 +50,18 @@ export function RegisterPage() {
       </form>
       <p className="mt-6 text-center text-sm text-zinc-400">
         Already have an account?{" "}
-        <Link to="/login" className="font-medium text-indigo-400 hover:text-indigo-300">
-          Sign in
-        </Link>
+        {isOAuthFlow() ? (
+          <a
+            href={`/login${window.location.search}`}
+            className="font-medium text-indigo-400 hover:text-indigo-300"
+          >
+            Sign in
+          </a>
+        ) : (
+          <Link to="/login" className="font-medium text-indigo-400 hover:text-indigo-300">
+            Sign in
+          </Link>
+        )}
       </p>
     </AuthCard>
   );

@@ -106,6 +106,61 @@ The Expo app is not part of the self-host stack. Run it with `pnpm dev:mobile` a
 reach it. The production compose file also shows a `mobile` service that hosts the Metro bundler
 for Expo Go over a LAN.
 
+## Connect Claude
+
+The API serves a read-only [MCP](https://modelcontextprotocol.io) server at `/api/mcp`, so Claude
+can answer questions about your library — "what should I play next?", "how far through Hollow
+Knight am I?", "how long is the rest of my Zelda marathon?". Each person connects with their own
+credentials and only ever sees their own library. Nothing Claude can call writes anything.
+
+### Claude Code
+
+In the web app, open **Preferences → API keys**, name a key after the device it's for and create
+it. The key is shown once; the card gives you the full command, which looks like:
+
+```bash
+claude mcp add --transport http gamesmanager https://<your-host>/api/mcp --header "Authorization: Bearer <key>"
+```
+
+Add `--scope user` to have it in every project rather than just the current folder, then check it
+with `claude mcp list`. Make one key per device and revoke the ones you stop using — a revoked key
+stops working on its next request. A key only works at `/api/mcp`: it isn't a session, so it can't
+be used against the rest of the API.
+
+The tools: `list_library` (filter by category, platform, tag or title), `get_game` (notes,
+mission progress, checklists and linked DLC/sequels/remakes), `get_dashboard`, `list_collections`,
+`get_collection` (games in play order), `list_categories` and `get_backlog_candidates` (Backlog,
+Shelved and Wishlist, shortest remaining first).
+
+### claude.ai (custom connector)
+
+claude.ai connects over OAuth instead of a key. In claude.ai, open **Settings → Connectors → Add
+custom connector**, give it a name and the URL `https://<your-host>/api/mcp`, then **Connect**.
+You land on your instance's normal sign-in (two-factor included, if you've turned it on), then a
+consent screen naming the app and what it can read. Allow, and you're sent back to claude.ai.
+Connected apps are listed under **Preferences → API keys**, where **Disconnect** cuts one off on
+its next request.
+
+Under the hood: claude.ai reads `/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-authorization-server`, registers itself (OAuth dynamic client registration),
+and runs the authorization-code flow with PKCE. Three things have to be true for that to work:
+
+- **`BETTER_AUTH_URL` is the public URL**, exactly — `https://<your-host>`, no trailing slash.
+  The issuer, the token audience and every URL in the discovery documents are built from it.
+- **`/.well-known/oauth-*` reaches the API.** Those two documents live at the root, not under
+  `/api`. The self-host nginx config and the production Traefik labels already route them; if you
+  run your own proxy, send that prefix to the API container too. Check it with
+  `curl https://<your-host>/.well-known/oauth-protected-resource` — JSON, not the web app's HTML.
+- **The redirect URI is allowed.** Registration only accepts claude.ai's callback,
+  `https://claude.ai/api/mcp/auth_callback` (and `https://claude.com/api/mcp/auth_callback`), plus
+  loopback addresses for local clients like Claude Code. To connect another MCP client, add its
+  callback to `OAUTH_REDIRECT_URIS` (comma-separated). Anyone can register a client, so this list
+  is what stops a stranger's app from receiving your sign-ins.
+
+If Cloudflare sits in front, make sure Bot Fight Mode or a challenge rule isn't intercepting
+`/api/mcp` and `/.well-known/oauth-*` — claude.ai calls them server-to-server and can't solve a
+challenge.
+
 ## Development
 
 Prereqs: Node 20+, pnpm (`npm i -g pnpm`), Docker.
@@ -127,6 +182,7 @@ First registered account becomes the admin. Other useful scripts:
 pnpm typecheck                            # every package
 pnpm --filter @gm/api db:generate         # new SQL migration after a schema change
 pnpm db:seed-demo                         # (re)build the /demo showcase account
+pnpm --filter @gm/api check:mcp           # MCP endpoint end to end (needs a migrated database)
 ```
 
 Migrations are plain SQL in `apps/api/drizzle/`, applied programmatically by `src/db/migrate.ts`.

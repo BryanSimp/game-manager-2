@@ -61,6 +61,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
+      # Extra OAuth redirect URIs for MCP clients other than Claude
+      # (comma-separated). Claude and localhost are always allowed.
+      OAUTH_REDIRECT_URIS: ${OAUTH_REDIRECT_URIS:-}
       IMAGE_DIR: /data/images
       TZ: ${TZ:-UTC}
     volumes:

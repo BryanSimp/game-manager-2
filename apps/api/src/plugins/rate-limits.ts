@@ -44,6 +44,30 @@ export const contactRateLimit = {
 };
 
 /**
+ * Making an API key. Nobody needs more than a handful, and the cap on how
+ * many an account may hold (`MAX_API_KEYS`) is the real limit — this just
+ * stops a script from churning create/revoke.
+ */
+export const apiKeyRateLimit = {
+  rateLimit: { max: 10, timeWindow: "10 minutes" },
+};
+
+/**
+ * The MCP endpoint (`/api/mcp`). Each tool call is a handful of queries and
+ * a model answering one question calls a few in a row, so this is roomy for
+ * a conversation and a ceiling on a runaway loop.
+ *
+ * Per IP, like everything else, and that's a choice: keying on the presented
+ * credential would happen before it's been checked, handing every made-up
+ * token a fresh bucket. The cost is that claude.ai connectors arrive from
+ * Anthropic's addresses and share one bucket per address — which is why the
+ * ceiling is this high rather than the 60 a single client would need.
+ */
+export const mcpRateLimit = {
+  rateLimit: { max: 300, timeWindow: "1 minute" },
+};
+
+/**
  * In-app feedback. Signed in, so it's already attributable and doesn't send
  * mail — but it does write rows an admin has to read, so it gets a ceiling
  * roomier than the contact form's and still well under a flood.
