@@ -7,7 +7,6 @@ import {
   OWNERSHIP_FORMATS,
   PROGRESS_BASES,
   estimateProgress,
-  normalizeTtb,
   resolveTtb,
   ttbForBasis,
   type ResolvedTtb,
@@ -27,6 +26,8 @@ import {
 import { rememberConsoles } from "../services/consoles.js";
 import { defaultPlatformFor, defaultStatusFor } from "../services/preferences.js";
 import { missionCountsByGame, type MissionCounts } from "../services/progress.js";
+import { replyWithServiceError } from "../services/service-error.js";
+import { setTimeToBeat } from "../services/time-to-beat.js";
 import { logEvent } from "../services/analytics.js";
 
 /** A category key: a built-in, or the id of one of the user's custom ones. */
@@ -664,109 +665,20 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
   });
 
   /**
-   * Record how long this game took *you*, for when IGDB has nothing.
-   *
-   * This used to write the shared catalog row, on the reasoning that a game's
-   * length is a fact about the game rather than about you. It is — but the
-   * app is public now, so "shared row, last writer wins" meant one person's
-   * typo silently became everyone's number, and there was nothing left to
-   * average. Submissions are per-user; `resolveTtb` picks what to show, and
-   * `communityTimes` averages the rest.
-   *
-   * Values are seconds. Sending null clears one, and clearing them all
-   * removes your submission entirely. `normalizeTtb` enforces
-   * main <= main+extras <= completionist, the same as on ingest, so a typo
-   * can't invert the columns.
+   * Record how long this game took *you*, for when IGDB has nothing. Values
+   * are seconds; null clears one and an omitted key keeps it. The rules —
+   * per-user, normalized, all-null removes the submission — live in
+   * `setTimeToBeat`, which the MCP `set_time_to_beat` tool calls too.
    */
   app.put<{ Params: { id: string } }>("/api/library/:id/time-to-beat", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-
-    const entry = await db.query.userGames.findFirst({
-      where: (ug, { and: andW, eq: eqW }) =>
-        andW(eqW(ug.id, request.params.id), eqW(ug.userId, user.id)),
-      columns: { gameId: true },
-    });
-    if (!entry) return reply.status(404).send({ message: "Not found" });
-
-    // a day is already a stretch for a single figure; the cap is there to
-    // catch a stray "3600" typed into a field that wanted hours
-    const seconds = z.number().int().min(0).max(60 * 60 * 1000).nullable();
-    const parsed = z
-      .object({
-        ttbMain: seconds.optional(),
-        ttbMainExtra: seconds.optional(),
-        ttbCompletionist: seconds.optional(),
-      })
-      .safeParse(request.body);
-    if (!parsed.success) return reply.status(400).send({ message: "Invalid times" });
-
-    const [mine] = await db
-      .select()
-      .from(schema.userTimeToBeat)
-      .where(
-        and(
-          eq(schema.userTimeToBeat.userId, user.id),
-          eq(schema.userTimeToBeat.gameId, entry.gameId),
-        ),
-      );
-
-    // an omitted key keeps what you had; an explicit null clears it
-    const merged = normalizeTtb({
-      ttbMain: parsed.data.ttbMain === undefined ? (mine?.mainSeconds ?? null) : parsed.data.ttbMain,
-      ttbMainExtra:
-        parsed.data.ttbMainExtra === undefined
-          ? (mine?.mainExtraSeconds ?? null)
-          : parsed.data.ttbMainExtra,
-      ttbCompletionist:
-        parsed.data.ttbCompletionist === undefined
-          ? (mine?.completionistSeconds ?? null)
-          : parsed.data.ttbCompletionist,
-    });
-
-    const hasAny =
-      merged.ttbMain != null || merged.ttbMainExtra != null || merged.ttbCompletionist != null;
-
-    if (!hasAny) {
-      await db
-        .delete(schema.userTimeToBeat)
-        .where(
-          and(
-            eq(schema.userTimeToBeat.userId, user.id),
-            eq(schema.userTimeToBeat.gameId, entry.gameId),
-          ),
-        );
-      // The one way back for a catalog row a previous version let someone
-      // pin by hand: nothing else writes `games.ttb_*` any more, so clearing
-      // your submission also clears a stale manual override rather than
-      // leaving it uncorrectable forever. IGDB's own figures are left alone.
-      await db
-        .update(schema.games)
-        .set({ ttbMain: null, ttbMainExtra: null, ttbCompletionist: null, ttbSource: null })
-        .where(and(eq(schema.games.id, entry.gameId), eq(schema.games.ttbSource, "manual")));
-      return { ok: true, ...merged };
+    try {
+      const { times } = await setTimeToBeat(user.id, request.params.id, request.body);
+      return { ok: true, ...times };
+    } catch (err) {
+      return replyWithServiceError(reply, err);
     }
-
-    await db
-      .insert(schema.userTimeToBeat)
-      .values({
-        userId: user.id,
-        gameId: entry.gameId,
-        mainSeconds: merged.ttbMain,
-        mainExtraSeconds: merged.ttbMainExtra,
-        completionistSeconds: merged.ttbCompletionist,
-      })
-      .onConflictDoUpdate({
-        target: [schema.userTimeToBeat.userId, schema.userTimeToBeat.gameId],
-        set: {
-          mainSeconds: merged.ttbMain,
-          mainExtraSeconds: merged.ttbMainExtra,
-          completionistSeconds: merged.ttbCompletionist,
-          updatedAt: new Date(),
-        },
-      });
-    logEvent("time_submitted", user.id, { gameId: entry.gameId });
-    return { ok: true, ...merged };
   });
 
   /**

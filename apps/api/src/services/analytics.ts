@@ -20,7 +20,10 @@ export type AnalyticsEventType =
   // average is built out of
   | "time_submitted"
   // a bug report, feature request or opinion filed from the Feedback page
-  | "feedback_submitted";
+  | "feedback_submitted"
+  // one of the MCP server's write tools ran: meta is the tool name and its
+  // counts (how many games were tagged, added, not found…) — never titles
+  | "mcp_write";
 
 // 'scrape' events are gone as of phase 19 along with the scraper-health card
 // that was the only thing reading them. Historical rows stay in the table —

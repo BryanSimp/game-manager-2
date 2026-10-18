@@ -132,10 +132,19 @@ export const API_KEY_NAME_MAX = 40;
 export const MAX_API_KEYS = 20;
 
 /**
- * The OAuth scope that lets a connected app (claude.ai) call `/api/mcp`.
- * There's only one because there's only one thing to grant: reading.
+ * The OAuth scope that lets a connected app (claude.ai) call `/api/mcp` at
+ * all. Every connection needs it, and on its own it only reads.
  */
 export const MCP_SCOPE = "library:read";
+
+/**
+ * The OAuth scope that lets a connected app use the MCP server's write
+ * tools — on top of `library:read`, never instead of it. Separate so that
+ * changing the library is something you tick on the consent screen rather
+ * than something a connection picks up by surprise; the API key equivalent
+ * is the "Allow changes" box (`ApiKeyCreateInput.allowChanges`).
+ */
+export const MCP_WRITE_SCOPE = "library:write";
 
 /**
  * Every scope the consent screen may be asked about, in plain words. The
@@ -143,7 +152,9 @@ export const MCP_SCOPE = "library:read";
  * still connect; none of them reaches the library on its own.
  */
 export const OAUTH_SCOPE_LABELS: Record<string, string> = {
-  [MCP_SCOPE]: "Read your library, collections, progress and stats. It can't change anything.",
+  [MCP_SCOPE]: "Read your library, collections, progress and stats. On its own, it can't change anything.",
+  [MCP_WRITE_SCOPE]:
+    "Add tags, collections, linked games and time-to-beat figures. It can't delete anything or change categories or ratings.",
   offline_access: "Stay connected until you disconnect it, without asking you to sign in again.",
   openid: "Know which Game Manager account you are.",
   profile: "See your display name.",

@@ -329,10 +329,10 @@ Phase 0–8 roadmap — read it before making design decisions.
   you get back there.
 - **Claude reads the library over MCP** (`routes/mcp.ts`, `POST /api/mcp`,
   Streamable HTTP via `@modelcontextprotocol/sdk`). **Stateless**: every
-  request builds a fresh `McpServer` whose tools are closed over the caller's
-  user id, so there are no MCP sessions to mix up between users; GET/DELETE
-  are a 405. **Read-only twice over**: no tool writes, and the credential that
-  reaches the route works nowhere else. The tools
+  request builds a fresh `McpServer` whose tools are closed over the caller,
+  so there are no MCP sessions to mix up between users; GET/DELETE are a 405.
+  The credential that reaches the route works nowhere else, so what it can
+  change is exactly the seven write tools (below) and nothing more. The tools
   (`services/mcp-tools.ts`) read through the *same* loaders the web routes
   use — `loadLibraryEntries`/`loadEntryProgress` (`routes/library.ts`),
   `loadDashboard`, `loadCollections`/`loadCollectionDetail`,
@@ -343,10 +343,42 @@ Phase 0–8 roadmap — read it before making design decisions.
   `get_game` takes it. `get_collection` refuses other people's public
   collections even though the route would open them — the tools describe
   your library, nothing else.
+- **Claude can organise the library, if you let it** (phase 30). Seven
+  write tools — `create_tag`, `tag_games`, `untag_games`,
+  `create_collection`, `add_games_to_collection`, `link_games`,
+  `set_time_to_beat` — and a deliberate list of what's *not* there: no
+  deleting, no renaming or deleting tags or collections, no category,
+  rating, notes, platform or date changes, no publishing, nothing on the
+  account. **Writes are a second grant**, asked for when the credential is
+  made: an API key's `permissions` (`{ library: ["read", "write"] }`, set
+  only by `routes/api-keys.ts` from the card's "Allow changes" box) or an
+  OAuth token carrying `library:write`. `McpCaller.canWrite` holds the
+  answer; `requireWrite` in `mcp-tools.ts` is the check, and every caller
+  still sees every tool — a read-only one gets an error that says how to
+  get a key or connection that can write. Keys from before phase 30 have
+  null permissions and read as read-only. **Each tool goes through the
+  route's own logic**, moved into `services/tags.ts`, `collections.ts`,
+  `game-links.ts` and `time-to-beat.ts`, which throw a `ServiceError` the
+  route sends as `{ message }` with its status and the tool reports as an
+  error result. Two deliberate differences from the web routes:
+  `create_collection` calls `createCollection(…, "private")`, ignoring
+  `publish_mode` and any `isPublic`, and `tag_games` **adds** one tag rather
+  than replacing the set the way `PUT /api/library/:id/tags` does. Games
+  are named by id or **exact** title (`titleKey`: case, accents and
+  punctuation aside) through the same `pickByTitle` `get_game` uses, but
+  with partial matching off — a near miss comes back with ids rather than
+  tagging the wrong game. Collections and links also take games you don't
+  own: library, then IGDB-backed catalog rows by exact title, then IGDB
+  itself (20 searches per call), with `igdb:<id>` as the way to pick
+  between same-named games. One write per HTTP request
+  (`WRITES_PER_REQUEST`), because the SDK accepts a 100-message JSON-RPC
+  batch and `mcpRateLimit` counts requests. Each write logs `mcp_write`
+  with the tool name and counts, never titles.
 - **API keys are better-auth's api-key plugin** (`@better-auth/api-key`,
   table `api_key`, migration 0030), but the browser never talks to the plugin:
   `routes/api-keys.ts` wraps it (create calls `auth.api.createApiKey`
-  server-side with the session's user id and only a name) and shadows
+  server-side with the session's user id, a name and one of two fixed
+  `permissions` grants — read, or read + write) and shadows
   `/api/auth/api-key/*` with a 404, so nobody can pick their own prefix,
   expiry or quota. `enableSessionForAPIKeys` stays **off** — a key is not a
   session, and `GET /api/library` with one is a 401 (`check:mcp` asserts it).
@@ -368,7 +400,14 @@ Phase 0–8 roadmap — read it before making design decisions.
   copying the plugin's private default. Prefixes `gmat_`/`gmrt_` (API keys
   are `gm_`) are how `mcp-auth.ts` routes a bearer without guessing.
   `library:read` is the only scope that opens `/api/mcp` (403
-  `insufficient_scope` otherwise); `offline_access` buys a refresh token;
+  `insufficient_scope` otherwise); `library:write` adds the write tools on
+  top of it and never replaces it. It's advertised and in the default
+  registration scopes (a client has to be *able* to ask), but a token only
+  gets it when the person ticks **Allow changes** on the consent page,
+  which starts unticked — unticked, the page posts `scope` without it and
+  the plugin narrows the consent. Clients registered before phase 30 have
+  read-only registrations, so asking for it is an `invalid_scope` and an
+  old connector can't pick writes up by surprise; `offline_access` buys a refresh token;
   `openid`/`profile`/`email` are accepted at registration and authorize —
   `clientRegistrationAllowedScopes` has to say so, or the plugin narrows
   registration to the defaults — but not advertised. **Registration is
@@ -486,6 +525,7 @@ was dev-only). Never use `db push`.
 | 28b search by Steam app id | see git log | **The game search takes a Steam app id or link** (a feedback request: some games only turn up for the exact right spelling). `parseSteamAppQuery` (shared `steam.ts`) reads store, community, SteamDB and `s.team` links, `steam://` URLs and "app 123"; `GET /api/games/search` resolves it through IGDB's `external_games` (`getIgdbGameBySteamAppId`, one request), then the catalog's own `steam_app_id`, and only then asks the Steam store what the app is called and searches for that, saying so. The exact game comes back first with `steamAppId` set and a "Steam app N" badge on web and mobile. Server-side, so every picker that searches games (add, collections, Linked tab, "Wrong game?", import review) gets it. `check:steam` covers 30 inputs, most of them titles that must stay titles |
 
 | 29 MCP server + API keys | see git log | **Claude can read your library.** `POST /api/mcp` is a stateless, read-only MCP server with seven tools — `list_library`, `get_game`, `get_dashboard`, `list_collections`, `get_collection`, `list_categories`, `get_backlog_candidates` — answering from the loaders the web routes use (extracted into exported functions for it). Authenticated by **personal API keys** (better-auth's api-key plugin, migration 0030) made on **Preferences → API keys**: named per device, shown once with the `claude mcp add` command filled in, listed with last-used dates, revoked inline. A key works only at `/api/mcp`. `check:mcp` covers auth, cross-user isolation and every tool against a real database (44 checks) |
+| 30 Claude can make changes | see git log | **Seven MCP write tools**, opt-in: `create_tag`, `tag_games` (adds one tag, keeps the rest), `untag_games`, `create_collection` (always private), `add_games_to_collection`, `link_games`, `set_time_to_beat`. A key writes only if made with **Allow changes** (the api-key plugin's `permissions`, no migration — the column was already there); an OAuth token only with `library:write`, an unticked-by-default line on the consent page. Existing keys and connectors stay read-only. The routes' logic moved into `services/tags.ts`, `collections.ts`, `game-links.ts`, `time-to-beat.ts` (with `ServiceError`), so a tool and its route can't drift. One write per request, `mcp_write` events. `check:mcp` grew to 121: read-only refusals for every tool, cross-user isolation for tags, collections, links and play times, tag_games keeping existing tags, private-under-`always`, the route/tool normalisation match, the batch cap, and consent with and without Allow changes |
 | 29b claude.ai over OAuth | see git log | **claude.ai's custom connector can sign in.** better-auth's OAuth 2.1 provider (migration 0031) with dynamic client registration fenced by a redirect-URI allowlist, opaque `gmat_`/`gmrt_` tokens hashed with our own function, and discovery at `/.well-known/oauth-protected-resource` + `oauth-authorization-server` (new Traefik router, nginx `location`, Vite proxy). `/api/mcp` takes an API key *or* an access token granted `library:read`, and a 401 carries `WWW-Authenticate: Bearer resource_metadata=…`. The existing login page continues the flow (two-factor included); `/oauth/consent` asks Allow/Deny; Preferences → API keys lists connected apps and disconnects them. `check:mcp` grew to 71 checks: discovery, registration allowlist, a 2FA account's sign-in, consent/deny, PKCE token exchange, refresh, insufficient scope, disconnect |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
@@ -520,6 +560,25 @@ file to be provided for reference).
   it from the query it signs — so the audience check (`validAudiences`)
   happens at the token endpoint only. Opaque tokens don't carry an audience
   anyway; `/api/mcp` is the only resource there is.
+- **The write tools haven't met a real Claude yet.** `check:mcp` drives
+  every one in-process, but what a model does with them — whether it reads
+  `notFound` and retries with the ids it's offered, whether it asks before
+  a big `tag_games` — is only knowable by using it.
+- **"Allow changes" can't be added to an existing key or connection.** A
+  key's grant is fixed when it's made (there's no update route), and an
+  OAuth client registered before phase 30 can't ask for `library:write`.
+  The fix in both cases is a new one: a new key, or removing and re-adding
+  the connector. Deliberate — an upgrade-in-place is exactly the "writes by
+  surprise" path the opt-in exists to rule out.
+- **`set_time_to_beat` follows `normalizeTtb` to the letter**, including
+  its two-figure rule: main + completionist, with nothing in between, is
+  stored as main + main-extras. That's the route's behaviour and the tool
+  description says so (and to give all three); changing it would change
+  the web form too.
+- **MCP write tools can add games to a published collection.** Adding a
+  game is something the web app allows on a public collection too, and
+  game titles aren't user text, so nothing is filtered. Making one public
+  is still web-only.
 - **API keys and connected apps are web-only**, like 2FA setup. Mobile
   neither lists nor revokes them.
 - better-auth logs `Failed to validate API key` at ERROR for every bad key

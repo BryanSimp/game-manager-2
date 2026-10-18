@@ -5,10 +5,13 @@ import { API_KEY_NAME_MAX } from "../constants.js";
  * Personal API keys: what Claude Code (or anything else that speaks MCP)
  * presents to `/api/mcp` to read your library without a browser session.
  *
- * A key is read-only by construction — it's accepted by the MCP endpoint and
- * nowhere else, and that endpoint has no tool that writes — so the only thing
- * you choose when making one is what to call it. One key per device is the
- * intended shape: revoking the laptop's shouldn't sign the desktop out.
+ * A key is accepted by the MCP endpoint and nowhere else. By default it only
+ * reads; `allowChanges` lets it use the MCP server's write tools too (add
+ * tags, collections, linked games and time-to-beat figures — nothing that
+ * deletes). That's a choice made once, when the key is made, and off unless
+ * you tick it: keys made before the option existed are read-only for good.
+ * One key per device is the intended shape: revoking the laptop's shouldn't
+ * sign the desktop out.
  */
 export const apiKeyCreateSchema = z.object({
   name: z
@@ -16,8 +19,9 @@ export const apiKeyCreateSchema = z.object({
     .trim()
     .min(1, "Give the key a name, like the device it's for")
     .max(API_KEY_NAME_MAX, `Key names are at most ${API_KEY_NAME_MAX} characters`),
+  allowChanges: z.boolean().optional(),
 });
-export type ApiKeyCreateInput = z.infer<typeof apiKeyCreateSchema>;
+export type ApiKeyCreateInput = z.input<typeof apiKeyCreateSchema>;
 
 /** A key as the API keys card lists it. The key itself is never in here. */
 export interface ApiKeySummary {
@@ -29,6 +33,8 @@ export interface ApiKeySummary {
   /** null until the key has been used once */
   lastUsedAt: string | null;
   expiresAt: string | null;
+  /** whether the key may use the MCP write tools, or only read */
+  allowChanges: boolean;
 }
 
 /** Returned once, by create. `key` can't be fetched again afterwards. */

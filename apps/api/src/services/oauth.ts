@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, eq, gt } from "drizzle-orm";
-import { MCP_SCOPE } from "@gm/shared";
+import { MCP_SCOPE, MCP_WRITE_SCOPE } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { env } from "../env.js";
 
@@ -33,8 +33,19 @@ export const OAUTH_ISSUER = `${PUBLIC_ORIGIN}/api/auth`;
  */
 export const PROTECTED_RESOURCE_METADATA_URL = `${PUBLIC_ORIGIN}/.well-known/oauth-protected-resource/api/mcp`;
 
-/** The scopes this server advertises: reading, and a refresh token to keep reading. */
-export const ADVERTISED_SCOPES = [MCP_SCOPE, "offline_access"];
+/**
+ * The scopes this server advertises: reading, changing (opt-in — see below),
+ * and a refresh token to stay connected.
+ *
+ * `library:write` is advertised so a client knows it can ask for it, and is
+ * among the scopes a client registers with by default so that asking for it
+ * at authorize isn't refused. Neither of those grants anything: a token only
+ * carries `library:write` when the person ticked "Allow changes" on the
+ * consent screen, which starts unticked. A client registered before this
+ * scope existed can't ask for it at all — its registration predates it —
+ * so an existing connection never picks it up on a refresh or a re-sign-in.
+ */
+export const ADVERTISED_SCOPES = [MCP_SCOPE, MCP_WRITE_SCOPE, "offline_access"];
 
 /**
  * Prefixes on the tokens handed out, so a token in a log or a config file

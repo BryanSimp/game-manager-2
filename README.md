@@ -108,15 +108,24 @@ for Expo Go over a LAN.
 
 ## Connect Claude
 
-The API serves a read-only [MCP](https://modelcontextprotocol.io) server at `/api/mcp`, so Claude
-can answer questions about your library — "what should I play next?", "how far through Hollow
-Knight am I?", "how long is the rest of my Zelda marathon?". Each person connects with their own
-credentials and only ever sees their own library. Nothing Claude can call writes anything.
+The API serves an [MCP](https://modelcontextprotocol.io) server at `/api/mcp`, so Claude can
+answer questions about your library — "what should I play next?", "how far through Hollow Knight
+am I?", "how long is the rest of my Zelda marathon?" — and, if you let it, organise it: "tag all
+my co-op games", "make a collection of the Zelda games in release order", "link the DLC to its
+base games". Each person connects with their own credentials and only ever sees or changes their
+own library.
+
+Reading is always on. **Changes are opt-in, per key or per connection**: a key only writes if you
+ticked **Allow changes** when you made it, and claude.ai only writes if you ticked **Allow
+changes** on the consent screen. Keys and connections made before this option existed stay
+read-only.
 
 ### Claude Code
 
-In the web app, open **Preferences → API keys**, name a key after the device it's for and create
-it. The key is shown once; the card gives you the full command, which looks like:
+In the web app, open **Preferences → API keys**, name a key after the device it's for, tick
+**Allow changes** if you want Claude to be able to organise your library (leave it off for a key
+that only reads), and create it. The key is shown once; the card gives you the full command, which
+looks like:
 
 ```bash
 claude mcp add --transport http gamesmanager https://<your-host>/api/mcp --header "Authorization: Bearer <key>"
@@ -127,19 +136,62 @@ with `claude mcp list`. Make one key per device and revoke the ones you stop usi
 stops working on its next request. A key only works at `/api/mcp`: it isn't a session, so it can't
 be used against the rest of the API.
 
-The tools: `list_library` (filter by category, platform, tag or title), `get_game` (notes,
-mission progress, checklists and linked DLC/sequels/remakes), `get_dashboard`, `list_collections`,
-`get_collection` (games in play order), `list_categories` and `get_backlog_candidates` (Backlog,
-Shelved and Wishlist, shortest remaining first).
+A key can't be switched from read-only to "Allow changes" later — make a new one. To swap the key
+Claude Code uses:
+
+```bash
+claude mcp remove gamesmanager
+```
+
+then run the `claude mcp add …` command the card gave you for the new key (with the same
+`--scope` you used before), and revoke the old key on the API keys card.
+
+### What Claude can do
+
+Reading, with any key or connection: `list_library` (filter by category, platform, tag or title),
+`get_game` (notes, mission progress, checklists and linked DLC/sequels/remakes), `get_dashboard`,
+`list_collections`, `get_collection` (games in play order), `list_categories` and
+`get_backlog_candidates` (Backlog, Shelved and Wishlist, shortest remaining first).
+
+Changing, only with **Allow changes** on:
+
+- `create_tag` — a tag, with an optional colour and group ("Franchise", "Mode"). A name you
+  already have returns that tag unchanged.
+- `tag_games` / `untag_games` — add one tag to (or take it off) up to 100 games. Adding keeps
+  each game's other tags; untagging removes the tag from those games, never the tag itself.
+- `create_collection` — a collection, optionally started with games in order. Always private,
+  whatever your publish preference says; a name you already have returns that collection.
+- `add_games_to_collection` — append up to 100 games to one of your collections, in order.
+- `link_games` — DLC, prequel/sequel or remake/remaster links, with the same rules as the Linked
+  tab (no self-links, one link per pair).
+- `set_time_to_beat` — your own main / main + extras / completionist hours for a game. These feed
+  the community average, so Claude is told to set them only when you give a figure or a reliable
+  source does.
+
+Games are named by id or exact title. Collections and links can include games you don't own, as
+in the web app: a title that isn't in your library is looked up in the shared catalog, then on
+IGDB.
+
+What it can't do, with any key: delete anything; rename or delete tags or collections; change a
+game's category, rating, notes, platforms or dates; publish a collection; or touch your account
+or settings. One request carries at most one change, and every change is logged (tool name and
+counts, never titles) like the web app's own writes.
 
 ### claude.ai (custom connector)
 
 claude.ai connects over OAuth instead of a key. In claude.ai, open **Settings → Connectors → Add
 custom connector**, give it a name and the URL `https://<your-host>/api/mcp`, then **Connect**.
 You land on your instance's normal sign-in (two-factor included, if you've turned it on), then a
-consent screen naming the app and what it can read. Allow, and you're sent back to claude.ai.
-Connected apps are listed under **Preferences → API keys**, where **Disconnect** cuts one off on
-its next request.
+consent screen naming the app and what it can read. If the app asks to make changes, that's a
+separate **Allow changes** line, unticked — tick it to let Claude use the write tools above, or
+leave it and the connection only reads. Allow, and you're sent back to claude.ai. Connected apps
+are listed under **Preferences → API keys** (with whether each can make changes), where
+**Disconnect** cuts one off on its next request.
+
+A connector added before changes existed stays read-only, even after a refresh: its registration
+only covers reading. To let it make changes, remove the connector in claude.ai (**Settings →
+Connectors**), disconnect it under **Preferences → API keys → Connected apps**, then add it again
+with the same URL and tick **Allow changes** when you're asked.
 
 Under the hood: claude.ai reads `/.well-known/oauth-protected-resource` and
 `/.well-known/oauth-authorization-server`, registers itself (OAuth dynamic client registration),

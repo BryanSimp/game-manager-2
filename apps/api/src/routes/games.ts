@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, eq, ilike, max, or } from "drizzle-orm";
+import { and, asc, eq, ilike } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
   GAME_LINK_ROLES,
@@ -8,7 +8,6 @@ import {
   parseSteamAppQuery,
   type CatalogGame,
   type GameLink,
-  type GameLinkRole,
   type GameLinkSection,
   type GameLinkSort,
   type GameLinks,
@@ -29,6 +28,8 @@ import { getStoreAppName } from "../services/steam.js";
 import { upsertGameFromIgdb } from "../services/catalog.js";
 import { ownedConsoleIds } from "../services/consoles.js";
 import { MIN_RATINGS, communityRatings, resolveTtbFor } from "../services/community.js";
+import { linkGames } from "../services/game-links.js";
+import { replyWithServiceError } from "../services/service-error.js";
 import { gameToJson } from "./library.js";
 
 export function registerGameRoutes(app: FastifyInstance): void {
@@ -254,94 +255,14 @@ export function registerGameRoutes(app: FastifyInstance): void {
       }
     }
     if (!relatedId) return reply.status(400).send({ message: "relatedGameId or igdbId required" });
-    if (relatedId === game.id) {
-      return reply.status(400).send({ message: "A game can't be linked to itself" });
+
+    try {
+      const link = await linkGames(user.id, game.id, relatedId, parsed.data.role);
+      reply.status(link.created ? 201 : 200);
+      return { ok: true, id: link.id };
+    } catch (err) {
+      return replyWithServiceError(reply, err);
     }
-
-    // the role names the game being added; storage is always base → related
-    const role = parsed.data.role;
-    const meta = GAME_LINK_ROLE_META[role];
-    const base = meta.side === "base" ? game.id : relatedId;
-    const related = meta.side === "base" ? relatedId : game.id;
-
-    // One link per pair. The same link again is a no-op; any *other* link
-    // between the two — the inverse (a game that's both prequel and sequel of
-    // another renders as listing itself) or a second kind (DLC and a sequel
-    // at once) — is refused and named, so the fix is "unlink that one" rather
-    // than two sections quietly disagreeing about what the pair is.
-    const existing = await db
-      .select({
-        id: schema.userGameLinks.id,
-        gameId: schema.userGameLinks.gameId,
-        kind: schema.userGameLinks.kind,
-      })
-      .from(schema.userGameLinks)
-      .where(
-        and(
-          eq(schema.userGameLinks.userId, user.id),
-          or(
-            and(
-              eq(schema.userGameLinks.gameId, base),
-              eq(schema.userGameLinks.relatedGameId, related),
-            ),
-            and(
-              eq(schema.userGameLinks.gameId, related),
-              eq(schema.userGameLinks.relatedGameId, base),
-            ),
-          ),
-        ),
-      );
-    const same = existing.find((l) => l.gameId === base && l.kind === meta.kind);
-    if (same) return { ok: true, id: same.id };
-    if (existing[0]) {
-      const current = roleFor(existing[0].kind, existing[0].gameId === game.id ? "base" : "related");
-      return reply.status(409).send({
-        message: current
-          ? `Those two are already linked — it's under ${GAME_LINK_ROLE_META[current].section}. Unlink it there first to change how they're related.`
-          : "Those two are already linked. Unlink them first to change how they're related.",
-      });
-    }
-
-    // new links go on the end of both lists they join, so a section already
-    // in custom order keeps the order you gave it
-    const [[baseMax], [relatedMax]] = await Promise.all([
-      db
-        .select({ value: max(schema.userGameLinks.basePosition) })
-        .from(schema.userGameLinks)
-        .where(
-          and(
-            eq(schema.userGameLinks.userId, user.id),
-            eq(schema.userGameLinks.gameId, base),
-            eq(schema.userGameLinks.kind, meta.kind),
-          ),
-        ),
-      db
-        .select({ value: max(schema.userGameLinks.relatedPosition) })
-        .from(schema.userGameLinks)
-        .where(
-          and(
-            eq(schema.userGameLinks.userId, user.id),
-            eq(schema.userGameLinks.relatedGameId, related),
-            eq(schema.userGameLinks.kind, meta.kind),
-          ),
-        ),
-    ]);
-
-    const [created] = await db
-      .insert(schema.userGameLinks)
-      .values({
-        userId: user.id,
-        gameId: base,
-        relatedGameId: related,
-        kind: meta.kind,
-        basePosition: (baseMax?.value ?? 0) + 1,
-        relatedPosition: (relatedMax?.value ?? 0) + 1,
-      })
-      // two clicks racing each other: the second finds the first's row
-      .onConflictDoNothing()
-      .returning({ id: schema.userGameLinks.id });
-    reply.status(created ? 201 : 200);
-    return { ok: true, id: created?.id ?? null };
   });
 
   /**
@@ -518,15 +439,6 @@ function dedupeResults(results: SearchResult[]): SearchResult[] {
     const key = r.igdbId !== null ? `igdb:${r.igdbId}` : `game:${r.gameId ?? r.title}`;
     return !seen.has(key) && seen.add(key);
   });
-}
-
-/** Which role a stored row plays on the page of the game at `side` of it. */
-function roleFor(kind: string, side: "base" | "related"): GameLinkRole | null {
-  return (
-    GAME_LINK_ROLES.find(
-      (role) => GAME_LINK_ROLE_META[role].kind === kind && GAME_LINK_ROLE_META[role].side === side,
-    ) ?? null
-  );
 }
 
 /**

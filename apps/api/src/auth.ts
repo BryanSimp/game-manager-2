@@ -6,7 +6,7 @@ import { apiKey } from "@better-auth/api-key";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { count, eq } from "drizzle-orm";
-import { API_KEY_NAME_MAX, API_KEY_PREFIX, MCP_SCOPE } from "@gm/shared";
+import { API_KEY_NAME_MAX, API_KEY_PREFIX, MCP_SCOPE, MCP_WRITE_SCOPE } from "@gm/shared";
 import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
 import { logEvent } from "./services/analytics.js";
@@ -52,6 +52,9 @@ const DISABLED_PATHS = [
   "/admin/oauth2/create-client",
   "/admin/oauth2/update-client",
 ];
+
+/** Every scope the authorization server knows — advertised or not. */
+const OAUTH_SCOPES = [MCP_SCOPE, MCP_WRITE_SCOPE, "offline_access", "openid", "profile", "email"];
 
 export const auth = betterAuth({
   secret: env.BETTER_AUTH_SECRET,
@@ -158,18 +161,19 @@ export const auth = betterAuth({
       accountLockout: { enabled: true, maxFailedAttempts: 10, durationSeconds: 15 * 60 },
     }),
     /*
-     * Personal API keys for the read-only MCP endpoint (`routes/mcp.ts`).
+     * Personal API keys for the MCP endpoint (`routes/mcp.ts`).
      *
      * Deliberately *not* a way into the rest of the API:
      * `enableSessionForAPIKeys` stays off, so a key presented anywhere but
      * `/api/mcp` is just an unrecognised header, and every write route still
-     * needs a real session. That's half of what makes the MCP server
-     * read-only; the other half is that it has no write tools.
+     * needs a real session. What a key can change is therefore exactly what
+     * the MCP write tools do, and only when the key was made with "Allow
+     * changes" on — recorded in the plugin's server-only `permissions`.
      *
      * The plugin's own HTTP endpoints aren't reachable either (see
      * `DISABLED_PATHS`): `routes/api-keys.ts` calls them server-side with the
-     * session's user id and nothing but a name. The fixed prefix is how
-     * `/api/mcp` tells a key from an OAuth access token at a glance.
+     * session's user id, a name and one of two fixed grants. The fixed prefix
+     * is how `/api/mcp` tells a key from an OAuth access token at a glance.
      *
      * The plugin's per-key quota is off: its default is ten requests a
      * *day*. `/api/mcp` is rate-limited per caller by @fastify/rate-limit,
@@ -194,23 +198,26 @@ export const auth = betterAuth({
      *   no signing keys to manage, and disconnecting an app is immediate.
      * - **`storeTokens` is our hash**, so `/api/mcp` verifies with the same
      *   function the plugin stored with (`services/oauth.ts`).
-     * - **Scopes**: `library:read` is the only one that opens `/api/mcp`, and
-     *   `offline_access` buys a refresh token so the connector stays
-     *   connected. The OpenID three are accepted (not advertised) so a client
-     *   that asks for them out of habit can still register.
+     * - **Scopes**: `library:read` is the only one that opens `/api/mcp`;
+     *   `library:write` adds the write tools on top of it, and only reaches a
+     *   token when the person ticks "Allow changes" on the consent screen
+     *   (see `ADVERTISED_SCOPES`). `offline_access` buys a refresh token so
+     *   the connector stays connected. The OpenID three are accepted (not
+     *   advertised) so a client that asks for them out of habit can still
+     *   register.
      * - **No client_credentials grant**: a token must belong to a person,
      *   because every tool answers for one person's library.
      */
     oauthProvider({
       loginPage: "/login",
       consentPage: "/oauth/consent",
-      scopes: [MCP_SCOPE, "offline_access", "openid", "profile", "email"],
+      scopes: OAUTH_SCOPES,
       advertisedMetadata: { scopes_supported: ADVERTISED_SCOPES },
       // what a client gets when it registers without naming scopes…
       clientRegistrationDefaultScopes: ADVERTISED_SCOPES,
       // …and what it may name; without this the plugin narrows registration
       // to the defaults and a client asking for `openid` is refused
-      clientRegistrationAllowedScopes: [MCP_SCOPE, "offline_access", "openid", "profile", "email"],
+      clientRegistrationAllowedScopes: OAUTH_SCOPES,
       grantTypes: ["authorization_code", "refresh_token"],
       // the `resource` a client may ask a token for (RFC 8707)
       validAudiences: [MCP_RESOURCE, `${MCP_RESOURCE}/`],
