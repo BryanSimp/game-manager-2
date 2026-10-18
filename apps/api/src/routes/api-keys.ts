@@ -10,6 +10,11 @@ import { auth } from "../auth.js";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { apiKeyRateLimit } from "../plugins/rate-limits.js";
+import {
+  READ_ONLY_KEY_PERMISSIONS,
+  WRITE_KEY_PERMISSIONS,
+  keyAllowsChanges,
+} from "../services/mcp-auth.js";
 
 /**
  * Personal API keys, for connecting Claude Code (or any MCP client) to
@@ -19,9 +24,11 @@ import { apiKeyRateLimit } from "../plugins/rate-limits.js";
  * call it directly (its own HTTP endpoints are in `auth.ts`'s
  * `DISABLED_PATHS`). The
  * plugin is still what generates and hashes a key — this file only decides
- * *whose* it is, from the session, and that the one thing a person chooses is
- * the name. Called that way, the plugin's server-only fields (quota, refill,
- * permissions, a custom prefix) can't be set by anybody.
+ * *whose* it is, from the session, and that the two things a person chooses
+ * are the name and whether it may make changes. Called that way, the
+ * plugin's server-only fields (quota, refill, a custom prefix) can't be set
+ * by anybody, and `permissions` only ever holds one of the two grants in
+ * `services/mcp-auth.ts`.
  *
  * Listing and revoking read the table directly, scoped to the asking user.
  */
@@ -32,6 +39,7 @@ function toSummary(row: {
   createdAt: Date;
   lastRequest: Date | null;
   expiresAt: Date | null;
+  permissions: unknown;
 }): ApiKeySummary {
   return {
     id: row.id,
@@ -40,6 +48,7 @@ function toSummary(row: {
     createdAt: row.createdAt.toISOString(),
     lastUsedAt: row.lastRequest?.toISOString() ?? null,
     expiresAt: row.expiresAt?.toISOString() ?? null,
+    allowChanges: keyAllowsChanges(row.permissions),
   };
 }
 
@@ -80,9 +89,15 @@ export function registerApiKeyRoutes(app: FastifyInstance): void {
     }
 
     // server-side call: no request, so the plugin takes `userId` from us
-    // rather than from a session, and nothing else in the body is ours to set
+    // rather than from a session, and nothing else in the body is ours to set.
+    // Read-only keys get their grant written out too, rather than left null,
+    // so a row says what it is without anyone knowing the legacy default.
     const created = await auth.api.createApiKey({
-      body: { name: parsed.data.name, userId: user.id },
+      body: {
+        name: parsed.data.name,
+        userId: user.id,
+        permissions: parsed.data.allowChanges ? WRITE_KEY_PERMISSIONS : READ_ONLY_KEY_PERMISSIONS,
+      },
     });
     reply.status(201);
     const payload: CreatedApiKey = {
@@ -93,6 +108,7 @@ export function registerApiKeyRoutes(app: FastifyInstance): void {
         createdAt: new Date(created.createdAt),
         lastRequest: null,
         expiresAt: created.expiresAt ? new Date(created.expiresAt) : null,
+        permissions: created.permissions,
       }),
       key: created.key,
     };

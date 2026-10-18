@@ -3,7 +3,6 @@ import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   COLLECTION_GRAPH_NAME_MAX,
-  COLLECTION_NAME_MAX,
   DEFAULT_COLLECTION_GRAPH_NAME,
   MAX_COLLECTION_GRAPHS,
   OWNERSHIP_FORMATS,
@@ -14,6 +13,15 @@ import { requireUser } from "../plugins/auth.js";
 import { upsertGameFromIgdb } from "../services/catalog.js";
 import { logEvent } from "../services/analytics.js";
 import { isValidCategory } from "../services/categories.js";
+import {
+  addGamesToCollection,
+  collectionSchema,
+  createCollection,
+  graphsOf,
+  gridSlot,
+  ownedCollection,
+  placeOnGraphs,
+} from "../services/collections.js";
 import { resolveTtbFor } from "../services/community.js";
 import { rememberConsoles } from "../services/consoles.js";
 import { inspectAll } from "../services/content-filter.js";
@@ -29,6 +37,7 @@ import {
   type CollectionTime,
   type GameTime,
 } from "../services/progress.js";
+import { isUniqueViolation, replyWithServiceError } from "../services/service-error.js";
 import {
   NO_VOTES,
   castCollectionVote,
@@ -61,24 +70,6 @@ type ListImportResult = {
   confidence: number;
   status: "added" | "duplicate" | "unmatched" | "failed";
 };
-
-const collectionSchema = z.object({
-  // Trimmed before it's measured: PATCH writes this straight to the row, so
-  // without it a rename to "   " was a collection with a blank title, and
-  // "Zelda " sat beside "Zelda" as a different name.
-  name: z
-    .string()
-    .trim()
-    .min(1, "Give the collection a name")
-    .max(COLLECTION_NAME_MAX, `Keep the name to ${COLLECTION_NAME_MAX} characters or fewer`),
-  description: z.string().max(2000).nullable().optional(),
-  accentColor: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/)
-    .nullable()
-    .optional(),
-  isPublic: z.boolean().optional(),
-});
 
 /** A handful of covers for a collection card, in play-order-ish layout order. */
 const PREVIEW_LIMIT = 5;
@@ -125,54 +116,6 @@ const graphNameSchema = z
   .max(COLLECTION_GRAPH_NAME_MAX, `Keep the name to ${COLLECTION_GRAPH_NAME_MAX} characters or fewer`);
 
 const GRAPH_NAME_TAKEN = "This collection already has a graph with that name";
-
-/** Postgres unique-violation, however deeply drizzle has wrapped it. */
-function isUniqueViolation(err: unknown): boolean {
-  for (let e = err; e instanceof Error; e = (e as { cause?: unknown }).cause) {
-    if ((e as { code?: string }).code === "23505") return true;
-  }
-  return false;
-}
-
-async function ownedCollection(userId: string, id: string) {
-  const [row] = await db
-    .select()
-    .from(schema.collections)
-    .where(and(eq(schema.collections.id, id), eq(schema.collections.userId, userId)));
-  return row ?? null;
-}
-
-/**
- * Where the nth game (0-based) lands on a graph nobody has arranged yet: a
- * loose grid, five across, so new nodes don't stack at the origin.
- */
-function gridSlot(n: number): { positionX: number; positionY: number } {
-  return { positionX: 80 + (n % 5) * 150, positionY: 80 + Math.floor(n / 5) * 190 };
-}
-
-/** A collection's graphs, in tab order. */
-function graphsOf(collectionId: string) {
-  return db
-    .select()
-    .from(schema.collectionGraphs)
-    .where(eq(schema.collectionGraphs.collectionId, collectionId))
-    .orderBy(asc(schema.collectionGraphs.position), asc(schema.collectionGraphs.createdAt));
-}
-
-/**
- * Put a game that has just joined a collection onto every one of its graphs.
- *
- * Each graph is a view of the whole collection, so a new game needs a place on
- * all of them — at the next free grid slot, where you'll see it and can drag
- * it to where it belongs. `n` is how many games the collection held before.
- */
-async function placeOnGraphs(graphIds: string[], gameId: string, n: number): Promise<void> {
-  if (graphIds.length === 0) return;
-  await db
-    .insert(schema.collectionGraphNodes)
-    .values(graphIds.map((graphId) => ({ graphId, gameId, ...gridSlot(n) })))
-    .onConflictDoNothing();
-}
 
 function gameCover(game: {
   coverImageId: string | null;
@@ -790,49 +733,13 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
   app.post("/api/collections", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const parsed = collectionSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+    try {
+      const created = await createCollection(user.id, request.body, "preference");
+      reply.status(201);
+      return created;
+    } catch (err) {
+      return replyWithServiceError(reply, err);
     }
-    const issue = inspectAll([parsed.data.name, parsed.data.description]);
-    if (issue) {
-      logEvent("content_blocked", user.id, { surface: "collection", kind: issue.kind });
-      return reply.status(400).send({ message: issue.message });
-    }
-    // Name and description are everything a new collection has, and both just
-    // passed the filter, so "publish automatically" has nothing unscanned to
-    // expose. An explicit isPublic in the request still wins — the preference
-    // decides the default, not the ceiling. Except under 'never', where it is
-    // the ceiling: see the PATCH below.
-    const mode = await publishModeFor(user.id);
-    const isPublic =
-      mode === "never" ? false : (parsed.data.isPublic ?? mode === "always");
-    // the collection and its first graph together, so a collection with no
-    // graph tab can't be left behind by a failure between the two
-    const created = await db.transaction(async (tx) => {
-      const [row] = await tx
-        .insert(schema.collections)
-        .values({
-          userId: user.id,
-          name: parsed.data.name.trim(),
-          description: parsed.data.description ?? null,
-          accentColor: parsed.data.accentColor ?? null,
-          isPublic,
-        })
-        .onConflictDoNothing()
-        .returning();
-      if (!row) return null;
-      await tx
-        .insert(schema.collectionGraphs)
-        .values({ collectionId: row.id, name: DEFAULT_COLLECTION_GRAPH_NAME, position: 1 });
-      return row;
-    });
-    if (!created) {
-      return reply.status(409).send({ message: "You already have a collection with that name" });
-    }
-    logEvent("collection_created", user.id, { collectionId: created.id });
-    reply.status(201);
-    return created;
   });
 
   app.patch<{ Params: { id: string } }>("/api/collections/:id", async (request, reply) => {
@@ -951,30 +858,10 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     }
     if (!gameId) return reply.status(400).send({ message: "gameId or igdbId required" });
 
-    const [countRow] = await db
-      .select({ n: count() })
-      .from(schema.collectionGames)
-      .where(eq(schema.collectionGames.collectionId, collection.id));
-    const n = countRow?.n ?? 0;
-    const added = await db
-      .insert(schema.collectionGames)
-      .values({
-        collectionId: collection.id,
-        gameId,
-        // new games land at the end of the flat list
-        sortOrder: n + 1,
-      })
-      .onConflictDoNothing()
-      .returning({ gameId: schema.collectionGames.gameId });
-    // only a game that actually joined needs placing — one that was already
-    // here has a spot on every graph, and it's wherever you dragged it
-    if (added.length > 0) {
-      const graphs = await graphsOf(collection.id);
-      await placeOnGraphs(
-        graphs.map((g) => g.id),
-        gameId,
-        n,
-      );
+    try {
+      await addGamesToCollection(user.id, collection.id, [gameId]);
+    } catch (err) {
+      return replyWithServiceError(reply, err);
     }
     return { ok: true, gameId };
   });

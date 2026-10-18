@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { API_KEY_NAME_MAX, type CreatedApiKey } from "@gm/shared";
+import {
+  API_KEY_NAME_MAX,
+  MCP_WRITE_SCOPE,
+  OAUTH_SCOPE_LABELS,
+  type CreatedApiKey,
+} from "@gm/shared";
 import { api } from "../lib/api.js";
 import { CopyButton } from "./TwoFactorCard.js";
 
@@ -17,6 +22,10 @@ import { CopyButton } from "./TwoFactorCard.js";
  *  - **One key per device** is the shape it nudges towards (the name field
  *    asks for one). Revoking the laptop's key then doesn't disconnect the
  *    desktop.
+ *  - **Changes are opt-in, per key.** "Allow changes" starts unticked, and
+ *    it can't be turned on later: a key that should write is a new key. So
+ *    the keys that existed before writes did stay read-only, and the list
+ *    says which of yours can change things.
  *  - **Revoking asks twice**, inline. Unlike unlinking a game, a revoked key
  *    can't be made again with one click: whatever was using it needs the new
  *    one pasted in by hand.
@@ -37,15 +46,17 @@ export function ApiKeysCard() {
   const queryClient = useQueryClient();
   const keys = useQuery({ queryKey: ["api-keys"], queryFn: () => api.listApiKeys() });
   const [name, setName] = useState("");
+  const [allowChanges, setAllowChanges] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fresh, setFresh] = useState<CreatedApiKey | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
 
   const create = useMutation({
-    mutationFn: () => api.createApiKey({ name: name.trim() }),
+    mutationFn: () => api.createApiKey({ name: name.trim(), allowChanges }),
     onSuccess: (created) => {
       setFresh(created);
       setName("");
+      setAllowChanges(false);
       setError(null);
       queryClient.invalidateQueries({ queryKey: ["api-keys"] });
     },
@@ -71,9 +82,10 @@ export function ApiKeysCard() {
     <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
       <h2 className="text-lg font-semibold">API keys</h2>
       <p className="mt-1 text-sm text-zinc-400">
-        Let Claude read your library — "what should I play next?", "how far through this am I?".
-        A key can only <em>read</em>, and only through the MCP connection at{" "}
-        <code className="rounded bg-zinc-800 px-1 py-0.5 text-xs text-zinc-300">{endpoint}</code>.
+        Let Claude read your library — "what should I play next?", "how far through this am I?" —
+        through the MCP connection at{" "}
+        <code className="rounded bg-zinc-800 px-1 py-0.5 text-xs text-zinc-300">{endpoint}</code>,
+        and nowhere else. A key only reads unless you tick <em>Allow changes</em> when you make it.
         Make one per device, so you can revoke one without the others.
       </p>
 
@@ -86,7 +98,8 @@ export function ApiKeysCard() {
       {fresh && command ? (
         <div className="mt-4 rounded-lg border border-emerald-900 bg-emerald-950/40 p-3">
           <p className="text-sm text-emerald-300">
-            Key “{fresh.name}” created. Copy it now — this is the only time it's shown.
+            Key “{fresh.name}” created{fresh.allowChanges ? ", allowed to make changes" : ", read-only"}.
+            Copy it now — this is the only time it's shown.
           </p>
           <code className="mt-2 block break-all rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200">
             {fresh.key}
@@ -112,27 +125,43 @@ export function ApiKeysCard() {
         </div>
       ) : (
         <form
-          className="mt-4 flex gap-2"
+          className="mt-4"
           onSubmit={(ev) => {
             ev.preventDefault();
             if (name.trim()) create.mutate();
           }}
         >
-          <input
-            value={name}
-            onChange={(ev) => setName(ev.target.value)}
-            placeholder="Name it after the device — e.g. Claude Code on my laptop"
-            maxLength={API_KEY_NAME_MAX}
-            aria-label="Key name"
-            className={inputClass}
-          />
-          <button
-            type="submit"
-            disabled={!name.trim() || create.isPending}
-            className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {create.isPending ? "…" : "Create key"}
-          </button>
+          <div className="flex gap-2">
+            <input
+              value={name}
+              onChange={(ev) => setName(ev.target.value)}
+              placeholder="Name it after the device — e.g. Claude Code on my laptop"
+              maxLength={API_KEY_NAME_MAX}
+              aria-label="Key name"
+              className={inputClass}
+            />
+            <button
+              type="submit"
+              disabled={!name.trim() || create.isPending}
+              className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {create.isPending ? "…" : "Create key"}
+            </button>
+          </div>
+          <label className="mt-2 flex cursor-pointer items-start gap-2 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              checked={allowChanges}
+              onChange={(ev) => setAllowChanges(ev.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Allow changes
+              <span className="block text-xs text-zinc-500">
+                {OAUTH_SCOPE_LABELS[MCP_WRITE_SCOPE]} Leave it off for a key that only reads.
+              </span>
+            </span>
+          </label>
         </form>
       )}
 
@@ -143,7 +172,13 @@ export function ApiKeysCard() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-zinc-200">{k.name ?? "Unnamed key"}</p>
                 <p className="text-xs text-zinc-500">
-                  {k.start ? <span className="font-mono">{k.start}…</span> : null} · created{" "}
+                  {k.start ? <span className="font-mono">{k.start}…</span> : null} ·{" "}
+                  {k.allowChanges ? (
+                    <span className="text-amber-400">can make changes</span>
+                  ) : (
+                    "read-only"
+                  )}{" "}
+                  · created{" "}
                   {shortDate(k.createdAt)} ·{" "}
                   {k.lastUsedAt ? `last used ${shortDate(k.lastUsedAt)}` : "never used"}
                 </p>
@@ -215,7 +250,8 @@ function ConnectedApps({ endpoint }: { endpoint: string }) {
       <p className="mt-1 text-sm text-zinc-400">
         On claude.ai, add a custom connector with the URL{" "}
         <code className="rounded bg-zinc-800 px-1 py-0.5 text-xs text-zinc-300">{endpoint}</code> —
-        no key needed; you'll sign in here and approve it.
+        no key needed; you'll sign in here and approve it, and tick <em>Allow changes</em> there if
+        you want it to be able to change things.
       </p>
       {apps.data && apps.data.length > 0 ? (
         <ul className="mt-3 divide-y divide-zinc-800 rounded-lg border border-zinc-800">
@@ -224,6 +260,11 @@ function ConnectedApps({ endpoint }: { endpoint: string }) {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-zinc-200">{a.name ?? "Unnamed app"}</p>
                 <p className="text-xs text-zinc-500">
+                  {a.scopes.includes(MCP_WRITE_SCOPE) ? (
+                    <span className="text-amber-400">can make changes · </span>
+                  ) : (
+                    "read-only · "
+                  )}
                   {a.redirectHost ? <>signs in via {a.redirectHost} · </> : null}
                   {a.connectedAt ? <>connected {shortDate(a.connectedAt)} · </> : null}
                   {a.lastActiveAt ? `last active ${shortDate(a.lastActiveAt)}` : "not used yet"}

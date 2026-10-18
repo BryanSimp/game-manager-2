@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { OAUTH_SCOPE_LABELS } from "@gm/shared";
+import { MCP_SCOPE, MCP_WRITE_SCOPE, OAUTH_SCOPE_LABELS } from "@gm/shared";
 import { authClient } from "../lib/auth.js";
 import { followOAuthRedirect, isOAuthFlow } from "../lib/oauth.js";
 import { AuthCard } from "../components/AuthCard.js";
@@ -20,6 +20,14 @@ import { AuthCard } from "../components/AuthCard.js";
  *
  * Allow and Deny both end in a full navigation back to the app; Deny tells it
  * "access_denied" rather than leaving it waiting.
+ *
+ * **Changes are a separate tick.** When an app asks for `library:write` it
+ * gets its own line — a checkbox that starts unticked, saying plainly that
+ * it lets the app change the library. Allow without the tick grants
+ * everything else the app asked for and narrows the consent to that (the
+ * plugin's `scope` on the consent request), so the token reads and nothing
+ * more. Clients tend to ask for every scope a server advertises, so a
+ * default-on box would be writes by surprise.
  */
 
 interface PublicClient {
@@ -45,11 +53,14 @@ export function OAuthConsentPage() {
   const search = new URLSearchParams(window.location.search);
   const clientId = search.get("client_id");
   const scopes = (search.get("scope") ?? "").split(" ").filter(Boolean);
+  const asksToWrite = scopes.includes(MCP_WRITE_SCOPE);
+  const readScopes = scopes.filter((scope) => scope !== MCP_WRITE_SCOPE);
   const backTo = redirectHostOf(search);
 
   const [client, setClient] = useState<PublicClient | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
+  const [allowChanges, setAllowChanges] = useState(false);
 
   useEffect(() => {
     if (!clientId || !session.data) return;
@@ -70,10 +81,13 @@ export function OAuthConsentPage() {
   async function decide(accept: boolean) {
     setError(null);
     setBusy(accept ? "allow" : "deny");
-    // the signed query is added by oauthProviderClient (lib/auth.ts)
+    // the signed query is added by oauthProviderClient (lib/auth.ts). Leaving
+    // "Allow changes" unticked consents to every other scope the app asked
+    // for, and the token it gets carries exactly those.
+    const narrowed = accept && asksToWrite && !allowChanges;
     const { data, error: consentError } = await authClient.$fetch<{ redirect?: boolean; url?: string }>(
       "/oauth2/consent",
-      { method: "POST", body: { accept } },
+      { method: "POST", body: narrowed ? { accept, scope: readScopes.join(" ") } : { accept } },
     );
     if (consentError || !followOAuthRedirect(data)) {
       setBusy(null);
@@ -119,11 +133,15 @@ export function OAuthConsentPage() {
   return (
     <AuthCard title="Connect an app">
       <h2 className="text-center text-lg font-semibold text-zinc-100">
-        {client ? `${appName} wants read access to your Game Manager library` : "…"}
+        {!client
+          ? "…"
+          : asksToWrite
+            ? `${appName} wants access to your Game Manager library`
+            : `${appName} wants read access to your Game Manager library`}
       </h2>
 
       <ul className="mt-4 space-y-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-sm text-zinc-300">
-        {(scopes.length > 0 ? scopes : ["library:read"]).map((scope) => (
+        {(readScopes.length > 0 ? readScopes : [MCP_SCOPE]).map((scope) => (
           <li key={scope} className="flex gap-2">
             <span aria-hidden className="text-emerald-400">
               ✓
@@ -131,6 +149,27 @@ export function OAuthConsentPage() {
             <span>{OAUTH_SCOPE_LABELS[scope] ?? scope}</span>
           </li>
         ))}
+        {asksToWrite ? (
+          <li className="border-t border-zinc-800 pt-2">
+            <label className="flex cursor-pointer items-start gap-2">
+              <input
+                type="checkbox"
+                checked={allowChanges}
+                onChange={(ev) => setAllowChanges(ev.target.checked)}
+                disabled={busy !== null}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-semibold text-amber-300">Allow changes</span> — this lets{" "}
+                {appName === "An app" ? "the app" : appName} make changes to your library.{" "}
+                {OAUTH_SCOPE_LABELS[MCP_WRITE_SCOPE]}
+                <span className="mt-0.5 block text-xs text-zinc-500">
+                  Leave it unticked and it can only read.
+                </span>
+              </span>
+            </label>
+          </li>
+        ) : null}
       </ul>
 
       <p className="mt-3 text-xs text-zinc-500">

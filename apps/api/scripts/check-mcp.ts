@@ -1,8 +1,10 @@
 /**
  * The MCP endpoint, end to end: who may call it, that one user can never see
- * another's library through it, what each tool answers, and the OAuth flow
- * claude.ai's connector takes to get in (discovery, registration, login with
- * two-factor, consent, tokens, disconnecting).
+ * another's library through it, what each tool answers, which credentials
+ * may use the write tools (and that those only ever touch the caller's own
+ * games, tags and collections), and the OAuth flow claude.ai's connector
+ * takes to get in (discovery, registration, login with two-factor, consent
+ * with and without "Allow changes", tokens, disconnecting).
  *
  * Unlike the other check scripts this needs a database — migrated, with
  * DATABASE_URL and BETTER_AUTH_SECRET set as for `pnpm dev:api`:
@@ -18,18 +20,20 @@
  * 5-a-minute sign-in limit like any other sign-in.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { inArray, eq } from "drizzle-orm";
+import { and, eq, ilike, inArray } from "drizzle-orm";
 import { base32 } from "@better-auth/utils/base32";
 import { createOTP } from "@better-auth/utils/otp";
-import { MCP_SCOPE } from "@gm/shared";
+import { MCP_SCOPE, MCP_WRITE_SCOPE } from "@gm/shared";
 import { auth } from "../src/auth.js";
 import { db, schema } from "../src/db/index.js";
 import { env } from "../src/env.js";
 import { buildServer } from "../src/server.js";
+import { flushEvents } from "../src/services/analytics.js";
 import {
   MCP_RESOURCE,
   OAUTH_ISSUER,
   PROTECTED_RESOURCE_METADATA_URL,
+  hashOAuthToken,
 } from "../src/services/oauth.js";
 
 const app = await buildServer({ logger: false });
@@ -136,7 +140,7 @@ async function tool(key: string, name: string, args: Record<string, unknown> = {
   };
 }
 
-async function asUser(cookie: string, method: "GET" | "POST" | "DELETE", url: string, payload?: unknown) {
+async function asUser(cookie: string, method: "GET" | "POST" | "PUT" | "DELETE", url: string, payload?: unknown) {
   return app.inject({
     method,
     url,
@@ -193,7 +197,8 @@ function authorizePath(clientId: string, challenge: string, scope: string) {
 /** The signed query a redirect to /login or /oauth/consent carries. */
 const signedQueryOf = (location: string) => location.slice(location.indexOf("?") + 1);
 
-async function consent(cookie: string, location: string, accept: boolean) {
+/** `scope` narrows what's granted — the consent page leaving "Allow changes" unticked. */
+async function consent(cookie: string, location: string, accept: boolean, scope?: string) {
   const res = await app.inject({
     method: "POST",
     url: "/api/auth/oauth2/consent",
@@ -203,7 +208,7 @@ async function consent(cookie: string, location: string, accept: boolean) {
       accept: "application/json",
       "content-type": "application/json",
     },
-    payload: { accept, oauth_query: signedQueryOf(location) },
+    payload: { accept, oauth_query: signedQueryOf(location), ...(scope ? { scope } : {}) },
   });
   return res.json() as { redirect?: boolean; url?: string };
 }
@@ -222,7 +227,12 @@ async function exchange(clientId: string, params: Record<string, string>) {
  * A signed-in user connects the client: authorize → consent (when it hasn't
  * been given yet) → code → token. Returns the token response.
  */
-async function connect(cookie: string, clientId: string, scope = `${MCP_SCOPE} offline_access`) {
+async function connect(
+  cookie: string,
+  clientId: string,
+  scope = `${MCP_SCOPE} offline_access`,
+  consentScope?: string,
+) {
   const { verifier, challenge } = pkce();
   const authorize = await app.inject({
     method: "GET",
@@ -231,7 +241,7 @@ async function connect(cookie: string, clientId: string, scope = `${MCP_SCOPE} o
   });
   let location = String(authorize.headers.location ?? "");
   if (location.startsWith("/oauth/consent")) {
-    location = (await consent(cookie, location, true)).url ?? "";
+    location = (await consent(cookie, location, true, consentScope)).url ?? "";
   }
   const code = location ? new URL(location).searchParams.get("code") : null;
   if (!code) throw new Error(`no code: ${authorize.statusCode} ${location}`);
@@ -281,6 +291,12 @@ try {
   const wish = await makeGame("Wishlist Game");
   const done = await makeGame("Finished Game", { ttbMain: 10 * 3600 });
   const odd = await makeGame("Custom Category Game");
+  // in the shared catalog, not in alice's library — collections and links may
+  // still name them (IGDB-backed, so a title finds them)
+  const igdbBase = 900_000_000 + Math.floor(Math.random() * 90_000_000);
+  const notOwned = await makeGame("Not Owned Game", { igdbId: igdbBase + 1, releaseDate: "2020-05-01" });
+  const catalogOnly = await makeGame("Catalog Only: Game", { igdbId: igdbBase + 2 });
+  const byIgdb = await makeGame("Found By Igdb Ref", { igdbId: igdbBase + 3 });
 
   const [custom] = await db
     .insert(schema.customCategories)
@@ -399,13 +415,24 @@ try {
   const listRes = await rpc(aliceKey, "tools/list");
   const tools = (listRes.json() as { result: { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }> } }).result.tools;
   const names = tools.map((t) => t.name).sort();
+  const READ_TOOLS = ["get_backlog_candidates", "get_collection", "get_dashboard", "get_game", "list_categories", "list_collections", "list_library"];
+  const WRITE_TOOLS = ["add_games_to_collection", "create_collection", "create_tag", "link_games", "set_time_to_beat", "tag_games", "untag_games"];
   check(
-    "tools/list offers the seven tools",
-    JSON.stringify(names) ===
-      JSON.stringify(["get_backlog_candidates", "get_collection", "get_dashboard", "get_game", "list_categories", "list_collections", "list_library"]),
+    "tools/list offers the seven read tools and the seven write tools, even to a read-only key",
+    JSON.stringify(names) === JSON.stringify([...READ_TOOLS, ...WRITE_TOOLS].sort()),
     names,
   );
-  check("every tool is annotated read-only", tools.every((t) => t.annotations?.readOnlyHint === true));
+  const annotated = tools as Array<{ name: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }>;
+  check(
+    "read tools are annotated read-only",
+    annotated.filter((t) => READ_TOOLS.includes(t.name)).every((t) => t.annotations?.readOnlyHint === true),
+  );
+  check(
+    "write tools are annotated readOnlyHint: false, destructiveHint: false",
+    annotated
+      .filter((t) => WRITE_TOOLS.includes(t.name))
+      .every((t) => t.annotations?.readOnlyHint === false && t.annotations?.destructiveHint === false),
+  );
 
   const lib = await tool(aliceKey, "list_library");
   const titles: string[] = lib.data.games.map((g: { title: string }) => g.title);
@@ -536,6 +563,311 @@ try {
   const bobView = await tool(bobKey, "list_library");
   check("bob's key sees bob's library and only that", bobView.data.total === 1 && bobView.data.games[0].id === bSecret.id, bobView.data);
 
+  console.log("\nWrites: who may");
+  const writeKeyRes = await asUser(alice.cookie, "POST", "/api/api-keys", { name: "Claude Code (changes)", allowChanges: true });
+  check("a key made with allowChanges says so", writeKeyRes.statusCode === 201 && writeKeyRes.json().allowChanges === true, writeKeyRes.body);
+  const aliceWriteKey = writeKeyRes.json().key as string;
+  const keyList = (await asUser(alice.cookie, "GET", "/api/api-keys")).json() as Array<{ name: string; allowChanges: boolean }>;
+  check(
+    "…and the list tells it apart from the read-only key made without it",
+    keyList.find((k) => k.name === "Claude Code")?.allowChanges === false &&
+      keyList.find((k) => k.name === "Claude Code (changes)")?.allowChanges === true,
+    keyList,
+  );
+  const smuggled = await asUser(alice.cookie, "POST", "/api/api-keys", {
+    name: "smuggled",
+    permissions: { library: ["read", "write"] },
+  });
+  check("a key can't be given permissions directly — only allowChanges grants writes", smuggled.statusCode === 201 && smuggled.json().allowChanges === false, smuggled.body);
+  await asUser(alice.cookie, "DELETE", `/api/api-keys/${smuggled.json().id}`);
+
+  const refusedArgs: Record<string, Record<string, unknown>> = {
+    create_tag: { name: `refused-${run}` },
+    tag_games: { tag: `refused-${run}`, games: [aHollow.id] },
+    untag_games: { tag: tag!.name, games: [aHollow.id] },
+    create_collection: { name: `refused-${run}` },
+    add_games_to_collection: { collectionId: aliceCollection, games: [shortOne.title] },
+    link_games: { game: aHollow.id, relatedGame: shortOne.title, role: "sequel" },
+    set_time_to_beat: { game: aHollow.id, mainHours: 1 },
+  };
+  const refusals = await Promise.all(
+    Object.entries(refusedArgs).map(async ([name, args]) => ({ name, ...(await tool(aliceKey, name, args)) })),
+  );
+  check(
+    "every write tool refuses a read-only key, saying how to get one that can write",
+    refusals.every((r) => r.isError && r.text.includes("This key is read-only") && r.text.includes("Allow changes")),
+    refusals.filter((r) => !r.isError || !r.text.includes("read-only")).map((r) => [r.name, r.text]),
+  );
+  const legacy = await tool(bobKey, "create_tag", { name: `bob-legacy-${run}` });
+  check("a key made before writes existed (no permissions at all) is read-only", legacy.isError && legacy.text.includes("read-only"), legacy.text);
+  const [hollowTagsBefore] = [
+    await db.select().from(schema.userGameTags).where(eq(schema.userGameTags.userGameId, aHollow.id)),
+  ];
+  const refusedRows = [
+    ...(await db.select().from(schema.tags).where(ilike(schema.tags.name, `refused-${run}`))),
+    ...(await db.select().from(schema.tags).where(ilike(schema.tags.name, `bob-legacy-${run}`))),
+  ];
+  const [aliceCollectionGames] = [
+    await db.select().from(schema.collectionGames).where(eq(schema.collectionGames.collectionId, aliceCollection)),
+  ];
+  check(
+    "…and none of the refused calls wrote anything",
+    refusedRows.length === 0 && hollowTagsBefore.length === 1 && aliceCollectionGames.length === 2,
+    { tags: refusedRows.map((t) => t.name), hollowTags: hollowTagsBefore.length, inCollection: aliceCollectionGames.length },
+  );
+
+  console.log("\nWrites: tags");
+  const coop = `Co-op ${run}`;
+  const made = await tool(aliceWriteKey, "create_tag", { name: coop, group: "Mode", color: "#22c55e" });
+  check("create_tag makes a tag with its group and colour", made.data?.created === true && made.data.tag.group === "Mode" && made.data.tag.color === "#22c55e", made.text);
+  const madeAgain = await tool(aliceWriteKey, "create_tag", { name: coop.toUpperCase(), group: "Something else" });
+  const coopRows = await db.select().from(schema.tags).where(and(eq(schema.tags.userId, alice.id), ilike(schema.tags.name, coop)));
+  check(
+    "…the same name again, in any case, returns that tag unchanged instead of a second one",
+    madeAgain.data?.created === false && madeAgain.data.tag.name === coop && madeAgain.data.tag.group === "Mode" && !!madeAgain.data.note && coopRows.length === 1,
+    madeAgain.text,
+  );
+
+  const tagResult = await tool(aliceWriteKey, "tag_games", {
+    tag: coop,
+    games: [aHollow.id, shortOne.title, `No Such Game zzq ${run}`, bSecret.id],
+  });
+  check(
+    "tag_games tags the games it finds and lists the ones it can't",
+    tagResult.data?.tagged === 2 && tagResult.data.alreadyHad === 0 && tagResult.data.notFound.length === 2,
+    tagResult.data ?? tagResult.text,
+  );
+  const hollowTagIds = (await db.select().from(schema.userGameTags).where(eq(schema.userGameTags.userGameId, aHollow.id))).map((r) => r.tagId);
+  check(
+    "tag_games adds the tag and keeps the game's other tags",
+    hollowTagIds.length === 2 && hollowTagIds.includes(tag!.id) && hollowTagIds.includes(coopRows[0]!.id),
+    hollowTagIds,
+  );
+  const hkTags = (await tool(aliceWriteKey, "get_game", { id: aHollow.id })).data.tags as string[];
+  check("…as the read tools see it too", hkTags.includes(tag!.name) && hkTags.includes(coop), hkTags);
+  const taggedAgain = await tool(aliceWriteKey, "tag_games", { tag: coop.toLowerCase(), games: [aHollow.id] });
+  check("tagging a game that has the tag counts it as already tagged", taggedAgain.data?.tagged === 0 && taggedAgain.data.alreadyHad === 1, taggedAgain.data);
+  const franchise = await tool(aliceWriteKey, "tag_games", { tag: `Hallownest ${run}`, group: "Franchise", games: [hollow.title, hollowDlc.title] });
+  check(
+    "tag_games makes a missing tag first, in the group given",
+    franchise.data?.tagCreated === true && franchise.data.tag.group === "Franchise" && franchise.data.tagged === 2,
+    franchise.data ?? franchise.text,
+  );
+  const nearMiss = await tool(aliceWriteKey, "tag_games", { tag: coop, games: ["backlog game"] });
+  check(
+    "a title that isn't exact isn't guessed at — it comes back with ids to choose from",
+    nearMiss.data?.tagged === 0 && nearMiss.data.notFound[0]?.reason.includes("Did you mean"),
+    nearMiss.data,
+  );
+  const punctuation = await tool(aliceWriteKey, "tag_games", { tag: coop, games: [`HOLLOW KNIGHT - GODMASTER ${run}`.replace(" - ", " ")] });
+  check("…while case and punctuation don't stop an exact title matching", punctuation.data?.tagged === 1, punctuation.data);
+
+  const untagged = await tool(aliceWriteKey, "untag_games", { tag: coop, games: [shortOne.title, longOne.title] });
+  check(
+    "untag_games takes the tag off, and counts games that didn't have it",
+    untagged.data?.removed === 1 && untagged.data.didNotHaveIt === 1,
+    untagged.data ?? untagged.text,
+  );
+  const coopStill = await db.select().from(schema.tags).where(eq(schema.tags.id, coopRows[0]!.id));
+  const hollowStill = await db.select().from(schema.userGameTags).where(and(eq(schema.userGameTags.userGameId, aHollow.id), eq(schema.userGameTags.tagId, coopRows[0]!.id)));
+  check("…removing the assignment only: the tag and its other games stay", coopStill.length === 1 && hollowStill.length === 1);
+  const noSuchTag = await tool(aliceWriteKey, "untag_games", { tag: `never-made-${run}`, games: [aHollow.id] });
+  check("untagging with a tag the user doesn't have is an error naming their tags", noSuchTag.isError && noSuchTag.text.includes(coop), noSuchTag.text);
+
+  // bob's tag on bob's game: alice can't reach either
+  const [bobTag] = await db.insert(schema.tags).values({ userId: bob.id, name: `bob-only-${run}` }).returning();
+  await db.insert(schema.userGameTags).values({ userGameId: bSecret.id, tagId: bobTag!.id });
+  const crossUntag = await tool(aliceWriteKey, "untag_games", { tag: bobTag!.name, games: [bSecret.id] });
+  const crossTag = await tool(aliceWriteKey, "tag_games", { tag: coop, games: [bSecret.id, bobsGame.title] });
+  const bobTagsAfter = await db.select().from(schema.userGameTags).where(eq(schema.userGameTags.userGameId, bSecret.id));
+  check(
+    "alice can't untag bob's games with bob's tag, nor tag bob's games",
+    crossUntag.isError && crossTag.data?.tagged === 0 && crossTag.data.notFound.length === 2 && bobTagsAfter.length === 1 && bobTagsAfter[0]!.tagId === bobTag!.id,
+    { crossUntag: crossUntag.text, crossTag: crossTag.data, bobTagsAfter },
+  );
+
+  console.log("\nWrites: collections");
+  const publishAlways = await asUser(alice.cookie, "PUT", "/api/preferences", { publishMode: "always" });
+  const webMade = await asUser(alice.cookie, "POST", "/api/collections", { name: `Made on the web ${run}` });
+  check(
+    "(the web app's own create still follows publish mode 'always')",
+    publishAlways.statusCode === 200 && webMade.statusCode === 201 && webMade.json().isPublic === true,
+    { prefs: publishAlways.statusCode, body: webMade.body },
+  );
+  const metroid = `Metroidvanias ${run}`;
+  const createdCol = await tool(aliceWriteKey, "create_collection", {
+    name: metroid,
+    description: "Bugs and castles",
+    games: [aHollow.id, wish.title, notOwned.id, catalogOnly.title.replace(":", ""), `igdb:${byIgdb.igdbId}`, `Nope zzq ${run}`],
+  });
+  const colId = createdCol.data?.collection?.id as string;
+  const [colRow] = colId ? await db.select().from(schema.collections).where(eq(schema.collections.id, colId)) : [];
+  check(
+    "create_collection is private even though the publish preference is 'always'",
+    createdCol.data?.created === true && createdCol.data.collection.public === false && colRow?.isPublic === false,
+    createdCol.data ?? createdCol.text,
+  );
+  check(
+    "…and starts with the games it could find, owned or not, reporting the rest",
+    createdCol.data?.added === 5 && createdCol.data.notFound.length === 1,
+    createdCol.data,
+  );
+  const colView = await tool(aliceWriteKey, "get_collection", { id: colId });
+  check(
+    "…in the order given, on the collection's graph",
+    JSON.stringify(colView.data?.games.map((g: { title: string }) => g.title)) ===
+      JSON.stringify([hollow.title, wish.title, notOwned.title, catalogOnly.title, byIgdb.title]) &&
+      colView.data.games[2].inLibrary === false &&
+      colView.data.graphs[0]?.name === "Play order",
+    colView.data ?? colView.text,
+  );
+  const graphNodes = await db
+    .select()
+    .from(schema.collectionGraphNodes)
+    .innerJoin(schema.collectionGraphs, eq(schema.collectionGraphs.id, schema.collectionGraphNodes.graphId))
+    .where(eq(schema.collectionGraphs.collectionId, colId));
+  check("every game it added has a node on the graph", graphNodes.length === 5, graphNodes.length);
+  const sameName = await tool(aliceWriteKey, "create_collection", { name: metroid.toLowerCase(), games: [shortOne.title, aHollow.id] });
+  const metroidRows = await db.select().from(schema.collections).where(and(eq(schema.collections.userId, alice.id), ilike(schema.collections.name, metroid)));
+  check(
+    "the same name again returns that collection, appending only the new games",
+    sameName.data?.created === false && sameName.data.collection.id === colId && sameName.data.added === 1 && sameName.data.alreadyIn === 1 && metroidRows.length === 1,
+    sameName.data ?? sameName.text,
+  );
+  const appended = await tool(aliceWriteKey, "add_games_to_collection", { collectionName: metroid, games: [longOne.title, hollow.title] });
+  check(
+    "add_games_to_collection appends by collection name",
+    appended.data?.added === 1 && appended.data.alreadyIn === 1 && appended.data.gamesInCollection === 7,
+    appended.data ?? appended.text,
+  );
+  const intoBobs = await tool(aliceWriteKey, "add_games_to_collection", { collectionId: bobCollection, games: [aHollow.id] });
+  const bobsByName = await tool(aliceWriteKey, "add_games_to_collection", { collectionName: `Bob's list ${run}`, games: [aHollow.id] });
+  const bobsGames = await db.select().from(schema.collectionGames).where(eq(schema.collectionGames.collectionId, bobCollection));
+  check("alice can't add to bob's collection, by id or by name", intoBobs.isError && bobsByName.isError && bobsGames.length === 0, { intoBobs: intoBobs.text, bobsByName: bobsByName.text });
+  const filtered = await tool(aliceWriteKey, "create_collection", { name: `mail me at someone-${run}@example.com` });
+  check("the content filter applies to collections made over MCP", filtered.isError, filtered.text);
+
+  console.log("\nWrites: links");
+  const sequel = await tool(aliceWriteKey, "link_games", { game: aHollow.id, relatedGame: notOwned.title, role: "sequel" });
+  const [sequelRow] = await db
+    .select()
+    .from(schema.userGameLinks)
+    .where(and(eq(schema.userGameLinks.userId, alice.id), eq(schema.userGameLinks.relatedGameId, notOwned.id)));
+  check(
+    "link_games links a game to one alice doesn't own, and says what it recorded",
+    sequel.data?.created === true && sequel.data.link === `"${notOwned.title}" follows "${hollow.title}"` && sequelRow?.gameId === hollow.id && sequelRow.kind === "sequel",
+    sequel.data ?? sequel.text,
+  );
+  const sequelAgain = await tool(aliceWriteKey, "link_games", { game: hollow.title, relatedGame: notOwned.id, role: "sequel" });
+  check("…the same link again changes nothing", sequelAgain.data?.created === false, sequelAgain.data ?? sequelAgain.text);
+  const inverse = await tool(aliceWriteKey, "link_games", { game: notOwned.id, relatedGame: aHollow.id, role: "sequel" });
+  check("…a different link between the same pair is refused, naming where it is", inverse.isError && inverse.text.includes("Prequels"), inverse.text);
+  const selfLink = await tool(aliceWriteKey, "link_games", { game: aHollow.id, relatedGame: hollow.title, role: "dlc" });
+  check("…and a game can't be linked to itself", selfLink.isError && selfLink.text.includes("itself"), selfLink.text);
+  const baseGame = await tool(aliceWriteKey, "link_games", { game: shortOne.title, relatedGame: longOne.title, role: "base_game" });
+  const [baseRow] = await db
+    .select()
+    .from(schema.userGameLinks)
+    .where(and(eq(schema.userGameLinks.userId, alice.id), eq(schema.userGameLinks.relatedGameId, shortOne.id)));
+  check(
+    "base_game is stored from the other end: the related game is the base",
+    baseGame.data?.created === true && baseRow?.gameId === longOne.id && baseRow.kind === "dlc",
+    baseGame.data ?? baseGame.text,
+  );
+  const crossLink = await tool(aliceWriteKey, "link_games", { game: bSecret.id, relatedGame: aHollow.id, role: "dlc" });
+  const bobLinks = await db.select().from(schema.userGameLinks).where(eq(schema.userGameLinks.userId, bob.id));
+  check("bob's library id means nothing to alice's link_games, and bob's links stay empty", crossLink.isError && bobLinks.length === 0, crossLink.text);
+
+  console.log("\nWrites: time to beat");
+  const ttbOf = async (gameId: string) =>
+    (await db.select().from(schema.userTimeToBeat).where(and(eq(schema.userTimeToBeat.userId, alice.id), eq(schema.userTimeToBeat.gameId, gameId))))[0];
+  const setTtb = await tool(aliceWriteKey, "set_time_to_beat", {
+    game: wish.title,
+    mainHours: 12.5,
+    mainExtraHours: 20,
+    completionistHours: 30,
+  });
+  check(
+    "set_time_to_beat records the user's own figures, in hours",
+    setTtb.data?.yourTimeToBeatHours?.main === 12.5 &&
+      setTtb.data.yourTimeToBeatHours.mainExtra === 20 &&
+      setTtb.data.yourTimeToBeatHours.completionist === 30 &&
+      (await ttbOf(wish.id))?.mainSeconds === 45000,
+    setTtb.data ?? setTtb.text,
+  );
+  const keepOthers = await tool(aliceWriteKey, "set_time_to_beat", { game: wish.title, completionistHours: 35 });
+  check(
+    "…an omitted field is kept",
+    keepOthers.data?.yourTimeToBeatHours?.main === 12.5 && keepOthers.data.yourTimeToBeatHours.mainExtra === 20 && keepOthers.data.yourTimeToBeatHours.completionist === 35,
+    keepOthers.data,
+  );
+  const clearOne = await tool(aliceWriteKey, "set_time_to_beat", { game: wish.title, completionistHours: null });
+  check(
+    "…null clears one",
+    clearOne.data?.yourTimeToBeatHours?.completionist === null && clearOne.data.yourTimeToBeatHours.main === 12.5 && (await ttbOf(wish.id))?.completionistSeconds === null,
+    clearOne.data,
+  );
+  const clearAll = await tool(aliceWriteKey, "set_time_to_beat", { game: wish.title, mainHours: null, mainExtraHours: null });
+  check("…and clearing every figure removes the submission", clearAll.data?.cleared === true && (await ttbOf(wish.id)) === undefined, clearAll.data);
+  // the route and the tool on the same out-of-order pair: same stored figures
+  const [aLong] = await db
+    .select({ id: schema.userGames.id })
+    .from(schema.userGames)
+    .where(and(eq(schema.userGames.userId, alice.id), eq(schema.userGames.gameId, longOne.id)));
+  const viaRoute = await app.inject({
+    method: "PUT",
+    url: `/api/library/${aLong!.id}/time-to-beat`,
+    headers: { cookie: alice.cookie, "content-type": "application/json" },
+    payload: { ttbMain: 50 * 3600, ttbCompletionist: 10 * 3600 },
+  });
+  const inverted = await tool(aliceWriteKey, "set_time_to_beat", { game: shortOne.title, mainHours: 50, completionistHours: 10 });
+  const routeTimes = viaRoute.json() as { ttbMain: number; ttbMainExtra: number | null; ttbCompletionist: number | null };
+  check(
+    "…normalised exactly as PUT /api/library/:id/time-to-beat normalises",
+    viaRoute.statusCode === 200 &&
+      inverted.data?.yourTimeToBeatHours?.main === routeTimes.ttbMain / 3600 &&
+      inverted.data.yourTimeToBeatHours.mainExtra === (routeTimes.ttbMainExtra ?? 0) / 3600 &&
+      inverted.data.yourTimeToBeatHours.completionist === routeTimes.ttbCompletionist &&
+      inverted.data.yourTimeToBeatHours.main === 10,
+    { route: routeTimes, tool: inverted.data },
+  );
+  const nothingGiven = await tool(aliceWriteKey, "set_time_to_beat", { game: wish.title });
+  check("…and a call that names no figure is an error, not a silent clear", nothingGiven.isError, nothingGiven.text);
+  const bobsTtb = await tool(aliceWriteKey, "set_time_to_beat", { game: bSecret.id, mainHours: 99 });
+  const bobTtbRows = await db.select().from(schema.userTimeToBeat).where(eq(schema.userTimeToBeat.gameId, bobsGame.id));
+  check("alice can't set a time on bob's game", bobsTtb.isError && bobTtbRows.length === 0, bobsTtb.text);
+  const notOwnedTtb = await tool(aliceWriteKey, "set_time_to_beat", { game: notOwned.title, mainHours: 5 });
+  check("…nor on a game she doesn't own", notOwnedTtb.isError, notOwnedTtb.text);
+
+  console.log("\nWrites: limits and logging");
+  const batch = await app.inject({
+    method: "POST",
+    url: "/api/mcp",
+    headers: { ...MCP_HEADERS, authorization: `Bearer ${aliceWriteKey}` },
+    payload: [
+      { jsonrpc: "2.0", id: ++rpcId, method: "tools/call", params: { name: "create_tag", arguments: { name: `batch-a-${run}` } } },
+      { jsonrpc: "2.0", id: ++rpcId, method: "tools/call", params: { name: "create_tag", arguments: { name: `batch-b-${run}` } } },
+    ],
+  });
+  const batchTags = await db.select().from(schema.tags).where(and(eq(schema.tags.userId, alice.id), ilike(schema.tags.name, `batch-%-${run}`)));
+  check(
+    "a JSON-RPC batch can't carry more than one write past the rate limiter",
+    batchTags.length === 1 && batch.body.includes("one change per request"),
+    { status: batch.statusCode, tags: batchTags.map((t) => t.name), body: batch.body.slice(0, 400) },
+  );
+  await flushEvents();
+  const writeEvents = await db
+    .select()
+    .from(schema.analyticsEvents)
+    .where(and(eq(schema.analyticsEvents.userId, alice.id), eq(schema.analyticsEvents.type, "mcp_write")));
+  const loggedTools = new Set(writeEvents.map((e) => (e.meta as { tool?: string } | null)?.tool));
+  check(
+    "every write tool logs an mcp_write event with its name and counts, and no titles",
+    WRITE_TOOLS.every((name) => loggedTools.has(name)) &&
+      !writeEvents.some((e) => JSON.stringify(e.meta).includes(run)),
+    { tools: [...loggedTools], sample: writeEvents.slice(0, 3).map((e) => e.meta) },
+  );
+
   console.log("\nRevoking");
   const revoke = await asUser(alice.cookie, "DELETE", `/api/api-keys/${aliceKeyId}`);
   check("revoking a key succeeds", revoke.statusCode === 200, revoke.body);
@@ -548,7 +880,8 @@ try {
     prm.statusCode === 200 &&
       prm.json().resource === MCP_RESOURCE &&
       prm.json().authorization_servers?.[0] === OAUTH_ISSUER &&
-      prm.json().scopes_supported?.includes(MCP_SCOPE),
+      prm.json().scopes_supported?.includes(MCP_SCOPE) &&
+      prm.json().scopes_supported?.includes(MCP_WRITE_SCOPE),
     prm.body,
   );
   const prmInserted = await app.inject({ method: "GET", url: "/.well-known/oauth-protected-resource/api/mcp" });
@@ -701,6 +1034,12 @@ try {
   const aliceAccess = String(aliceTokens.body.access_token);
   const viaOAuth = await tool(aliceAccess, "list_library");
   check("an OAuth access token reads its owner's library", viaOAuth.data?.total === 7, viaOAuth.text.slice(0, 200));
+  const oauthWrite = await tool(aliceAccess, "create_tag", { name: `oauth-refused-${run}` });
+  check(
+    "a token without library:write is refused by write tools, saying how to reconnect",
+    oauthWrite.isError && oauthWrite.text.includes("This connection is read-only") && oauthWrite.text.includes("Allow changes"),
+    oauthWrite.text,
+  );
   const carolView = await tool(String(carolTokens.body.access_token), "list_library");
   check("…and each person's token only theirs", carolView.data?.total === 0, carolView.text.slice(0, 200));
   const tokenAsSession = await app.inject({
@@ -737,7 +1076,7 @@ try {
     denied,
   );
   // a client that registered for sign-in only; one registered without a
-  // scope is held to library:read + offline_access and can't ask for openid
+  // scope is held to the advertised scopes and can't ask for openid
   const signInOnly = await registerClient([CLAUDE_CALLBACK], "openid");
   const openidOnly = await connect(bob.cookie, signInOnly.clientId!, "openid");
   const noScope = await rpc(String(openidOnly.body.access_token), "tools/list");
@@ -746,6 +1085,66 @@ try {
     noScope.statusCode === 403 &&
       String(noScope.headers["www-authenticate"]).includes('error="insufficient_scope"'),
     { status: noScope.statusCode, header: noScope.headers["www-authenticate"] },
+  );
+
+  console.log("\nOAuth changes (library:write)");
+  // better-auth allows five registrations a minute and the checks above used
+  // them, so these reuse the clients already registered. `clientId` was
+  // registered without naming scopes, so it gets the defaults — which now
+  // include library:write.
+  const allScopes = `${MCP_SCOPE} ${MCP_WRITE_SCOPE} offline_access`;
+  const tokenScopes = async (token: string) => {
+    const [row] = await db
+      .select({ scopes: schema.oauthAccessToken.scopes })
+      .from(schema.oauthAccessToken)
+      .where(eq(schema.oauthAccessToken.token, hashOAuthToken(token.slice("gmat_".length))));
+    return row?.scopes ?? [];
+  };
+  // carol connected this client for reading earlier; asking for changes too
+  // brings the consent screen back, and she leaves "Allow changes" unticked
+  const carolNarrow = await connect(carolSession, clientId, allScopes, `${MCP_SCOPE} offline_access`);
+  const narrowToken = String(carolNarrow.body.access_token);
+  const narrowWrite = await tool(narrowToken, "create_tag", { name: `carol-narrow-${run}` });
+  const narrowRead = await tool(narrowToken, "list_library");
+  check(
+    'leaving "Allow changes" unticked grants the rest: the token reads and is refused writes',
+    !(await tokenScopes(narrowToken)).includes(MCP_WRITE_SCOPE) && narrowRead.data?.total === 0 && narrowWrite.isError,
+    { scopes: await tokenScopes(narrowToken), write: narrowWrite.text },
+  );
+  // …then connects again and ticks it
+  const carolWrite = await connect(carolSession, clientId, allScopes);
+  const carolWriteToken = String(carolWrite.body.access_token);
+  const carolTag = await tool(carolWriteToken, "create_tag", { name: `carol-oauth-${run}` });
+  check(
+    "consenting to library:write gives a token the write tools accept",
+    (await tokenScopes(carolWriteToken)).includes(MCP_WRITE_SCOPE) && carolTag.data?.created === true,
+    { scopes: await tokenScopes(carolWriteToken), result: carolTag.text },
+  );
+  const carolApps = (await asUser(carolSession, "GET", "/api/oauth-connections")).json() as Array<{ scopes: string[] }>;
+  check("connected apps shows the connection can make changes", carolApps[0]?.scopes.includes(MCP_WRITE_SCOPE) === true, carolApps);
+  // a registration from before library:write existed: read and refresh only
+  const LOCAL_CALLBACK = "http://localhost:33418/callback";
+  await db
+    .update(schema.oauthClient)
+    .set({ scopes: [MCP_SCOPE, "offline_access"] })
+    .where(eq(schema.oauthClient.clientId, local.clientId!));
+  const oldAuthorize = await app.inject({
+    method: "GET",
+    url: `/api/auth/oauth2/authorize?${new URLSearchParams({
+      response_type: "code",
+      client_id: local.clientId!,
+      redirect_uri: LOCAL_CALLBACK,
+      scope: allScopes,
+      state: "st4te",
+      code_challenge: pkce().challenge,
+      code_challenge_method: "S256",
+    })}`,
+    headers: { cookie: alice.cookie },
+  });
+  check(
+    "a client registered for reading only — every connector before this — can't ask for library:write",
+    String(oldAuthorize.headers.location ?? "").includes("error=invalid_scope"),
+    oldAuthorize.headers.location,
   );
 
   console.log("\nDisconnecting");
