@@ -10,6 +10,9 @@ import type {
   AdminSettings,
   AdminUserPage,
   AdminUserQuery,
+  ApiKeyCreateInput,
+  ApiKeySummary,
+  CreatedApiKey,
   CatalogGame,
   BarcodeLookupResult,
   BulkAddItem,
@@ -904,6 +907,24 @@ export class ApiClient {
   /** The account list behind the analytics page's Users tab. Read-only. */
   getAdminUsers(query: AdminUserQuery = {}): Promise<AdminUserPage> {
     return this.request<AdminUserPage>(`/api/admin/users${ApiClient.queryString(query)}`);
+  }
+
+  // ---- API keys (for connecting Claude / MCP clients) ----
+
+  listApiKeys(): Promise<ApiKeySummary[]> {
+    return this.request<ApiKeySummary[]>("/api/api-keys");
+  }
+
+  /** The response is the only time the key itself is ever sent back. */
+  createApiKey(input: ApiKeyCreateInput): Promise<CreatedApiKey> {
+    return this.request<CreatedApiKey>("/api/api-keys", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  revokeApiKey(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/api-keys/${id}`, { method: "DELETE" });
   }
 
   // ---- feedback ----

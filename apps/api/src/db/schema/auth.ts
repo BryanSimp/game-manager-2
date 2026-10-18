@@ -1,6 +1,7 @@
 import { boolean, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
-// Tables owned by better-auth (email/password + admin + bearer plugins).
+// Tables owned by better-auth (email/password + admin + bearer + two-factor
+// + api-key plugins).
 // Property names must match better-auth's model fields; column names are snake_case.
 
 export const user = pgTable("user", {
@@ -96,6 +97,57 @@ export const twoFactor = pgTable(
   // every code prompt looks the row up by user, which is the one path that
   // sits between a correct password and a session
   (t) => [index("two_factor_user_idx").on(t.userId)],
+);
+
+/*
+ * better-auth's API key plugin (`@better-auth/api-key`): personal keys for
+ * the read-only MCP endpoint, so Claude Code can read your library without a
+ * browser session.
+ *
+ * `key` is a SHA-256 hash, never the key itself — the plaintext is returned
+ * once, by the create call, and is unrecoverable after that. `start` is the
+ * first few characters in the clear, which is what the API keys card shows
+ * so you can tell two keys apart. `referenceId` is the owning user.
+ *
+ * Property names are the plugin's model fields verbatim, for the same reason
+ * as `twoFactor` above. Most of the counters (`requestCount`, `remaining`,
+ * the refill pair) back the plugin's own quota system, which is switched off
+ * in `auth.ts` — `/api/mcp` is rate-limited per key by @fastify/rate-limit
+ * instead — but the plugin writes every column, so they all have to exist.
+ */
+export const apikey = pgTable(
+  "api_key",
+  {
+    id: text("id").primaryKey(),
+    configId: text("config_id").notNull().default("default"),
+    name: text("name"),
+    start: text("start"),
+    prefix: text("prefix"),
+    key: text("key").notNull(),
+    referenceId: text("reference_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    refillInterval: integer("refill_interval"),
+    refillAmount: integer("refill_amount"),
+    lastRefillAt: timestamp("last_refill_at", { withTimezone: true }),
+    enabled: boolean("enabled").notNull().default(true),
+    rateLimitEnabled: boolean("rate_limit_enabled").notNull().default(true),
+    rateLimitTimeWindow: integer("rate_limit_time_window"),
+    rateLimitMax: integer("rate_limit_max"),
+    requestCount: integer("request_count").notNull().default(0),
+    remaining: integer("remaining"),
+    lastRequest: timestamp("last_request", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    permissions: text("permissions"),
+    metadata: text("metadata"),
+  },
+  (t) => [
+    // every MCP request looks its key up by hash; the card lists by owner
+    index("api_key_key_idx").on(t.key),
+    index("api_key_reference_idx").on(t.referenceId),
+  ],
 );
 
 // Ours, not better-auth's: its built-in reset flow stores tokens *raw* in

@@ -119,7 +119,7 @@ async function rejectBadContent(
 
 async function summarize(
   templates: Array<typeof schema.checklistTemplates.$inferSelect>,
-  user: SessionUser,
+  user: Pick<SessionUser, "id">,
 ) {
   if (templates.length === 0) return [];
   const ids = templates.map((t) => t.id);
@@ -172,6 +172,26 @@ function byScore(a: { votes: VoteCounts }, b: { votes: VoteCounts }): number {
   return b.votes.score - a.votes.score;
 }
 
+/**
+ * Your own lists for a game, in the order you arranged them, each with its
+ * ticked/total counts. The `mine` half of `GET /api/games/:gameId/checklists`,
+ * and what the MCP `get_game` tool reports.
+ */
+export async function loadMyChecklists(userId: string, gameId: string) {
+  const mine = await db
+    .select()
+    .from(schema.checklistTemplates)
+    .where(
+      and(
+        eq(schema.checklistTemplates.gameId, gameId),
+        eq(schema.checklistTemplates.authorUserId, userId),
+      ),
+    )
+    // createdAt breaks ties, and covers rows the 0020 backfill left at 0
+    .orderBy(asc(schema.checklistTemplates.position), asc(schema.checklistTemplates.createdAt));
+  return summarize(mine, { id: userId });
+}
+
 export function registerChecklistRoutes(app: FastifyInstance): void {
   /**
    * Every list for a game: yours in the order you arranged them, then other
@@ -182,17 +202,6 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     async (request, reply) => {
       const user = await requireUser(request, reply);
       if (!user) return;
-      const mine = await db
-        .select()
-        .from(schema.checklistTemplates)
-        .where(
-          and(
-            eq(schema.checklistTemplates.gameId, request.params.gameId),
-            eq(schema.checklistTemplates.authorUserId, user.id),
-          ),
-        )
-        // createdAt breaks ties, and covers rows the 0020 backfill left at 0
-        .orderBy(asc(schema.checklistTemplates.position), asc(schema.checklistTemplates.createdAt));
       const pub = await db
         .select()
         .from(schema.checklistTemplates)
@@ -205,7 +214,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
         )
         .orderBy(sql`${schema.checklistTemplates.createdAt} desc`);
       return {
-        mine: await summarize(mine, user),
+        mine: await loadMyChecklists(user.id, request.params.gameId),
         public: (await summarize(pub, user)).sort(byScore),
       };
     },

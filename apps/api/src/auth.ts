@@ -2,7 +2,9 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, bearer, twoFactor } from "better-auth/plugins";
 import { expo } from "@better-auth/expo";
+import { apiKey } from "@better-auth/api-key";
 import { count, eq } from "drizzle-orm";
+import { API_KEY_NAME_MAX, API_KEY_PREFIX } from "@gm/shared";
 import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
 import { logEvent } from "./services/analytics.js";
@@ -20,6 +22,7 @@ export const auth = betterAuth({
       verification: schema.verification,
       // key must be the plugin's model name — the adapter resolves tables by it
       twoFactor: schema.twoFactor,
+      apikey: schema.apikey,
     },
   }),
   emailAndPassword: {
@@ -80,6 +83,31 @@ export const auth = betterAuth({
       // one prompt is one guess in a million; ten tries then a cool-off is
       // generous to a fat-fingered code and useless to a script
       accountLockout: { enabled: true, maxFailedAttempts: 10, durationSeconds: 15 * 60 },
+    }),
+    /*
+     * Personal API keys for the read-only MCP endpoint (`routes/mcp.ts`).
+     *
+     * Deliberately *not* a way into the rest of the API:
+     * `enableSessionForAPIKeys` stays off, so a key presented anywhere but
+     * `/api/mcp` is just an unrecognised header, and every write route still
+     * needs a real session. That's half of what makes the MCP server
+     * read-only; the other half is that it has no write tools.
+     *
+     * The plugin's own HTTP endpoints aren't reachable either — `server.ts`
+     * refuses `/api/auth/api-key/*`, and `routes/api-keys.ts` calls these
+     * server-side with the session's user id and nothing but a name, so a
+     * browser can't choose its own prefix, expiry or quota. The fixed prefix
+     * is how `/api/mcp` tells a key from an OAuth access token at a glance.
+     *
+     * The plugin's per-key quota is off: its default is ten requests a
+     * *day*. `/api/mcp` is rate-limited per caller by @fastify/rate-limit,
+     * like every other route that needs it.
+     */
+    apiKey({
+      defaultPrefix: API_KEY_PREFIX,
+      requireName: true,
+      maximumNameLength: API_KEY_NAME_MAX,
+      rateLimit: { enabled: false },
     }),
     expo(),
   ],

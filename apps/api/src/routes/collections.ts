@@ -284,6 +284,236 @@ async function previewsFor(
   return byCollection;
 }
 
+/**
+ * One user's collections, as `GET /api/collections` lists them: roll-up
+ * counts, play-time totals and cover previews. `gameId` adds `containsGame`.
+ * Shared with the MCP `list_collections` tool.
+ */
+export async function loadCollections(userId: string, gameId?: string) {
+  const rows = await db
+    .select()
+    .from(schema.collections)
+    .where(eq(schema.collections.userId, userId))
+    .orderBy(asc(schema.collections.name));
+
+  // roll-up stats: total games + user's finished count per collection
+  const stats = await db
+    .select({
+      collectionId: schema.collectionGames.collectionId,
+      total: count(),
+      finished: sql<number>`count(*) filter (where ${schema.userGames.status} = 'finished')`,
+    })
+    .from(schema.collectionGames)
+    .leftJoin(
+      schema.userGames,
+      and(
+        eq(schema.userGames.gameId, schema.collectionGames.gameId),
+        eq(schema.userGames.userId, userId),
+      ),
+    )
+    .groupBy(schema.collectionGames.collectionId);
+  const statMap = new Map(stats.map((s) => [s.collectionId, s]));
+  const previews = await previewsFor(rows.map((c) => c.id));
+  const times = await collectionTimes(
+    userId,
+    rows.map((c) => c.id),
+  );
+
+  // membership, when one was asked about: one query for every collection
+  // rather than one per row
+  let holding = new Set<string>();
+  if (gameId && rows.length > 0) {
+    const found = await db
+      .select({ collectionId: schema.collectionGames.collectionId })
+      .from(schema.collectionGames)
+      .where(
+        and(
+          eq(schema.collectionGames.gameId, gameId),
+          inArray(
+            schema.collectionGames.collectionId,
+            rows.map((c) => c.id),
+          ),
+        ),
+      );
+    holding = new Set(found.map((f) => f.collectionId));
+  }
+
+  return rows.map((c) => ({
+    id: c.id,
+    name: c.name,
+    description: c.description,
+    accentColor: c.accentColor,
+    isPublic: c.isPublic,
+    adoptedFromId: c.adoptedFromId,
+    total: statMap.get(c.id)?.total ?? 0,
+    finished: Number(statMap.get(c.id)?.finished ?? 0),
+    time: times.get(c.id) ?? emptyCollectionTime(),
+    preview: previews.get(c.id) ?? [],
+    // absent unless a game was named, so "false" always means "asked, and no"
+    ...(gameId ? { containsGame: holding.has(c.id) } : {}),
+  }));
+}
+
+/**
+ * One collection as `GET /api/collections/:id` returns it, or null when it
+ * doesn't exist or is someone else's and private. Every per-game field
+ * resolves against `userId`, the asker. Shared with the MCP `get_collection`
+ * tool, which only ever passes the user's own collections.
+ */
+export async function loadCollectionDetail(userId: string, collectionId: string) {
+  const [collection] = await db
+    .select()
+    .from(schema.collections)
+    .where(eq(schema.collections.id, collectionId));
+  if (!collection || (collection.userId !== userId && !collection.isPublic)) {
+    return null;
+  }
+  const isOwner = collection.userId === userId;
+  const [author] = isOwner
+    ? []
+    : await db
+        .select({ name: schema.user.name })
+        .from(schema.user)
+        .where(eq(schema.user.id, collection.userId));
+
+  const nodes = await db
+    .select({
+      game: schema.games,
+      sortOrder: schema.collectionGames.sortOrder,
+      userGameId: schema.userGames.id,
+      status: schema.userGames.status,
+      completed100: schema.userGames.completed100,
+      progressBasis: schema.userGames.progressBasis,
+      progressCustomSeconds: schema.userGames.progressCustomSeconds,
+      ttbEnabled: schema.userGames.ttbEnabled,
+    })
+    .from(schema.collectionGames)
+    .innerJoin(schema.games, eq(schema.collectionGames.gameId, schema.games.id))
+    .leftJoin(
+      schema.userGames,
+      and(
+        eq(schema.userGames.gameId, schema.collectionGames.gameId),
+        eq(schema.userGames.userId, userId),
+      ),
+    )
+    .where(eq(schema.collectionGames.collectionId, collection.id));
+
+  /*
+   * Per-game play times, resolved for whoever is asking — so a visitor
+   * browsing someone else's published collection sees their own progress
+   * against it, the same rule `userGameId`/`status` already follow. The
+   * roll-up is summed from these rather than fetched separately, so the
+   * header total can never disagree with the rows under it.
+   */
+  const ttb = await resolveTtbFor(
+    userId,
+    nodes.map((n) => n.game),
+  );
+  const missions = await missionCountsByGame(userId);
+  const time = emptyCollectionTime();
+  const nodeTimes = new Map<string, GameTime>();
+  for (const n of nodes) {
+    const t = gameTime({
+      ttb: ttb.get(n.game.id) ?? n.game,
+      basis: n.progressBasis ?? "main",
+      customSeconds: n.progressCustomSeconds,
+      status: n.status,
+      completed100: n.completed100 ?? false,
+      ttbEnabled: n.ttbEnabled ?? true,
+      missions: missions.get(n.game.id),
+    });
+    nodeTimes.set(n.game.id, t);
+    addGameTime(time, t);
+  }
+
+  /*
+   * The graphs: one named arrangement each, all over the same games. A
+   * node's place is stored per graph; a game with no stored place on one
+   * (nothing writes that state, but a read shouldn't depend on it) falls
+   * back to a grid slot in list order rather than piling up at the origin.
+   */
+  const graphRows = await graphsOf(collection.id);
+  const graphIds = graphRows.map((g) => g.id);
+  const placed =
+    graphIds.length > 0
+      ? await db
+          .select()
+          .from(schema.collectionGraphNodes)
+          .where(inArray(schema.collectionGraphNodes.graphId, graphIds))
+      : [];
+  const links =
+    graphIds.length > 0
+      ? await db
+          .select()
+          .from(schema.collectionLinks)
+          .where(inArray(schema.collectionLinks.graphId, graphIds))
+      : [];
+  const inListOrder = [...nodes].sort(
+    (a, b) => a.sortOrder - b.sortOrder || a.game.title.localeCompare(b.game.title),
+  );
+  const graphs: CollectionGraph[] = graphRows.map((graph) => {
+    const at = new Map(
+      placed.filter((p) => p.graphId === graph.id).map((p) => [p.gameId, p] as const),
+    );
+    return {
+      id: graph.id,
+      name: graph.name,
+      nodes: inListOrder.map((n, i) => {
+        const spot = at.get(n.game.id) ?? gridSlot(i);
+        return { gameId: n.game.id, x: spot.positionX, y: spot.positionY };
+      }),
+      links: links
+        .filter((l) => l.graphId === graph.id)
+        .map((l) => ({
+          id: l.id,
+          fromGameId: l.fromGameId,
+          toGameId: l.toGameId,
+          label: l.label,
+        })),
+    };
+  });
+
+  // remakes, remasters and originals you've linked to any of these games —
+  // yours even on someone else's collection, like every other per-user field
+  const versions = await versionsFor(
+    userId,
+    nodes.map((n) => n.game.id),
+  );
+
+  const votes = await collectionVoteCounts([collection.id], userId);
+
+  return {
+    id: collection.id,
+    name: collection.name,
+    description: collection.description,
+    accentColor: collection.accentColor,
+    isPublic: collection.isPublic,
+    adoptedFromId: collection.adoptedFromId,
+    isOwner,
+    authorName: author?.name ?? null,
+    votes: votes.get(collection.id) ?? NO_VOTES,
+    time,
+    games: nodes.map((n) => ({
+      gameId: n.game.id,
+      title: n.game.title,
+      coverSrc: gameCover(n.game),
+      sortOrder: n.sortOrder,
+      releaseDate: n.game.releaseDate,
+      // the resolved figure, not games.ttb_main — see collectionTimes
+      ttbMain: ttb.get(n.game.id)?.ttbMain ?? n.game.ttbMain,
+      ttbSeconds: nodeTimes.get(n.game.id)?.totalSeconds ?? null,
+      remainingSeconds: nodeTimes.get(n.game.id)?.remainingSeconds ?? null,
+      finished: nodeTimes.get(n.game.id)?.finished ?? false,
+      endless: nodeTimes.get(n.game.id)?.endless ?? false,
+      userGameId: n.userGameId,
+      status: n.status,
+      versions: versions.get(n.game.id)?.versions ?? [],
+      latestVersionId: versions.get(n.game.id)?.latestVersionId ?? null,
+    })),
+    graphs,
+  };
+}
+
 export function registerCollectionRoutes(app: FastifyInstance): void {
   app.get<{ Querystring: { gameId?: string } }>("/api/collections", async (request, reply) => {
     const user = await requireUser(request, reply);
@@ -295,69 +525,7 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     const asked = z.object({ gameId: z.string().uuid().optional() }).safeParse(request.query);
     if (!asked.success) return reply.status(400).send({ message: "Invalid gameId" });
     const gameId = asked.data.gameId;
-
-    const rows = await db
-      .select()
-      .from(schema.collections)
-      .where(eq(schema.collections.userId, user.id))
-      .orderBy(asc(schema.collections.name));
-
-    // roll-up stats: total games + user's finished count per collection
-    const stats = await db
-      .select({
-        collectionId: schema.collectionGames.collectionId,
-        total: count(),
-        finished: sql<number>`count(*) filter (where ${schema.userGames.status} = 'finished')`,
-      })
-      .from(schema.collectionGames)
-      .leftJoin(
-        schema.userGames,
-        and(
-          eq(schema.userGames.gameId, schema.collectionGames.gameId),
-          eq(schema.userGames.userId, user.id),
-        ),
-      )
-      .groupBy(schema.collectionGames.collectionId);
-    const statMap = new Map(stats.map((s) => [s.collectionId, s]));
-    const previews = await previewsFor(rows.map((c) => c.id));
-    const times = await collectionTimes(
-      user.id,
-      rows.map((c) => c.id),
-    );
-
-    // membership, when one was asked about: one query for every collection
-    // rather than one per row
-    let holding = new Set<string>();
-    if (gameId && rows.length > 0) {
-      const found = await db
-        .select({ collectionId: schema.collectionGames.collectionId })
-        .from(schema.collectionGames)
-        .where(
-          and(
-            eq(schema.collectionGames.gameId, gameId),
-            inArray(
-              schema.collectionGames.collectionId,
-              rows.map((c) => c.id),
-            ),
-          ),
-        );
-      holding = new Set(found.map((f) => f.collectionId));
-    }
-
-    return rows.map((c) => ({
-      id: c.id,
-      name: c.name,
-      description: c.description,
-      accentColor: c.accentColor,
-      isPublic: c.isPublic,
-      adoptedFromId: c.adoptedFromId,
-      total: statMap.get(c.id)?.total ?? 0,
-      finished: Number(statMap.get(c.id)?.finished ?? 0),
-      time: times.get(c.id) ?? emptyCollectionTime(),
-      preview: previews.get(c.id) ?? [],
-      // absent unless a game was named, so "false" always means "asked, and no"
-      ...(gameId ? { containsGame: holding.has(c.id) } : {}),
-    }));
+    return loadCollections(user.id, gameId);
   });
 
   /**
@@ -746,157 +914,9 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
   app.get<{ Params: { id: string } }>("/api/collections/:id", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const [collection] = await db
-      .select()
-      .from(schema.collections)
-      .where(eq(schema.collections.id, request.params.id));
-    if (!collection || (collection.userId !== user.id && !collection.isPublic)) {
-      return reply.status(404).send({ message: "Collection not found" });
-    }
-    const isOwner = collection.userId === user.id;
-    const [author] = isOwner
-      ? []
-      : await db
-          .select({ name: schema.user.name })
-          .from(schema.user)
-          .where(eq(schema.user.id, collection.userId));
-
-    const nodes = await db
-      .select({
-        game: schema.games,
-        sortOrder: schema.collectionGames.sortOrder,
-        userGameId: schema.userGames.id,
-        status: schema.userGames.status,
-        completed100: schema.userGames.completed100,
-        progressBasis: schema.userGames.progressBasis,
-        progressCustomSeconds: schema.userGames.progressCustomSeconds,
-        ttbEnabled: schema.userGames.ttbEnabled,
-      })
-      .from(schema.collectionGames)
-      .innerJoin(schema.games, eq(schema.collectionGames.gameId, schema.games.id))
-      .leftJoin(
-        schema.userGames,
-        and(
-          eq(schema.userGames.gameId, schema.collectionGames.gameId),
-          eq(schema.userGames.userId, user.id),
-        ),
-      )
-      .where(eq(schema.collectionGames.collectionId, collection.id));
-
-    /*
-     * Per-game play times, resolved for whoever is asking — so a visitor
-     * browsing someone else's published collection sees their own progress
-     * against it, the same rule `userGameId`/`status` already follow. The
-     * roll-up is summed from these rather than fetched separately, so the
-     * header total can never disagree with the rows under it.
-     */
-    const ttb = await resolveTtbFor(
-      user.id,
-      nodes.map((n) => n.game),
-    );
-    const missions = await missionCountsByGame(user.id);
-    const time = emptyCollectionTime();
-    const nodeTimes = new Map<string, GameTime>();
-    for (const n of nodes) {
-      const t = gameTime({
-        ttb: ttb.get(n.game.id) ?? n.game,
-        basis: n.progressBasis ?? "main",
-        customSeconds: n.progressCustomSeconds,
-        status: n.status,
-        completed100: n.completed100 ?? false,
-        ttbEnabled: n.ttbEnabled ?? true,
-        missions: missions.get(n.game.id),
-      });
-      nodeTimes.set(n.game.id, t);
-      addGameTime(time, t);
-    }
-
-    /*
-     * The graphs: one named arrangement each, all over the same games. A
-     * node's place is stored per graph; a game with no stored place on one
-     * (nothing writes that state, but a read shouldn't depend on it) falls
-     * back to a grid slot in list order rather than piling up at the origin.
-     */
-    const graphRows = await graphsOf(collection.id);
-    const graphIds = graphRows.map((g) => g.id);
-    const placed =
-      graphIds.length > 0
-        ? await db
-            .select()
-            .from(schema.collectionGraphNodes)
-            .where(inArray(schema.collectionGraphNodes.graphId, graphIds))
-        : [];
-    const links =
-      graphIds.length > 0
-        ? await db
-            .select()
-            .from(schema.collectionLinks)
-            .where(inArray(schema.collectionLinks.graphId, graphIds))
-        : [];
-    const inListOrder = [...nodes].sort(
-      (a, b) => a.sortOrder - b.sortOrder || a.game.title.localeCompare(b.game.title),
-    );
-    const graphs: CollectionGraph[] = graphRows.map((graph) => {
-      const at = new Map(
-        placed.filter((p) => p.graphId === graph.id).map((p) => [p.gameId, p] as const),
-      );
-      return {
-        id: graph.id,
-        name: graph.name,
-        nodes: inListOrder.map((n, i) => {
-          const spot = at.get(n.game.id) ?? gridSlot(i);
-          return { gameId: n.game.id, x: spot.positionX, y: spot.positionY };
-        }),
-        links: links
-          .filter((l) => l.graphId === graph.id)
-          .map((l) => ({
-            id: l.id,
-            fromGameId: l.fromGameId,
-            toGameId: l.toGameId,
-            label: l.label,
-          })),
-      };
-    });
-
-    // remakes, remasters and originals you've linked to any of these games —
-    // yours even on someone else's collection, like every other per-user field
-    const versions = await versionsFor(
-      user.id,
-      nodes.map((n) => n.game.id),
-    );
-
-    const votes = await collectionVoteCounts([collection.id], user.id);
-
-    return {
-      id: collection.id,
-      name: collection.name,
-      description: collection.description,
-      accentColor: collection.accentColor,
-      isPublic: collection.isPublic,
-      adoptedFromId: collection.adoptedFromId,
-      isOwner,
-      authorName: author?.name ?? null,
-      votes: votes.get(collection.id) ?? NO_VOTES,
-      time,
-      games: nodes.map((n) => ({
-        gameId: n.game.id,
-        title: n.game.title,
-        coverSrc: gameCover(n.game),
-        sortOrder: n.sortOrder,
-        releaseDate: n.game.releaseDate,
-        // the resolved figure, not games.ttb_main — see collectionTimes
-        ttbMain: ttb.get(n.game.id)?.ttbMain ?? n.game.ttbMain,
-        ttbSeconds: nodeTimes.get(n.game.id)?.totalSeconds ?? null,
-        remainingSeconds: nodeTimes.get(n.game.id)?.remainingSeconds ?? null,
-        finished: nodeTimes.get(n.game.id)?.finished ?? false,
-        endless: nodeTimes.get(n.game.id)?.endless ?? false,
-        userGameId: n.userGameId,
-        status: n.status,
-        versions: versions.get(n.game.id)?.versions ?? [],
-        latestVersionId: versions.get(n.game.id)?.latestVersionId ?? null,
-      })),
-      graphs,
-    };
+    const detail = await loadCollectionDetail(user.id, request.params.id);
+    if (!detail) return reply.status(404).send({ message: "Collection not found" });
+    return detail;
   });
 
   app.post<{ Params: { id: string } }>("/api/collections/:id/games", async (request, reply) => {

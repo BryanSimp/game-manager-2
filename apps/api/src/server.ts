@@ -29,15 +29,18 @@ import { registerAdminUserRoutes } from "./routes/admin-users.js";
 import { registerContactRoutes } from "./routes/contact.js";
 import { registerFeedbackRoutes } from "./routes/feedback.js";
 import { registerDemoAdminRoutes } from "./routes/demo.js";
+import { registerApiKeyRoutes } from "./routes/api-keys.js";
+import { registerMcpRoutes } from "./routes/mcp.js";
 import { logEvent } from "./services/analytics.js";
 import { demoUser, isDemoRequest, isReadMethod } from "./services/demo.js";
 import { requireUser } from "./plugins/auth.js";
 
-export async function buildServer() {
+export async function buildServer({ logger = true }: { logger?: boolean } = {}) {
   // trustProxy: the API is only reachable through Traefik (prod) or the Vite
   // proxy (dev), so X-Forwarded-For is honest — without this, rate limiting
   // would key every visitor to the proxy's IP and share one bucket.
-  const app = Fastify({ logger: true, trustProxy: true });
+  // `logger: false` is for the check scripts, which drive the app in-process.
+  const app = Fastify({ logger, trustProxy: true });
 
   // Activity telemetry: onResponse fires after the reply has gone out, and
   // logEvent is an in-memory push (batched insert on a timer), so this adds
@@ -199,6 +202,8 @@ export async function buildServer() {
   registerContactRoutes(app);
   registerFeedbackRoutes(app);
   registerDemoAdminRoutes(app);
+  registerApiKeyRoutes(app);
+  registerMcpRoutes(app);
 
   return app;
 }

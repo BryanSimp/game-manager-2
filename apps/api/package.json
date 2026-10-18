@@ -15,15 +15,19 @@
     "check:titles": "tsx scripts/check-product-titles.ts",
     "check:content": "tsx scripts/check-content-filter.ts",
     "check:versions": "tsx scripts/check-version-family.ts",
-    "check:steam": "tsx scripts/check-steam-app-ids.ts"
+    "check:steam": "tsx scripts/check-steam-app-ids.ts",
+    "check:mcp": "tsx scripts/check-mcp.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
+    "@better-auth/api-key": "^1.6.23",
     "@better-auth/expo": "^1.6.23",
+    "@better-auth/oauth-provider": "^1.6.23",
     "@fastify/cors": "^11.0.0",
     "@fastify/multipart": "^10.1.0",
     "@fastify/rate-limit": "^11.2.0",
     "@gm/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "better-auth": "^1.6.23",
     "dotenv": "^16.5.0",
     "drizzle-orm": "^0.45.2",

@@ -106,6 +106,32 @@ The Expo app is not part of the self-host stack. Run it with `pnpm dev:mobile` a
 reach it. The production compose file also shows a `mobile` service that hosts the Metro bundler
 for Expo Go over a LAN.
 
+## Connect Claude
+
+The API serves a read-only [MCP](https://modelcontextprotocol.io) server at `/api/mcp`, so Claude
+can answer questions about your library — "what should I play next?", "how far through Hollow
+Knight am I?", "how long is the rest of my Zelda marathon?". Each person connects with their own
+credentials and only ever sees their own library. Nothing Claude can call writes anything.
+
+### Claude Code
+
+In the web app, open **Preferences → API keys**, name a key after the device it's for and create
+it. The key is shown once; the card gives you the full command, which looks like:
+
+```bash
+claude mcp add --transport http gamesmanager https://<your-host>/api/mcp --header "Authorization: Bearer <key>"
+```
+
+Add `--scope user` to have it in every project rather than just the current folder, then check it
+with `claude mcp list`. Make one key per device and revoke the ones you stop using — a revoked key
+stops working on its next request. A key only works at `/api/mcp`: it isn't a session, so it can't
+be used against the rest of the API.
+
+The tools: `list_library` (filter by category, platform, tag or title), `get_game` (notes,
+mission progress, checklists and linked DLC/sequels/remakes), `get_dashboard`, `list_collections`,
+`get_collection` (games in play order), `list_categories` and `get_backlog_candidates` (Backlog,
+Shelved and Wishlist, shortest remaining first).
+
 ## Development
 
 Prereqs: Node 20+, pnpm (`npm i -g pnpm`), Docker.
@@ -127,6 +153,7 @@ First registered account becomes the admin. Other useful scripts:
 pnpm typecheck                            # every package
 pnpm --filter @gm/api db:generate         # new SQL migration after a schema change
 pnpm db:seed-demo                         # (re)build the /demo showcase account
+pnpm --filter @gm/api check:mcp           # MCP endpoint end to end (needs a migrated database)
 ```
 
 Migrations are plain SQL in `apps/api/drizzle/`, applied programmatically by `src/db/migrate.ts`.

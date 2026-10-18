@@ -119,6 +119,19 @@ export const COLLECTION_GRAPH_NAME_MAX = 40;
 export const GITHUB_REPO_URL = "https://github.com/BryanSimp/game-manager-2";
 
 /**
+ * What every personal API key starts with. Readable in a config file, and
+ * the way `/api/mcp` tells a key apart from an OAuth access token before it
+ * has looked either up.
+ */
+export const API_KEY_PREFIX = "gm_";
+
+/** The longest name an API key can have ("Claude Code on the laptop"). */
+export const API_KEY_NAME_MAX = 40;
+
+/** How many API keys one account may hold — one per device is plenty. */
+export const MAX_API_KEYS = 20;
+
+/**
  * What happens to a list or collection the moment you create it.
  *
  *  - `manual`  — private until you press Publish. The original behaviour.

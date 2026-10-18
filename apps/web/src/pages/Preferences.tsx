@@ -11,6 +11,7 @@ import { api } from "../lib/api.js";
 import { Shell } from "../components/Shell.js";
 import { SteamCard } from "../components/SteamCard.js";
 import { TwoFactorCard } from "../components/TwoFactorCard.js";
+import { ApiKeysCard } from "../components/ApiKeysCard.js";
 import { ConsoleSelect } from "../components/ConsolePicker.js";
 import { useCategories } from "../lib/categories.js";
 import { statusChip } from "../lib/format.js";
@@ -61,6 +62,10 @@ export function PreferencesPage() {
         {me.data && !me.data.isDemo ? (
           <TwoFactorCard enabled={me.data.twoFactorEnabled} />
         ) : null}
+
+        {/* hidden on the demo for the same reason: the API refuses a key for
+            a demo account */}
+        {me.data && !me.data.isDemo ? <ApiKeysCard /> : null}
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
           <h2 className="text-lg font-semibold">Categories</h2>
