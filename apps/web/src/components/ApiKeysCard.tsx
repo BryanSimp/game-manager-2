@@ -181,6 +181,87 @@ export function ApiKeysCard() {
       ) : keys.data ? (
         <p className="mt-4 text-sm text-zinc-500">No keys yet.</p>
       ) : null}
+
+      <ConnectedApps endpoint={endpoint} />
     </section>
+  );
+}
+
+/**
+ * Apps connected over OAuth — claude.ai's custom connector signs in this
+ * way rather than with a key. Listed here, beside the keys, because it's the
+ * same question ("what can read my library?") and the same answer
+ * (disconnect it). Disconnecting withdraws the consent and every token the
+ * app holds, so its next request fails.
+ */
+function ConnectedApps({ endpoint }: { endpoint: string }) {
+  const queryClient = useQueryClient();
+  const apps = useQuery({
+    queryKey: ["oauth-connections"],
+    queryFn: () => api.listOAuthConnections(),
+  });
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const disconnect = useMutation({
+    mutationFn: (clientId: string) => api.disconnectOAuthApp(clientId),
+    onSuccess: () => {
+      setConfirming(null);
+      queryClient.invalidateQueries({ queryKey: ["oauth-connections"] });
+    },
+  });
+
+  return (
+    <div className="mt-6 border-t border-zinc-800 pt-4">
+      <h3 className="text-sm font-semibold text-zinc-200">Connected apps</h3>
+      <p className="mt-1 text-sm text-zinc-400">
+        On claude.ai, add a custom connector with the URL{" "}
+        <code className="rounded bg-zinc-800 px-1 py-0.5 text-xs text-zinc-300">{endpoint}</code> —
+        no key needed; you'll sign in here and approve it.
+      </p>
+      {apps.data && apps.data.length > 0 ? (
+        <ul className="mt-3 divide-y divide-zinc-800 rounded-lg border border-zinc-800">
+          {apps.data.map((a) => (
+            <li key={a.clientId} className="flex items-center gap-3 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-zinc-200">{a.name ?? "Unnamed app"}</p>
+                <p className="text-xs text-zinc-500">
+                  {a.redirectHost ? <>signs in via {a.redirectHost} · </> : null}
+                  {a.connectedAt ? <>connected {shortDate(a.connectedAt)} · </> : null}
+                  {a.lastActiveAt ? `last active ${shortDate(a.lastActiveAt)}` : "not used yet"}
+                </p>
+              </div>
+              {confirming === a.clientId ? (
+                <div className="flex shrink-0 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => disconnect.mutate(a.clientId)}
+                    disabled={disconnect.isPending}
+                    className="rounded-lg bg-red-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+                  >
+                    Disconnect
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(null)}
+                    className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+                  >
+                    Keep
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirming(a.clientId)}
+                  className="shrink-0 rounded-lg border border-red-900 px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-950"
+                >
+                  Disconnect…
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : apps.data ? (
+        <p className="mt-3 text-sm text-zinc-500">Nothing connected.</p>
+      ) : null}
+    </div>
   );
 }

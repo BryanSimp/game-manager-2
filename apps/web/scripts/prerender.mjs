@@ -102,6 +102,7 @@ async function main() {
       alias: [
         { find: /^better-auth\/react$/, replacement: stub },
         { find: /^better-auth\/client\/plugins$/, replacement: stub },
+        { find: /^@better-auth\/oauth-provider\/client$/, replacement: stub },
       ],
     },
   });

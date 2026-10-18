@@ -13,6 +13,7 @@ import type {
   ApiKeyCreateInput,
   ApiKeySummary,
   CreatedApiKey,
+  OAuthConnection,
   CatalogGame,
   BarcodeLookupResult,
   BulkAddItem,
@@ -925,6 +926,18 @@ export class ApiClient {
 
   revokeApiKey(id: string): Promise<{ ok: true }> {
     return this.request(`/api/api-keys/${id}`, { method: "DELETE" });
+  }
+
+  /** Apps connected through OAuth (claude.ai's connector). */
+  listOAuthConnections(): Promise<OAuthConnection[]> {
+    return this.request<OAuthConnection[]>("/api/oauth-connections");
+  }
+
+  /** Withdraw consent and every token the app holds. Immediate. */
+  disconnectOAuthApp(clientId: string): Promise<{ ok: true }> {
+    return this.request(`/api/oauth-connections/${encodeURIComponent(clientId)}`, {
+      method: "DELETE",
+    });
   }
 
   // ---- feedback ----

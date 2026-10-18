@@ -1,4 +1,4 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import { fromNodeHeaders } from "better-auth/node";
@@ -31,6 +31,8 @@ import { registerFeedbackRoutes } from "./routes/feedback.js";
 import { registerDemoAdminRoutes } from "./routes/demo.js";
 import { registerApiKeyRoutes } from "./routes/api-keys.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
+import { registerOAuthConnectionRoutes } from "./routes/oauth-connections.js";
+import { registerWellKnownRoutes } from "./routes/well-known.js";
 import { logEvent } from "./services/analytics.js";
 import { demoUser, isDemoRequest, isReadMethod } from "./services/demo.js";
 import { requireUser } from "./plugins/auth.js";
@@ -98,29 +100,47 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
   registerSanitizer(app);
 
   // Mount better-auth: translate Fastify request -> Fetch Request -> auth.handler
-  app.route({
-    method: ["GET", "POST"],
-    url: "/api/auth/*",
-    async handler(request, reply) {
-      const url = new URL(request.url, env.BETTER_AUTH_URL);
-      const headers = new Headers();
-      for (const [key, value] of Object.entries(request.headers)) {
-        if (value == null) continue;
-        headers.append(key, Array.isArray(value) ? value.join(", ") : value);
-      }
-      const fetchRequest = new Request(url, {
-        method: request.method,
-        headers,
-        body:
-          request.method !== "GET" && request.body != null
-            ? JSON.stringify(request.body)
-            : undefined,
-      });
-      const response = await auth.handler(fetchRequest);
-      reply.status(response.status);
-      response.headers.forEach((value, key) => reply.header(key, value));
-      reply.send(response.body ? await response.text() : null);
-    },
+  const forwardToAuth = async (request: FastifyRequest, reply: FastifyReply) => {
+    const url = new URL(request.url, env.BETTER_AUTH_URL);
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(request.headers)) {
+      if (value == null) continue;
+      headers.append(key, Array.isArray(value) ? value.join(", ") : value);
+    }
+    const fetchRequest = new Request(url, {
+      method: request.method,
+      headers,
+      body:
+        request.method !== "GET" && request.body != null
+          ? // a form body (OAuth, below) arrives as the raw string and goes on as-is
+            typeof request.body === "string"
+            ? request.body
+            : JSON.stringify(request.body)
+          : undefined,
+    });
+    const response = await auth.handler(fetchRequest);
+    reply.status(response.status);
+    response.headers.forEach((value, key) => reply.header(key, value));
+    reply.send(response.body ? await response.text() : null);
+  };
+  app.route({ method: ["GET", "POST"], url: "/api/auth/*", handler: forwardToAuth });
+
+  /*
+   * The OAuth provider's endpoints, through the same mount — plus the one
+   * thing they need that nothing else does: RFC 6749 sends token, revoke and
+   * introspect requests as `application/x-www-form-urlencoded`, which Fastify
+   * doesn't parse. The parser is registered inside this plugin only, so
+   * every other route still answers a form body with a 415, and it keeps the
+   * body as the raw string so repeated keys (several `resource`s) survive
+   * the trip. Fastify picks this more specific prefix over `/api/auth/*`.
+   */
+  await app.register(async (oauth) => {
+    oauth.addContentTypeParser(
+      "application/x-www-form-urlencoded",
+      { parseAs: "string" },
+      (_request, body, done) => done(null, body),
+    );
+    oauth.route({ method: ["GET", "POST"], url: "/api/auth/oauth2/*", handler: forwardToAuth });
   });
 
   app.get("/api/health", async () => ({
@@ -204,6 +224,8 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
   registerDemoAdminRoutes(app);
   registerApiKeyRoutes(app);
   registerMcpRoutes(app);
+  registerOAuthConnectionRoutes(app);
+  registerWellKnownRoutes(app);
 
   return app;
 }

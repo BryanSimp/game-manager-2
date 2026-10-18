@@ -218,6 +218,13 @@
       "when": 1792344553734,
       "tag": "0030_mean_monster_badoon",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792345526308,
+      "tag": "0031_warm_impossible_man",
+      "breakpoints": true
     }
   ]
 }

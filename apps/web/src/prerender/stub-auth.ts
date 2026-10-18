@@ -53,3 +53,8 @@ export function createAuthClient(): unknown {
 export function twoFactorClient(): Record<string, never> {
   return {};
 }
+
+/** `@better-auth/oauth-provider/client` is aliased here too, for the same reason. */
+export function oauthProviderClient(): Record<string, never> {
+  return {};
+}

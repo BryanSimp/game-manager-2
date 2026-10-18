@@ -132,6 +132,35 @@ mission progress, checklists and linked DLC/sequels/remakes), `get_dashboard`, `
 `get_collection` (games in play order), `list_categories` and `get_backlog_candidates` (Backlog,
 Shelved and Wishlist, shortest remaining first).
 
+### claude.ai (custom connector)
+
+claude.ai connects over OAuth instead of a key. In claude.ai, open **Settings → Connectors → Add
+custom connector**, give it a name and the URL `https://<your-host>/api/mcp`, then **Connect**.
+You land on your instance's normal sign-in (two-factor included, if you've turned it on), then a
+consent screen naming the app and what it can read. Allow, and you're sent back to claude.ai.
+Connected apps are listed under **Preferences → API keys**, where **Disconnect** cuts one off on
+its next request.
+
+Under the hood: claude.ai reads `/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-authorization-server`, registers itself (OAuth dynamic client registration),
+and runs the authorization-code flow with PKCE. Three things have to be true for that to work:
+
+- **`BETTER_AUTH_URL` is the public URL**, exactly — `https://<your-host>`, no trailing slash.
+  The issuer, the token audience and every URL in the discovery documents are built from it.
+- **`/.well-known/oauth-*` reaches the API.** Those two documents live at the root, not under
+  `/api`. The self-host nginx config and the production Traefik labels already route them; if you
+  run your own proxy, send that prefix to the API container too. Check it with
+  `curl https://<your-host>/.well-known/oauth-protected-resource` — JSON, not the web app's HTML.
+- **The redirect URI is allowed.** Registration only accepts claude.ai's callback,
+  `https://claude.ai/api/mcp/auth_callback` (and `https://claude.com/api/mcp/auth_callback`), plus
+  loopback addresses for local clients like Claude Code. To connect another MCP client, add its
+  callback to `OAUTH_REDIRECT_URIS` (comma-separated). Anyone can register a client, so this list
+  is what stops a stranger's app from receiving your sign-ins.
+
+If Cloudflare sits in front, make sure Bot Fight Mode or a challenge rule isn't intercepting
+`/api/mcp` and `/.well-known/oauth-*` — claude.ai calls them server-to-server and can't solve a
+challenge.
+
 ## Development
 
 Prereqs: Node 20+, pnpm (`npm i -g pnpm`), Docker.

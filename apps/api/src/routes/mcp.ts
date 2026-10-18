@@ -5,7 +5,9 @@ import { z } from "zod";
 import { env } from "../env.js";
 import { toFetchRequest, sendFetchResponse } from "../plugins/fetch-bridge.js";
 import { mcpRateLimit } from "../plugins/rate-limits.js";
-import { authenticateMcp } from "../services/mcp-auth.js";
+import { MCP_SCOPE } from "@gm/shared";
+import { authenticateMcp, type McpAuth } from "../services/mcp-auth.js";
+import { PROTECTED_RESOURCE_METADATA_URL } from "../services/oauth.js";
 import {
   BACKLOG_CANDIDATE_CATEGORIES,
   LIBRARY_SORTS,
@@ -35,9 +37,13 @@ import {
  * server-to-client SSE stream) and DELETE (session teardown) are a 405.
  *
  * **Read-only.** Two independent reasons: no tool here writes anything, and
- * the credential that reaches this route works nowhere else — an API key is
- * not a session (see `auth.ts`), so it can't be replayed against the routes
- * that do write.
+ * the credential that reaches this route works nowhere else — neither an API
+ * key nor an OAuth access token is a session (see `auth.ts`), so neither can
+ * be replayed against the routes that do write.
+ *
+ * **Two ways in**, told apart by prefix in `services/mcp-auth.ts`: a
+ * personal API key (Claude Code) or an OAuth access token granted
+ * `library:read` (claude.ai's custom connector, see `services/oauth.ts`).
  */
 
 const INSTRUCTIONS = `Game Manager is the user's personal video game library. Everything these tools return belongs to the signed-in user and nobody else, and every tool only reads — nothing here can change the library.
@@ -195,11 +201,34 @@ export function buildMcpServer(userId: string): McpServer {
   return server;
 }
 
-function unauthorized(reply: FastifyReply) {
-  return reply.status(401).send({
-    error: "unauthorized",
-    message: "Send a Game Manager API key as `Authorization: Bearer <key>`.",
-  });
+/**
+ * A refusal an MCP client can act on. The `WWW-Authenticate` header is the
+ * MCP authorization spec's starting point: it names the protected-resource
+ * metadata, from which claude.ai finds the authorization server and begins
+ * the OAuth flow. Claude Code with an API key just sees the 401.
+ */
+function refuse(reply: FastifyReply, result: Exclude<McpAuth, { ok: true }>) {
+  const metadata = `resource_metadata="${PROTECTED_RESOURCE_METADATA_URL}"`;
+  if (result.status === 403) {
+    return reply
+      .status(403)
+      .header(
+        "www-authenticate",
+        `Bearer error="insufficient_scope", scope="${MCP_SCOPE}", ${metadata}`,
+      )
+      .send({ error: "insufficient_scope", message: `This token wasn't granted ${MCP_SCOPE}.` });
+  }
+  return reply
+    .status(401)
+    .header(
+      "www-authenticate",
+      result.presented ? `Bearer error="invalid_token", ${metadata}` : `Bearer ${metadata}`,
+    )
+    .send({
+      error: "unauthorized",
+      message:
+        "Send a Game Manager API key or an OAuth access token as `Authorization: Bearer <credential>`.",
+    });
 }
 
 export function registerMcpRoutes(app: FastifyInstance): void {
@@ -208,8 +237,9 @@ export function registerMcpRoutes(app: FastifyInstance): void {
     url: "/api/mcp",
     config: mcpRateLimit,
     async handler(request, reply) {
-      const caller = await authenticateMcp(request.headers.authorization);
-      if (!caller) return unauthorized(reply);
+      const result = await authenticateMcp(request.headers.authorization);
+      if (!result.ok) return refuse(reply, result);
+      const { caller } = result;
       // the activity log (server.ts onResponse) counts MCP use like any other
       request.sessionUser = caller.user;
 

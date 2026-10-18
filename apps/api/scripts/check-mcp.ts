@@ -1,6 +1,8 @@
 /**
  * The MCP endpoint, end to end: who may call it, that one user can never see
- * another's library through it, and what each tool answers.
+ * another's library through it, what each tool answers, and the OAuth flow
+ * claude.ai's connector takes to get in (discovery, registration, login with
+ * two-factor, consent, tokens, disconnecting).
  *
  * Unlike the other check scripts this needs a database — migrated, with
  * DATABASE_URL and BETTER_AUTH_SECRET set as for `pnpm dev:api`:
@@ -8,16 +10,27 @@
  *   pnpm --filter @gm/api check:mcp
  *
  * It drives the real app in-process (`buildServer()` + `inject`), so the
- * auth, rate limits and routing under test are the production ones. Two
+ * auth, rate limits and routing under test are the production ones. A few
  * throwaway accounts (`mcp-check-…@example.test`) get a small library each
- * and are deleted afterwards along with the catalog rows made for them, so
- * it's safe to point at a dev database — but a scratch one is better.
+ * and are deleted afterwards along with the catalog rows and OAuth clients
+ * made for them, so it's safe to point at a dev database — but a scratch one
+ * is better. It signs in over HTTP once, which counts against better-auth's
+ * 5-a-minute sign-in limit like any other sign-in.
  */
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { inArray, eq } from "drizzle-orm";
+import { base32 } from "@better-auth/utils/base32";
+import { createOTP } from "@better-auth/utils/otp";
+import { MCP_SCOPE } from "@gm/shared";
 import { auth } from "../src/auth.js";
 import { db, schema } from "../src/db/index.js";
+import { env } from "../src/env.js";
 import { buildServer } from "../src/server.js";
+import {
+  MCP_RESOURCE,
+  OAUTH_ISSUER,
+  PROTECTED_RESOURCE_METADATA_URL,
+} from "../src/services/oauth.js";
 
 const app = await buildServer({ logger: false });
 const run = randomBytes(4).toString("hex");
@@ -38,6 +51,7 @@ function check(name: string, ok: boolean, detail?: unknown) {
 // ---- fixtures -------------------------------------------------------------
 
 const createdUsers: string[] = [];
+const createdClients: string[] = [];
 const createdGames: string[] = [];
 const createdPlatforms: string[] = [];
 
@@ -129,6 +143,116 @@ async function asUser(cookie: string, method: "GET" | "POST" | "DELETE", url: st
     headers: { cookie, ...(payload ? { "content-type": "application/json" } : {}) },
     ...(payload ? { payload: payload as Record<string, unknown> } : {}),
   });
+}
+
+// ---- OAuth helpers --------------------------------------------------------
+
+const CLAUDE_CALLBACK = "https://claude.ai/api/mcp/auth_callback";
+// better-auth checks Origin on cookie-carrying POSTs, as a browser would send it
+const ORIGIN = env.CORS_ORIGINS[0] ?? env.BETTER_AUTH_URL;
+
+/** Dynamic client registration, the way claude.ai does it: unauthenticated. */
+async function registerClient(redirectUris: string[], scope?: string) {
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/auth/oauth2/register",
+    headers: { "content-type": "application/json" },
+    payload: {
+      client_name: `Claude ${run}`,
+      redirect_uris: redirectUris,
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      ...(scope ? { scope } : {}),
+    },
+  });
+  const clientId = res.statusCode < 300 ? (res.json().client_id as string) : null;
+  if (clientId) createdClients.push(clientId);
+  return { res, clientId };
+}
+
+function pkce() {
+  const verifier = randomBytes(32).toString("base64url");
+  return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
+}
+
+function authorizePath(clientId: string, challenge: string, scope: string) {
+  const q = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: CLAUDE_CALLBACK,
+    scope,
+    state: "st4te",
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    resource: MCP_RESOURCE,
+  });
+  return `/api/auth/oauth2/authorize?${q}`;
+}
+
+/** The signed query a redirect to /login or /oauth/consent carries. */
+const signedQueryOf = (location: string) => location.slice(location.indexOf("?") + 1);
+
+async function consent(cookie: string, location: string, accept: boolean) {
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/auth/oauth2/consent",
+    headers: {
+      cookie,
+      origin: ORIGIN,
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    payload: { accept, oauth_query: signedQueryOf(location) },
+  });
+  return res.json() as { redirect?: boolean; url?: string };
+}
+
+async function exchange(clientId: string, params: Record<string, string>) {
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/auth/oauth2/token",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    payload: new URLSearchParams({ client_id: clientId, ...params }).toString(),
+  });
+  return { status: res.statusCode, body: res.json() as Record<string, unknown> };
+}
+
+/**
+ * A signed-in user connects the client: authorize → consent (when it hasn't
+ * been given yet) → code → token. Returns the token response.
+ */
+async function connect(cookie: string, clientId: string, scope = `${MCP_SCOPE} offline_access`) {
+  const { verifier, challenge } = pkce();
+  const authorize = await app.inject({
+    method: "GET",
+    url: authorizePath(clientId, challenge, scope),
+    headers: { cookie },
+  });
+  let location = String(authorize.headers.location ?? "");
+  if (location.startsWith("/oauth/consent")) {
+    location = (await consent(cookie, location, true)).url ?? "";
+  }
+  const code = location ? new URL(location).searchParams.get("code") : null;
+  if (!code) throw new Error(`no code: ${authorize.statusCode} ${location}`);
+  return exchange(clientId, {
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: CLAUDE_CALLBACK,
+    code_verifier: verifier,
+    resource: MCP_RESOURCE,
+  });
+}
+
+/** Turn two-factor on for a user, returning a function that makes a current code. */
+async function enableTwoFactor(cookie: string) {
+  const headers = new Headers({ cookie, origin: ORIGIN });
+  const { totpURI } = await auth.api.enableTwoFactor({ body: { password: PASSWORD }, headers });
+  const encoded = new URL(totpURI).searchParams.get("secret") ?? "";
+  const secret = new TextDecoder().decode(base32.decode(encoded));
+  const code = () => createOTP(secret, { digits: 6, period: 30 }).totp();
+  await auth.api.verifyTOTP({ body: { code: await code() }, headers });
+  return code;
 }
 
 // ---- the checks -----------------------------------------------------------
@@ -417,6 +541,246 @@ try {
   check("revoking a key succeeds", revoke.statusCode === 200, revoke.body);
   check("a revoked key → 401", (await rpc(aliceKey, "tools/list")).statusCode === 401);
 
+  console.log("\nOAuth discovery");
+  const prm = await app.inject({ method: "GET", url: "/.well-known/oauth-protected-resource" });
+  check(
+    "/.well-known/oauth-protected-resource names /api/mcp and its authorization server",
+    prm.statusCode === 200 &&
+      prm.json().resource === MCP_RESOURCE &&
+      prm.json().authorization_servers?.[0] === OAUTH_ISSUER &&
+      prm.json().scopes_supported?.includes(MCP_SCOPE),
+    prm.body,
+  );
+  const prmInserted = await app.inject({ method: "GET", url: "/.well-known/oauth-protected-resource/api/mcp" });
+  check(
+    "…and at its path-inserted address",
+    prmInserted.statusCode === 200 && prmInserted.json().resource === MCP_RESOURCE,
+  );
+  for (const url of [
+    "/.well-known/oauth-authorization-server",
+    "/.well-known/oauth-authorization-server/api/auth",
+  ]) {
+    const asm = await app.inject({ method: "GET", url });
+    const meta = asm.statusCode === 200 ? asm.json() : {};
+    check(
+      `${url} describes registration, authorize and token endpoints`,
+      meta.issuer === OAUTH_ISSUER &&
+        meta.registration_endpoint === `${OAUTH_ISSUER}/oauth2/register` &&
+        meta.authorization_endpoint === `${OAUTH_ISSUER}/oauth2/authorize` &&
+        meta.token_endpoint === `${OAUTH_ISSUER}/oauth2/token` &&
+        meta.code_challenge_methods_supported?.includes("S256") &&
+        meta.token_endpoint_auth_methods_supported?.includes("none"),
+      asm.body,
+    );
+  }
+  const challenge401 = await rpc(null, "tools/list");
+  check(
+    "a 401 from /api/mcp points to the resource metadata",
+    String(challenge401.headers["www-authenticate"]).includes(
+      `resource_metadata="${PROTECTED_RESOURCE_METADATA_URL}"`,
+    ),
+    challenge401.headers["www-authenticate"],
+  );
+
+  console.log("\nOAuth registration");
+  const evil = await registerClient(["https://evil.example/callback"]);
+  check(
+    "registering a redirect URI that isn't Claude's or loopback is refused",
+    evil.res.statusCode === 400,
+    evil.res.body,
+  );
+  const mixed = await registerClient([CLAUDE_CALLBACK, "https://evil.example/callback"]);
+  check("…even alongside Claude's", mixed.res.statusCode === 400, mixed.res.body);
+  const local = await registerClient(["http://localhost:33418/callback"]);
+  check("loopback redirect URIs (Claude Code) are accepted", local.res.statusCode < 300, local.res.body);
+  const claude = await registerClient([CLAUDE_CALLBACK]);
+  check("claude.ai's callback is accepted", claude.res.statusCode < 300 && !!claude.clientId, claude.res.body);
+  const clientId = claude.clientId!;
+  const createClient = await asUser(alice.cookie, "POST", "/api/auth/oauth2/create-client", {
+    redirect_uris: ["https://evil.example/callback"],
+  });
+  check(
+    "the plugin's own create-client endpoint isn't reachable",
+    createClient.statusCode === 404,
+    createClient.statusCode,
+  );
+
+  console.log("\nOAuth sign-in");
+  const anon = await app.inject({
+    method: "GET",
+    url: authorizePath(clientId, pkce().challenge, MCP_SCOPE),
+  });
+  check(
+    "authorizing while signed out sends you to /login with a signed query",
+    anon.statusCode === 302 &&
+      String(anon.headers.location).startsWith("/login?") &&
+      String(anon.headers.location).includes("sig="),
+    anon.headers.location,
+  );
+
+  // carol has two-factor on: her password alone must not produce a code
+  const carol = await makeUser("carol");
+  const carolCode = await enableTwoFactor(carol.cookie);
+  const { verifier: carolVerifier, challenge: carolChallenge } = pkce();
+  const toLogin = await app.inject({
+    method: "GET",
+    url: authorizePath(clientId, carolChallenge, `${MCP_SCOPE} offline_access`),
+  });
+  const loginQuery = signedQueryOf(String(toLogin.headers.location));
+  const signIn = await app.inject({
+    method: "POST",
+    url: "/api/auth/sign-in/email",
+    headers: { "content-type": "application/json", accept: "application/json", origin: ORIGIN },
+    payload: {
+      email: `mcp-check-carol-${run}@example.test`,
+      password: PASSWORD,
+      oauth_query: loginQuery,
+    },
+  });
+  const signInBody = signIn.json() as { twoFactorRedirect?: boolean; url?: string };
+  check(
+    "with two-factor on, the password alone doesn't continue the OAuth flow",
+    signIn.statusCode === 200 && signInBody.twoFactorRedirect === true && !signInBody.url,
+    signIn.body,
+  );
+  const twoFactorCookie =
+    /(?:__Secure-)?better-auth\.two_factor=[^;]+/.exec(String(signIn.headers["set-cookie"]))?.[0] ?? "";
+  const verified = await app.inject({
+    method: "POST",
+    url: "/api/auth/two-factor/verify-totp",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      origin: ORIGIN,
+      cookie: twoFactorCookie,
+    },
+    payload: { code: await carolCode(), oauth_query: loginQuery },
+  });
+  const verifiedBody = verified.json() as { redirect?: boolean; url?: string };
+  check(
+    "…the authenticator code does, on to the consent screen",
+    verifiedBody.redirect === true && String(verifiedBody.url).startsWith("/oauth/consent?"),
+    verified.body,
+  );
+  const carolSession =
+    /(?:__Secure-)?better-auth\.session_token=[^;]+/.exec(String(verified.headers["set-cookie"]))?.[0] ?? "";
+  const carolConsent = await consent(carolSession, String(verifiedBody.url), true);
+  const carolRedirect = carolConsent.url ? new URL(carolConsent.url) : null;
+  const carolAuthCode = carolRedirect?.searchParams.get("code") ?? null;
+  check(
+    "allowing on the consent screen sends a code back to claude.ai with the state",
+    !!carolAuthCode &&
+      carolConsent.url!.startsWith(CLAUDE_CALLBACK) &&
+      carolRedirect!.searchParams.get("state") === "st4te",
+    carolConsent,
+  );
+  const carolTokens = await exchange(clientId, {
+    grant_type: "authorization_code",
+    code: carolAuthCode ?? "",
+    redirect_uri: CLAUDE_CALLBACK,
+    code_verifier: carolVerifier,
+    resource: MCP_RESOURCE,
+  });
+  check(
+    "the code exchanges (form-encoded, PKCE) for an access and a refresh token",
+    carolTokens.status === 200 &&
+      String(carolTokens.body.access_token).startsWith("gmat_") &&
+      String(carolTokens.body.refresh_token).startsWith("gmrt_"),
+    carolTokens,
+  );
+  const replayed = await exchange(clientId, {
+    grant_type: "authorization_code",
+    code: carolAuthCode ?? "",
+    redirect_uri: CLAUDE_CALLBACK,
+    code_verifier: carolVerifier,
+  });
+  check("a code can't be exchanged twice", replayed.status >= 400, replayed);
+
+  console.log("\nOAuth access");
+  const aliceTokens = await connect(alice.cookie, clientId);
+  const aliceAccess = String(aliceTokens.body.access_token);
+  const viaOAuth = await tool(aliceAccess, "list_library");
+  check("an OAuth access token reads its owner's library", viaOAuth.data?.total === 7, viaOAuth.text.slice(0, 200));
+  const carolView = await tool(String(carolTokens.body.access_token), "list_library");
+  check("…and each person's token only theirs", carolView.data?.total === 0, carolView.text.slice(0, 200));
+  const tokenAsSession = await app.inject({
+    method: "GET",
+    url: "/api/library",
+    headers: { authorization: `Bearer ${aliceAccess}` },
+  });
+  check(
+    "an access token is not a session anywhere else",
+    tokenAsSession.statusCode === 401,
+    tokenAsSession.statusCode,
+  );
+  const refreshed = await exchange(clientId, {
+    grant_type: "refresh_token",
+    refresh_token: String(aliceTokens.body.refresh_token),
+  });
+  const refreshedCats = await tool(String(refreshed.body.access_token), "list_categories");
+  check(
+    "the refresh token gets a fresh access token that works",
+    refreshed.status === 200 && refreshedCats.data?.categories?.length === 8,
+    refreshed,
+  );
+
+  // bob says no, then grants a token without library:read
+  const bobAuthorize = await app.inject({
+    method: "GET",
+    url: authorizePath(clientId, pkce().challenge, `${MCP_SCOPE} offline_access`),
+    headers: { cookie: bob.cookie },
+  });
+  const denied = await consent(bob.cookie, String(bobAuthorize.headers.location), false);
+  check(
+    "denying on the consent screen tells claude.ai access_denied",
+    !!denied.url && new URL(denied.url).searchParams.get("error") === "access_denied",
+    denied,
+  );
+  // a client that registered for sign-in only; one registered without a
+  // scope is held to library:read + offline_access and can't ask for openid
+  const signInOnly = await registerClient([CLAUDE_CALLBACK], "openid");
+  const openidOnly = await connect(bob.cookie, signInOnly.clientId!, "openid");
+  const noScope = await rpc(String(openidOnly.body.access_token), "tools/list");
+  check(
+    "a token without library:read gets 403 insufficient_scope",
+    noScope.statusCode === 403 &&
+      String(noScope.headers["www-authenticate"]).includes('error="insufficient_scope"'),
+    { status: noScope.statusCode, header: noScope.headers["www-authenticate"] },
+  );
+
+  console.log("\nDisconnecting");
+  const connections = (await asUser(alice.cookie, "GET", "/api/oauth-connections")).json() as Array<{
+    clientId: string;
+    redirectHost: string;
+  }>;
+  check(
+    "connected apps lists the client with where it signs in",
+    connections.length === 1 &&
+      connections[0]!.clientId === clientId &&
+      connections[0]!.redirectHost === "claude.ai",
+    connections,
+  );
+  const bobDisconnects = await asUser(bob.cookie, "DELETE", `/api/oauth-connections/${clientId}`);
+  const aliceStillIn = (await rpc(String(refreshed.body.access_token), "tools/list")).statusCode;
+  check(
+    // bob denied this app, so he has nothing to disconnect — and the attempt
+    // mustn't reach alice's consent or tokens for the same client
+    "someone else disconnecting the same app doesn't touch your tokens",
+    bobDisconnects.statusCode === 404 && aliceStillIn === 200,
+    { bobDisconnects: bobDisconnects.statusCode, aliceStillIn },
+  );
+  const disconnected = await asUser(alice.cookie, "DELETE", `/api/oauth-connections/${clientId}`);
+  check("disconnecting succeeds", disconnected.statusCode === 200, disconnected.body);
+  check(
+    "…and the app's access token stops working at once",
+    (await rpc(String(refreshed.body.access_token), "tools/list")).statusCode === 401,
+  );
+  const afterRefresh = await exchange(clientId, {
+    grant_type: "refresh_token",
+    refresh_token: String(refreshed.body.refresh_token ?? aliceTokens.body.refresh_token),
+  });
+  check("…as does its refresh token", afterRefresh.status >= 400, afterRefresh);
+
   const [unchanged] = await db.select().from(schema.userGames).where(eq(schema.userGames.id, aHollow.id));
   check("nothing in the library was written", unchanged?.notes === "Stuck on the Mantis Lords." && unchanged.status === "playing");
 } catch (err) {
@@ -426,6 +790,10 @@ try {
   // users cascade to everything they own; catalog rows are shared, so only
   // the ones made here go
   if (createdUsers.length > 0) await db.delete(schema.user).where(inArray(schema.user.id, createdUsers));
+  // registered unauthenticated, so owned by nobody and not cascaded
+  if (createdClients.length > 0) {
+    await db.delete(schema.oauthClient).where(inArray(schema.oauthClient.clientId, createdClients));
+  }
   if (createdGames.length > 0) await db.delete(schema.games).where(inArray(schema.games.id, createdGames));
   if (createdPlatforms.length > 0) {
     await db.delete(schema.platforms).where(inArray(schema.platforms.id, createdPlatforms.reverse()));

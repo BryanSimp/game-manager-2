@@ -33,6 +33,7 @@ import { PreferencesPage } from "./pages/Preferences.js";
 import { DashboardPage } from "./pages/Dashboard.js";
 import { LoginPage } from "./pages/Login.js";
 import { RegisterPage } from "./pages/Register.js";
+import { OAuthConsentPage } from "./pages/OAuthConsent.js";
 import { ForgotPasswordPage } from "./pages/ForgotPassword.js";
 import { ResetPasswordPage } from "./pages/ResetPassword.js";
 import { PrivacyPolicyPage } from "./pages/PrivacyPolicy.js";
@@ -103,6 +104,8 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/dashboard", component: DashboardPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/login", component: LoginPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/register", component: RegisterPage }),
+  // where a connected app (claude.ai) asks for access — see pages/OAuthConsent.tsx
+  createRoute({ getParentRoute: () => rootRoute, path: "/oauth/consent", component: OAuthConsentPage }),
   createRoute({ getParentRoute: () => rootRoute, path: "/forgot-password", component: ForgotPasswordPage }),
   createRoute({
     getParentRoute: () => rootRoute,

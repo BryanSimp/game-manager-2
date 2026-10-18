@@ -61,6 +61,12 @@ export default defineConfig({
         target: "http://localhost:3001",
         changeOrigin: true,
       },
+      // OAuth discovery for the MCP endpoint lives outside /api; prod routes
+      // it to the API the same way (Traefik label, nginx.selfhost.conf)
+      "/.well-known/oauth-": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
     },
   },
 });

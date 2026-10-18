@@ -16,7 +16,8 @@ import { apiKeyRateLimit } from "../plugins/rate-limits.js";
  * `/api/mcp`.
  *
  * These wrap better-auth's api-key plugin rather than letting the browser
- * call it directly (its own HTTP endpoints are refused in `server.ts`). The
+ * call it directly (its own HTTP endpoints are in `auth.ts`'s
+ * `DISABLED_PATHS`). The
  * plugin is still what generates and hashes a key — this file only decides
  * *whose* it is, from the session, and that the one thing a person chooses is
  * the name. Called that way, the plugin's server-only fields (quota, refill,
@@ -43,18 +44,6 @@ function toSummary(row: {
 }
 
 export function registerApiKeyRoutes(app: FastifyInstance): void {
-  /*
-   * The plugin's own client endpoints (create/list/update/delete), shadowed.
-   * Fastify matches this more specific prefix ahead of the `/api/auth/*`
-   * mount — the same trick `auth-recovery.ts` uses — so the only way to make
-   * a key is the route below. `auth.api.*` calls are in-process and unaffected.
-   */
-  app.route({
-    method: ["GET", "POST"],
-    url: "/api/auth/api-key/*",
-    handler: async (_request, reply) => reply.status(404).send({ message: "Not found" }),
-  });
-
   app.get("/api/api-keys", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;

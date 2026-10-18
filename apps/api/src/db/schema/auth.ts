@@ -1,7 +1,7 @@
-import { boolean, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 // Tables owned by better-auth (email/password + admin + bearer + two-factor
-// + api-key plugins).
+// + api-key + oauth-provider plugins).
 // Property names must match better-auth's model fields; column names are snake_case.
 
 export const user = pgTable("user", {
@@ -147,6 +147,123 @@ export const apikey = pgTable(
     // every MCP request looks its key up by hash; the card lists by owner
     index("api_key_key_idx").on(t.key),
     index("api_key_reference_idx").on(t.referenceId),
+  ],
+);
+
+/*
+ * better-auth's OAuth 2.1 provider (`@better-auth/oauth-provider`), which is
+ * how claude.ai's custom connectors sign in: they register themselves
+ * (dynamic client registration), send you through the normal login and a
+ * consent screen, and get an access token for `/api/mcp`.
+ *
+ * Property names are the plugin's model fields verbatim, as above; the
+ * plugin's `string[]` fields are real `text[]` columns, because the drizzle
+ * adapter reports array support for Postgres. Tokens are stored hashed —
+ * `storeTokens` in `auth.ts` hands the plugin `hashOAuthToken`, which is also
+ * what `/api/mcp` looks a presented token up by. Clients are referenced by
+ * their public `client_id`, not their row id, because that's the key the
+ * plugin joins on.
+ */
+export const oauthClient = pgTable("oauth_client", {
+  id: text("id").primaryKey(),
+  clientId: text("client_id").notNull().unique(),
+  clientSecret: text("client_secret"),
+  disabled: boolean("disabled").default(false),
+  skipConsent: boolean("skip_consent"),
+  enableEndSession: boolean("enable_end_session"),
+  subjectType: text("subject_type"),
+  scopes: text("scopes").array(),
+  // set when a signed-in user registered the client; dynamic registration
+  // from claude.ai is unauthenticated, so it's usually null
+  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  name: text("name"),
+  uri: text("uri"),
+  icon: text("icon"),
+  contacts: text("contacts").array(),
+  tos: text("tos"),
+  policy: text("policy"),
+  softwareId: text("software_id"),
+  softwareVersion: text("software_version"),
+  softwareStatement: text("software_statement"),
+  redirectUris: text("redirect_uris").array().notNull(),
+  postLogoutRedirectUris: text("post_logout_redirect_uris").array(),
+  tokenEndpointAuthMethod: text("token_endpoint_auth_method"),
+  grantTypes: text("grant_types").array(),
+  responseTypes: text("response_types").array(),
+  public: boolean("public"),
+  type: text("type"),
+  requirePKCE: boolean("require_pkce"),
+  referenceId: text("reference_id"),
+  metadata: jsonb("metadata"),
+});
+
+export const oauthRefreshToken = pgTable(
+  "oauth_refresh_token",
+  {
+    id: text("id").primaryKey(),
+    token: text("token").notNull().unique(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: "cascade" }),
+    sessionId: text("session_id").references(() => session.id, { onDelete: "set null" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    referenceId: text("reference_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    revoked: timestamp("revoked", { withTimezone: true }),
+    authTime: timestamp("auth_time", { withTimezone: true }),
+    scopes: text("scopes").array().notNull(),
+  },
+  (t) => [
+    index("oauth_refresh_token_client_idx").on(t.clientId),
+    index("oauth_refresh_token_user_idx").on(t.userId),
+  ],
+);
+
+export const oauthAccessToken = pgTable(
+  "oauth_access_token",
+  {
+    id: text("id").primaryKey(),
+    // the hash; every /api/mcp request with an OAuth token looks this up
+    token: text("token").unique(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: "cascade" }),
+    sessionId: text("session_id").references(() => session.id, { onDelete: "set null" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    referenceId: text("reference_id"),
+    refreshId: text("refresh_id").references(() => oauthRefreshToken.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    scopes: text("scopes").array().notNull(),
+  },
+  (t) => [
+    index("oauth_access_token_client_idx").on(t.clientId),
+    index("oauth_access_token_user_idx").on(t.userId),
+  ],
+);
+
+/** "You said yes to this app, for these scopes." Deleting it is disconnecting. */
+export const oauthConsent = pgTable(
+  "oauth_consent",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    referenceId: text("reference_id"),
+    scopes: text("scopes").array().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    index("oauth_consent_client_idx").on(t.clientId),
+    index("oauth_consent_user_idx").on(t.userId),
   ],
 );
 

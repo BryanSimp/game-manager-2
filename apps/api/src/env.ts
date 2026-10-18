@@ -34,6 +34,19 @@ const envSchema = z.object({
   // first CORS origin (the web app in dev), then BETTER_AUTH_URL (prod is
   // same-origin behind Traefik, so that's already the site).
   APP_URL: z.string().url().optional(),
+  // Extra OAuth redirect URIs that dynamic client registration accepts, for
+  // MCP clients other than Claude (comma-separated, exact match). Claude's
+  // connector callbacks and loopback addresses are always allowed — see
+  // services/oauth.ts.
+  OAUTH_REDIRECT_URIS: z
+    .string()
+    .default("")
+    .transform((v) =>
+      v
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
 });
 
 const parsed = envSchema.safeParse(process.env);

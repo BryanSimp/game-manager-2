@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { loginSchema } from "@gm/shared";
 import { authClient } from "../lib/auth.js";
 import { AuthCard, Field, FormError, SubmitButton } from "../components/AuthCard.js";
+import { followOAuthRedirect, isOAuthFlow } from "../lib/oauth.js";
 
 /**
  * Sign in, in one or two steps.
@@ -13,6 +14,12 @@ import { AuthCard, Field, FormError, SubmitButton } from "../components/AuthCard
  * its own route: better-auth offers a `twoFactorPage` redirect and warns that
  * it forces a full page reload, which would throw away the email that's
  * already typed to gain nothing.
+ *
+ * It's also where a connected app (claude.ai) sends someone to sign in. The
+ * signed OAuth query rides along on the sign-in and the code check (see
+ * lib/oauth.ts), so the server resumes the app's flow only once a session
+ * really exists — two-factor still applies — and the answer is a redirect
+ * to follow instead of the library.
  */
 export function LoginPage() {
   const navigate = useNavigate();
@@ -48,6 +55,7 @@ export function LoginPage() {
       setNeedsCode(true);
       return;
     }
+    if (followOAuthRedirect(data)) return;
     navigate({ to: "/" });
   }
 
@@ -60,7 +68,7 @@ export function LoginPage() {
       return;
     }
     setBusy(true);
-    const { error: verifyError } = useBackupCode
+    const { data, error: verifyError } = useBackupCode
       ? await authClient.twoFactor.verifyBackupCode({ code: entered, trustDevice })
       : await authClient.twoFactor.verifyTotp({ code: entered, trustDevice });
     setBusy(false);
@@ -69,6 +77,7 @@ export function LoginPage() {
       setCode("");
       return;
     }
+    if (followOAuthRedirect(data)) return;
     navigate({ to: "/" });
   }
 
@@ -135,8 +144,10 @@ export function LoginPage() {
     );
   }
 
+  const connecting = isOAuthFlow();
+
   return (
-    <AuthCard title="Sign in to your library">
+    <AuthCard title={connecting ? "Sign in to connect an app to your library" : "Sign in to your library"}>
       <form onSubmit={onSubmit}>
         <FormError message={error} />
         <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
@@ -151,9 +162,20 @@ export function LoginPage() {
       </form>
       <p className="mt-6 text-center text-sm text-zinc-400">
         No account?{" "}
-        <Link to="/register" className="font-medium text-indigo-400 hover:text-indigo-300">
-          Create one
-        </Link>
+        {connecting ? (
+          // a plain href, so the signed query comes along and signing up
+          // carries on to the app as well
+          <a
+            href={`/register${window.location.search}`}
+            className="font-medium text-indigo-400 hover:text-indigo-300"
+          >
+            Create one
+          </a>
+        ) : (
+          <Link to="/register" className="font-medium text-indigo-400 hover:text-indigo-300">
+            Create one
+          </Link>
+        )}
       </p>
       <p className="mt-2 text-center text-sm text-zinc-400">
         <Link to="/forgot-password" className="font-medium text-indigo-400 hover:text-indigo-300">

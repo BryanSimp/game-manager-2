@@ -35,3 +35,20 @@ export interface ApiKeySummary {
 export interface CreatedApiKey extends ApiKeySummary {
   key: string;
 }
+
+/**
+ * An app you've let read your library through OAuth — claude.ai's connector,
+ * usually. `name` is whatever the app called itself when it registered, so
+ * `redirectHost` (where its sign-ins are sent, which the server checked) is
+ * the trustworthy half.
+ */
+export interface OAuthConnection {
+  clientId: string;
+  name: string | null;
+  uri: string | null;
+  redirectHost: string | null;
+  scopes: string[];
+  connectedAt: string | null;
+  /** when it last got a token, which while in use is roughly hourly */
+  lastActiveAt: string | null;
+}

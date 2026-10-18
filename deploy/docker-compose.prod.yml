@@ -60,6 +60,9 @@ services:
       # needs no value here.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
+      # Extra OAuth redirect URIs for MCP clients other than Claude
+      # (comma-separated). Claude and localhost are always allowed.
+      OAUTH_REDIRECT_URIS: ${OAUTH_REDIRECT_URIS:-}
       IMAGE_DIR: /data/images
       TZ: ${TZ:-America/Chicago}
     volumes:
@@ -75,6 +78,15 @@ services:
       - traefik.http.routers.gm2-api.entrypoints=websecure
       - traefik.http.routers.gm2-api.tls.certresolver=cloudflare
       - traefik.http.services.gm2-api.loadbalancer.server.port=3001
+      # OAuth discovery for the MCP endpoint (/.well-known/oauth-protected-resource
+      # and /.well-known/oauth-authorization-server) lives at the root, not under
+      # /api — without this router those paths fall through to the web app and
+      # claude.ai's connector gets the SPA's HTML instead of JSON.
+      - traefik.http.routers.gm2-api-wellknown.rule=Host(`${GM_HOST:-gamesmanager.app}`) && PathPrefix(`/.well-known/oauth-`)
+      - traefik.http.routers.gm2-api-wellknown.priority=20
+      - traefik.http.routers.gm2-api-wellknown.entrypoints=websecure
+      - traefik.http.routers.gm2-api-wellknown.tls.certresolver=cloudflare
+      - traefik.http.routers.gm2-api-wellknown.service=gm2-api
       - com.centurylinklabs.watchtower.enable=true
 
   web:

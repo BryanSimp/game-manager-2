@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@better-auth/oauth-provider": "^1.6.23",
     "@gm/api-client": "workspace:*",
     "@gm/shared": "workspace:*",
     "@observablehq/plot": "^0.6.17",
