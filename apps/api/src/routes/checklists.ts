@@ -5,7 +5,18 @@ import { CHECKLIST_KINDS, EXTRA_LIST_KIND, MAIN_LIST_KIND } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { requireUser, type SessionUser } from "../plugins/auth.js";
 import { logEvent } from "../services/analytics.js";
+import {
+  CHECKLIST_CHAPTER_MAX,
+  CHECKLIST_ENTRY_MAX,
+  CHECKLIST_TITLE_MAX,
+  MAX_CHECKLIST_ENTRIES_PER_WRITE,
+  addChecklistEntries,
+  createChecklist,
+  hasMainList,
+  nextPosition,
+} from "../services/checklists.js";
 import { inspectAll } from "../services/content-filter.js";
+import { replyWithServiceError } from "../services/service-error.js";
 import {
   NO_VOTES,
   castChecklistVote,
@@ -17,21 +28,26 @@ import { publishModeFor } from "../services/preferences.js";
 import { voteRateLimit } from "../plugins/rate-limits.js";
 
 const titleSchema = z.object({
-  title: z.string().min(1).max(200),
+  title: z.string().min(1).max(CHECKLIST_TITLE_MAX),
   kind: z.enum(CHECKLIST_KINDS).optional(),
 });
 const patchSchema = z.object({
-  title: z.string().min(1).max(200).optional(),
+  title: z.string().min(1).max(CHECKLIST_TITLE_MAX).optional(),
   isPublic: z.boolean().optional(),
   sequential: z.boolean().optional(),
 });
 const itemSchema = z.object({
-  text: z.string().min(1).max(500),
-  category: z.string().max(100).nullable().optional(),
+  // trimmed before it's measured, so "   " is refused here rather than
+  // stored as a blank entry
+  text: z.string().trim().min(1).max(CHECKLIST_ENTRY_MAX),
+  category: z.string().max(CHECKLIST_CHAPTER_MAX).nullable().optional(),
 });
 const importMissionsSchema = z.object({
-  title: z.string().min(1).max(200),
-  missions: z.array(z.string().min(1).max(500)).min(1).max(500),
+  title: z.string().min(1).max(CHECKLIST_TITLE_MAX),
+  missions: z
+    .array(z.string().min(1).max(CHECKLIST_ENTRY_MAX))
+    .min(1)
+    .max(MAX_CHECKLIST_ENTRIES_PER_WRITE),
   // only the main-story list feeds the time estimate; everything else is untimed
   kind: z.enum(["missions", "side_quests"]).default("missions"),
 });
@@ -40,8 +56,8 @@ const bulkCheckSchema = z.object({
   completed: z.boolean(),
 });
 const itemPatchSchema = z.object({
-  text: z.string().min(1).max(500).optional(),
-  category: z.string().max(100).nullable().optional(),
+  text: z.string().min(1).max(CHECKLIST_ENTRY_MAX).optional(),
+  category: z.string().max(CHECKLIST_CHAPTER_MAX).nullable().optional(),
   position: z.number().int().min(0).optional(),
 });
 const listOrderSchema = z.object({
@@ -59,44 +75,6 @@ async function getTemplate(id: string) {
 /** Author sees their own; everyone sees public. */
 function canView(tpl: { authorUserId: string; isPublic: boolean }, user: SessionUser) {
   return tpl.authorUserId === user.id || tpl.isPublic;
-}
-
-/** Where a new list lands among this user's lists for the game. */
-async function nextPosition(userId: string, gameId: string): Promise<number> {
-  const [row] = await db
-    .select({ max: sql<number>`coalesce(max(${schema.checklistTemplates.position}), 0)::int` })
-    .from(schema.checklistTemplates)
-    .where(
-      and(
-        eq(schema.checklistTemplates.gameId, gameId),
-        eq(schema.checklistTemplates.authorUserId, userId),
-      ),
-    );
-  return (row?.max ?? 0) + 1;
-}
-
-/**
- * You get one main-story list per game.
- *
- * It's the list `estimateProgress` divides the how-long-to-beat figure
- * across, so a second one would mean two different answers to "how much is
- * left". Extra lists are unlimited precisely because they're untimed.
- * Duplicates from before this rule still exist, which is why the estimate
- * keeps its own oldest-wins tiebreak rather than trusting this alone.
- */
-async function hasMainList(userId: string, gameId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ id: schema.checklistTemplates.id })
-    .from(schema.checklistTemplates)
-    .where(
-      and(
-        eq(schema.checklistTemplates.gameId, gameId),
-        eq(schema.checklistTemplates.authorUserId, userId),
-        eq(schema.checklistTemplates.kind, MAIN_LIST_KIND),
-      ),
-    )
-    .limit(1);
-  return !!row;
 }
 
 /**
@@ -227,36 +205,21 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       if (!user) return;
       const parsed = titleSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ message: "Title is required" });
-      if (await rejectBadContent(reply, user.id, [parsed.data.title])) return;
-      const [game] = await db
-        .select({ id: schema.games.id })
-        .from(schema.games)
-        .where(eq(schema.games.id, request.params.gameId));
-      if (!game) return reply.status(404).send({ message: "Game not found" });
-
-      const kind = parsed.data.kind ?? EXTRA_LIST_KIND;
-      if (kind === MAIN_LIST_KIND && (await hasMainList(user.id, game.id))) {
-        return reply
-          .status(409)
-          .send({ message: "You already have a main story list for this game" });
+      try {
+        // An empty list's title is all there is to filter, so "publish
+        // automatically" can apply here without a second scan. Entries added
+        // later are filtered on write.
+        const { checklist } = await createChecklist(
+          user.id,
+          request.params.gameId,
+          { title: parsed.data.title, kind: parsed.data.kind ?? EXTRA_LIST_KIND },
+          "preference",
+        );
+        reply.status(201);
+        return { id: checklist.id, isPublic: checklist.isPublic };
+      } catch (err) {
+        return replyWithServiceError(reply, err);
       }
-      // The title has already passed the filter above, and an empty list has
-      // nothing else to check — so "publish automatically" can apply here
-      // without a second scan. Entries added later are filtered on write.
-      const isPublic = (await publishModeFor(user.id)) === "always";
-      const [tpl] = await db
-        .insert(schema.checklistTemplates)
-        .values({
-          gameId: game.id,
-          authorUserId: user.id,
-          title: parsed.data.title.trim(),
-          kind,
-          isPublic,
-          position: await nextPosition(user.id, game.id),
-        })
-        .returning();
-      reply.status(201);
-      return { id: tpl!.id, isPublic };
     },
   );
 
@@ -316,42 +279,26 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       const parsed = importMissionsSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ message: "Invalid input" });
 
-      const [game] = await db
-        .select({ id: schema.games.id })
-        .from(schema.games)
-        .where(eq(schema.games.id, request.params.gameId));
-      if (!game) return reply.status(404).send({ message: "Game not found" });
-
       const missions = parsed.data.missions.map((m) => m.trim()).filter(Boolean);
       if (missions.length === 0) {
         return reply.status(400).send({ message: "At least one mission is required" });
       }
-      if (await rejectBadContent(reply, user.id, [parsed.data.title, ...missions])) return;
-
-      if (parsed.data.kind === MAIN_LIST_KIND && (await hasMainList(user.id, game.id))) {
-        return reply
-          .status(409)
-          .send({ message: "You already have a main story list for this game" });
+      try {
+        const { checklist, entries } = await createChecklist(
+          user.id,
+          request.params.gameId,
+          {
+            title: parsed.data.title,
+            kind: parsed.data.kind,
+            entries: missions.map((text) => ({ text })),
+          },
+          "preference",
+        );
+        reply.status(201);
+        return { id: checklist.id, count: entries, isPublic: checklist.isPublic };
+      } catch (err) {
+        return replyWithServiceError(reply, err);
       }
-      // every mission went through the filter above alongside the title, so
-      // there is nothing left unscanned for "publish automatically" to expose
-      const isPublic = (await publishModeFor(user.id)) === "always";
-      const [tpl] = await db
-        .insert(schema.checklistTemplates)
-        .values({
-          gameId: game.id,
-          authorUserId: user.id,
-          title: parsed.data.title.trim(),
-          kind: parsed.data.kind,
-          isPublic,
-          position: await nextPosition(user.id, game.id),
-        })
-        .returning();
-      await db.insert(schema.checklistItems).values(
-        missions.map((text, i) => ({ templateId: tpl!.id, position: i, text })),
-      );
-      reply.status(201);
-      return { id: tpl!.id, count: missions.length, isPublic };
     },
   );
 
@@ -544,29 +491,15 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
   app.post<{ Params: { id: string } }>("/api/checklists/:id/items", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const tpl = await getTemplate(request.params.id);
-    if (!tpl || tpl.authorUserId !== user.id) {
-      return reply.status(404).send({ message: "Checklist not found" });
-    }
     const parsed = itemSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ message: "Item text is required" });
-    if (await rejectBadContent(reply, user.id, [parsed.data.text, parsed.data.category])) return;
-    const [maxRow] = await db
-      .select({ max: sql<number>`coalesce(max(${schema.checklistItems.position}), -1)::int` })
-      .from(schema.checklistItems)
-      .where(eq(schema.checklistItems.templateId, tpl.id));
-    const max = maxRow?.max ?? -1;
-    const [item] = await db
-      .insert(schema.checklistItems)
-      .values({
-        templateId: tpl.id,
-        position: max + 1,
-        text: parsed.data.text.trim(),
-        category: parsed.data.category?.trim() || null,
-      })
-      .returning();
-    reply.status(201);
-    return { id: item!.id, position: item!.position };
+    try {
+      const { added } = await addChecklistEntries(user.id, request.params.id, [parsed.data]);
+      reply.status(201);
+      return { id: added[0]!.id, position: added[0]!.position };
+    } catch (err) {
+      return replyWithServiceError(reply, err);
+    }
   });
 
   app.patch<{ Params: { itemId: string } }>(

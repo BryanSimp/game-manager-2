@@ -1,8 +1,11 @@
-import { and, eq, ilike, isNotNull } from "drizzle-orm";
+import { and, asc, eq, ilike, isNotNull } from "drizzle-orm";
 import {
+  EXTRA_LIST_KIND,
   GAME_LINK_ROLE_META,
+  MAIN_LIST_KIND,
   PROGRESS_BASIS_LABELS,
   type CategoryView,
+  type ChecklistKind,
   type GameLinkRole,
   type ProgressBasis,
 } from "@gm/shared";
@@ -10,6 +13,7 @@ import { db, schema } from "../db/index.js";
 import { logEvent } from "./analytics.js";
 import { upsertGameFromIgdb } from "./catalog.js";
 import { listCategories } from "./categories.js";
+import { addChecklistEntries, createChecklist, type ChecklistTemplate } from "./checklists.js";
 import {
   addGamesToCollection,
   createCollection,
@@ -50,10 +54,10 @@ import {
  * one id kept is a library entry's, because `get_game` takes it.
  *
  * The write tools at the bottom go through the same service functions the
- * web routes do (`services/tags.ts`, `collections.ts`, `game-links.ts`,
- * `time-to-beat.ts`), so validation, ownership and the content filter are
- * the app's own, and each refuses unless the caller's credential allows
- * changes (`requireWrite`).
+ * web routes do (`services/tags.ts`, `collections.ts`, `checklists.ts`,
+ * `game-links.ts`, `time-to-beat.ts`), so validation, ownership and the
+ * content filter are the app's own, and each refuses unless the caller's
+ * credential allows changes (`requireWrite`).
  */
 
 /** A tool asked for something that isn't there; reported to the model as an error result. */
@@ -116,6 +120,11 @@ type Categories = Map<string, CategoryView>;
 async function categoriesFor(userId: string): Promise<Categories> {
   const list = await listCategories(userId);
   return new Map(list.map((c) => [c.key, c]));
+}
+
+/** A list's kind the way the Progress tab sorts them: the one main story list, then extras. */
+function listKindName(kind: ChecklistKind): "main story" | "extra" {
+  return kind === MAIN_LIST_KIND ? "main story" : "extra";
 }
 
 /** A stored status as the name a person would use for it. */
@@ -425,7 +434,7 @@ export async function toolGetGame(userId: string, args: { id?: string; title?: s
       : null,
     checklists: checklists.map((c) => ({
       title: c.title,
-      kind: c.kind === "missions" ? "main story" : "extra",
+      kind: listKindName(c.kind),
       done: c.doneCount,
       total: c.itemCount,
     })),
@@ -631,12 +640,13 @@ export async function toolGetBacklogCandidates(
 // ---------------------------------------------------------------------------
 // Writes
 //
-// Seven tools, all of which only add: tags and tag assignments, collections
-// and the games in them, links between games, and the user's own
-// time-to-beat figures. `untag_games` is the one that takes anything away,
-// and it removes an assignment, never a tag. Nothing here deletes, renames,
-// recategorises, rates, publishes or touches the account — that's the whole
-// list, and adding to it is a decision, not a refactor.
+// Eight tools, all of which only add: tags and tag assignments, collections
+// and the games in them, progress checklists and their items, links between
+// games, and the user's own time-to-beat figures. `untag_games` is the one
+// that takes anything away, and it removes an assignment, never a tag.
+// Nothing here deletes, renames, recategorises, rates, publishes, ticks a
+// checklist item or touches the account — that's the whole list, and adding
+// to it is a decision, not a refactor.
 
 /** The most games one write may name — the same cap as `PUT /api/library/:id/tags`. */
 export const MAX_GAMES_PER_WRITE = 100;
@@ -1077,6 +1087,115 @@ export async function toolAddGamesToCollection(
     alreadyIn: filled.already.length,
     notFound: filled.missing,
     gamesInCollection: filled.total,
+  };
+}
+
+/** The kinds `create_checklist` takes, by the names the tools report them under. */
+export const CHECKLIST_KIND_INPUTS = ["main_story", "extra"] as const;
+
+/** An item as a model sends it: just the text, or the text under a chapter. */
+type ChecklistItemArg = string | { text: string; chapter?: string };
+
+export async function toolCreateChecklist(
+  access: McpAccess,
+  args: {
+    game: string;
+    title: string;
+    kind?: (typeof CHECKLIST_KIND_INPUTS)[number];
+    items: ChecklistItemArg[];
+    sequential?: boolean;
+  },
+) {
+  requireWrite(access);
+  // your own games only: a list is progress through a game you're playing,
+  // and the Progress tab it lives on is a library entry's
+  const { found, missing } = resolveEntries(await libraryIndex(access.userId), [args.game]);
+  const entry = found[0];
+  if (!entry) throw new McpToolError(missing[0]?.reason ?? "Give a game id or title.");
+
+  const kind = args.kind === "main_story" ? MAIN_LIST_KIND : EXTRA_LIST_KIND;
+  const items = args.items.map((item) =>
+    typeof item === "string" ? { text: item } : { text: item.text, category: item.chapter ?? null },
+  );
+  const lists = await db
+    .select()
+    .from(schema.checklistTemplates)
+    .where(
+      and(
+        eq(schema.checklistTemplates.gameId, entry.gameId),
+        eq(schema.checklistTemplates.authorUserId, access.userId),
+      ),
+    )
+    .orderBy(asc(schema.checklistTemplates.position), asc(schema.checklistTemplates.createdAt));
+  const same = lists.find((l) => fold(l.title) === fold(args.title));
+
+  let checklist: ChecklistTemplate;
+  let added: number;
+  let already = 0;
+  let total: number;
+  const notes: string[] = [];
+  if (same) {
+    // a list by that name already: add to it, the way create_collection does,
+    // skipping what it has so a repeated call adds nothing twice
+    const result = await addChecklistEntries(access.userId, same.id, items, { skipExisting: true });
+    checklist = result.checklist;
+    added = result.added.length;
+    already = result.already;
+    total = result.total;
+    notes.push(`"${entry.title}" already had a list called "${checklist.title}", so the items went on it.`);
+    if (args.kind !== undefined && kind !== checklist.kind) {
+      notes.push(`It stays ${checklist.kind === MAIN_LIST_KIND ? "the main story list" : "an extra list"}.`);
+    }
+    if (args.sequential !== undefined && args.sequential !== checklist.sequential) {
+      notes.push("Its sequential setting was left as it was.");
+    }
+    if (checklist.isPublic) notes.push("That list is published, so the new items are public too.");
+  } else {
+    if (kind === MAIN_LIST_KIND) {
+      // the service refuses this too; this says which list is in the way
+      const main = lists.find((l) => l.kind === MAIN_LIST_KIND);
+      if (main) {
+        throw new McpToolError(
+          `"${entry.title}" already has a main story list, "${main.title}" — a game has only one, because it's what the Progress tab divides the time to beat across. Call again with the title "${main.title}" to add to it, or make this an extra list (kind "extra").`,
+        );
+      }
+    }
+    // "private", never "preference": like collections, a list made over MCP
+    // starts private whatever the publish mode says
+    const result = await createChecklist(
+      access.userId,
+      entry.gameId,
+      { title: args.title, kind, entries: items, sequential: args.sequential },
+      "private",
+    );
+    checklist = result.checklist;
+    added = result.entries;
+    total = result.entries;
+    if (args.sequential && kind !== MAIN_LIST_KIND) {
+      notes.push("Only a main story list can be sequential, so this one isn't.");
+    }
+  }
+
+  logEvent("mcp_write", access.userId, {
+    tool: "create_checklist",
+    created: !same,
+    kind: checklist.kind,
+    added,
+    alreadyOnList: already,
+  });
+  return {
+    created: !same,
+    checklist: {
+      game: entry.title,
+      title: checklist.title,
+      kind: listKindName(checklist.kind),
+      sequential: checklist.sequential,
+      public: checklist.isPublic,
+      items: total,
+    },
+    added,
+    alreadyOnList: already,
+    ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
   };
 }
 

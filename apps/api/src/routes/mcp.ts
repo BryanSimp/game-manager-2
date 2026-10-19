@@ -9,11 +9,19 @@ import { GAME_LINK_ROLES, GAME_LINK_ROLE_META, MCP_SCOPE } from "@gm/shared";
 import { authenticateMcp, type McpAuth, type McpCaller } from "../services/mcp-auth.js";
 import { PROTECTED_RESOURCE_METADATA_URL } from "../services/oauth.js";
 import {
+  CHECKLIST_CHAPTER_MAX,
+  CHECKLIST_ENTRY_MAX,
+  CHECKLIST_TITLE_MAX,
+  MAX_CHECKLIST_ENTRIES_PER_WRITE,
+} from "../services/checklists.js";
+import {
   BACKLOG_CANDIDATE_CATEGORIES,
+  CHECKLIST_KIND_INPUTS,
   LIBRARY_SORTS,
   MAX_GAMES_PER_WRITE,
   McpToolError,
   toolAddGamesToCollection,
+  toolCreateChecklist,
   toolCreateCollection,
   toolCreateTag,
   toolGetBacklogCandidates,
@@ -38,7 +46,7 @@ import { MAX_TTB_SECONDS } from "../services/time-to-beat.js";
  * This is how Claude (Claude Code, and claude.ai as a custom connector)
  * reads your library — "what should I play next?", "how far through Elden
  * Ring am I?" — and, when you've allowed it, tidies it up: tags, collections,
- * links between games, your own play times. It lives under `/api` so the
+ * progress checklists, links between games, your own play times. It lives under `/api` so the
  * routing that already sends `/api/*` to this server (Traefik's
  * `PathPrefix(/api)`, the self-host nginx, the Vite proxy) carries it
  * without changes.
@@ -52,7 +60,7 @@ import { MAX_TTB_SECONDS } from "../services/time-to-beat.js";
  * **Reads always, writes by permission.** The credential that reaches this
  * route works nowhere else — neither an API key nor an OAuth access token is
  * a session (see `auth.ts`), so neither can be replayed against the web
- * app's write routes. What it can change is therefore exactly the seven
+ * app's write routes. What it can change is therefore exactly the eight
  * write tools below, and only when the credential was granted changes: a key
  * made with "Allow changes", or a token with `library:write`. Every caller
  * sees every tool listed; a read-only one gets an error result from a write
@@ -65,9 +73,9 @@ import { MAX_TTB_SECONDS } from "../services/time-to-beat.js";
 
 const INSTRUCTIONS = `Game Manager is the user's personal video game library. Everything these tools return or change belongs to the signed-in user and nobody else.
 
-Reading is always allowed. Changes are limited to seven tools — create_tag, tag_games, untag_games, create_collection, add_games_to_collection, link_games and set_time_to_beat — and they only work when the user allowed changes for this connection (an API key made with "Allow changes" on, or "Allow changes" ticked when connecting); otherwise they return an error saying how to allow them. They add tags, collections, linked games and the user's own time-to-beat figures, and untag_games takes a tag off games. Nothing here can delete a game, tag or collection, rename anything, change a game's category, rating, notes, platforms or dates, or publish a collection. Only make changes the user asked for, and tell them what changed.
+Reading is always allowed. Changes are limited to eight tools — create_tag, tag_games, untag_games, create_collection, add_games_to_collection, create_checklist, link_games and set_time_to_beat — and they only work when the user allowed changes for this connection (an API key made with "Allow changes" on, or "Allow changes" ticked when connecting); otherwise they return an error saying how to allow them. They add tags, collections, progress checklists, linked games and the user's own time-to-beat figures, and untag_games takes a tag off games. Nothing here can delete a game, tag, collection or checklist, rename anything, tick checklist items off, change a game's category, rating, notes, platforms or dates, or publish a collection or checklist. Only make changes the user asked for, and tell them what changed.
 
-Every game in the library is filed under one category: the built-ins are Uncategorized, Wishlist, Backlog, Playing, Finished, Shelved and Dropped, and the user may have custom ones too (list_categories). Games are owned on one or more platforms, each physical or digital; PC storefronts like Steam are "part of" PC, so filtering by PC includes them. Ratings are out of 5 in half stars. Times are in hours. "Time to beat" comes from IGDB, the user's own figure or a community average. A progress percentage exists only when the user keeps a mission list for the game.
+Every game in the library is filed under one category: the built-ins are Uncategorized, Wishlist, Backlog, Playing, Finished, Shelved and Dropped, and the user may have custom ones too (list_categories). Games are owned on one or more platforms, each physical or digital; PC storefronts like Steam are "part of" PC, so filtering by PC includes them. Ratings are out of 5 in half stars. Times are in hours. "Time to beat" comes from IGDB, the user's own figure or a community average. A progress percentage exists only when the user keeps a main story checklist (mission list) for the game.
 
 For "what should I play next?", start with get_backlog_candidates. To look at one game in depth, call get_game with the id from any other tool's results. The write tools take a game as its id from another tool's results or its exact title.`;
 
@@ -123,6 +131,25 @@ const hoursField = (what: string) =>
     .nullable()
     .optional()
     .describe(`${what} in hours. null clears it; leave it out to keep what's there.`);
+
+/** A checklist item: just its text, or its text under a chapter. */
+const checklistItem = z.union([
+  z.string().trim().min(1).max(CHECKLIST_ENTRY_MAX),
+  z.object({
+    text: z
+      .string()
+      .trim()
+      .min(1)
+      .max(CHECKLIST_ENTRY_MAX)
+      .describe("The item: a mission, boss, collectible, ending…"),
+    chapter: z
+      .string()
+      .trim()
+      .max(CHECKLIST_CHAPTER_MAX)
+      .optional()
+      .describe('The chapter, act or area it sits under, e.g. "Act 1" or "Limgrave".'),
+  }),
+]);
 
 /** What each link role says the related game is, from GAME_LINK_ROLE_META's own hints. */
 const LINK_ROLE_GUIDE = GAME_LINK_ROLES.map(
@@ -386,6 +413,43 @@ export function buildMcpServer(caller: McpCaller): McpServer {
       annotations: { title: "Add games to collection", ...WRITE },
     },
     (args) => write(() => toolAddGamesToCollection(access, args)),
+  );
+
+  server.registerTool(
+    "create_checklist",
+    {
+      title: "Create checklist",
+      description:
+        "Make a progress checklist for a game in the user's library — a list on the game's Progress tab that the user ticks off as they play — or add items to one they already have. Two kinds: main_story is the story's missions, chapters or bosses in play order; a game has at most one, and it's what the Progress tab divides the game's time to beat across, so it gives the game its progress percentage and hours remaining. extra (the default) is anything else — collectibles, side quests, endings, trophies — as many lists as the user likes, untimed. Items can sit under chapters (acts, areas, regions). If the game already has a list with this title (ignoring case), the items are appended to it and items it already has are skipped, so repeating a call adds nothing twice; asking for a second main story list is refused, naming the one the game has. Lists are always private (only the user can publish one, from the web app) and start with nothing ticked — ticking happens in the app. Build a list from what the user gave you or a source you can name, and tell the user where the items came from: a mission list recalled from memory is easy to get wrong.",
+      inputSchema: {
+        game: gameRef.describe("A game in the user's library: its library id, or its exact title."),
+        title: z
+          .string()
+          .trim()
+          .min(1)
+          .max(CHECKLIST_TITLE_MAX)
+          .describe(
+            'The list\'s name, e.g. "Main story", "Bosses" or "Riddler trophies". An existing list with this name is added to.',
+          ),
+        kind: z
+          .enum(CHECKLIST_KIND_INPUTS)
+          .optional()
+          .describe("main_story for the story in play order (one per game; it drives the progress estimate), or extra (default) for anything else."),
+        items: z
+          .array(checklistItem)
+          .min(1)
+          .max(MAX_CHECKLIST_ENTRIES_PER_WRITE)
+          .describe(
+            `Up to ${MAX_CHECKLIST_ENTRIES_PER_WRITE} items, in order: each a string, or { text, chapter } to put it under a chapter. Repeats are kept (several "Mask Shard" entries are several entries).`,
+          ),
+        sequential: z
+          .boolean()
+          .optional()
+          .describe("Main story lists only: ticking an item also ticks every item before it, for a story played in order. Off by default; the user can switch it in the app."),
+      },
+      annotations: { title: "Create checklist", ...WRITE },
+    },
+    (args) => write(() => toolCreateChecklist(access, args)),
   );
 
   server.registerTool(

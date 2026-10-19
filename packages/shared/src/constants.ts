@@ -154,7 +154,7 @@ export const MCP_WRITE_SCOPE = "library:write";
 export const OAUTH_SCOPE_LABELS: Record<string, string> = {
   [MCP_SCOPE]: "Read your library, collections, progress and stats. On its own, it can't change anything.",
   [MCP_WRITE_SCOPE]:
-    "Add tags, collections, linked games and time-to-beat figures. It can't delete anything or change categories or ratings.",
+    "Add tags, collections, progress checklists, linked games and time-to-beat figures. It can't delete anything or change categories or ratings.",
   offline_access: "Stay connected until you disconnect it, without asking you to sign in again.",
   openid: "Know which Game Manager account you are.",
   profile: "See your display name.",

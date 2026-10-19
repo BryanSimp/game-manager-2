@@ -332,7 +332,7 @@ Phase 0–8 roadmap — read it before making design decisions.
   request builds a fresh `McpServer` whose tools are closed over the caller,
   so there are no MCP sessions to mix up between users; GET/DELETE are a 405.
   The credential that reaches the route works nowhere else, so what it can
-  change is exactly the seven write tools (below) and nothing more. The tools
+  change is exactly the eight write tools (below) and nothing more. The tools
   (`services/mcp-tools.ts`) read through the *same* loaders the web routes
   use — `loadLibraryEntries`/`loadEntryProgress` (`routes/library.ts`),
   `loadDashboard`, `loadCollections`/`loadCollectionDetail`,
@@ -343,11 +343,12 @@ Phase 0–8 roadmap — read it before making design decisions.
   `get_game` takes it. `get_collection` refuses other people's public
   collections even though the route would open them — the tools describe
   your library, nothing else.
-- **Claude can organise the library, if you let it** (phase 30). Seven
+- **Claude can organise the library, if you let it** (phase 30). Eight
   write tools — `create_tag`, `tag_games`, `untag_games`,
-  `create_collection`, `add_games_to_collection`, `link_games`,
-  `set_time_to_beat` — and a deliberate list of what's *not* there: no
-  deleting, no renaming or deleting tags or collections, no category,
+  `create_collection`, `add_games_to_collection`, `create_checklist`
+  (phase 31), `link_games`, `set_time_to_beat` — and a deliberate list of
+  what's *not* there: no deleting, no renaming or deleting tags,
+  collections or checklists, no ticking checklist items, no category,
   rating, notes, platform or date changes, no publishing, nothing on the
   account. **Writes are a second grant**, asked for when the credential is
   made: an API key's `permissions` (`{ library: ["read", "write"] }`, set
@@ -358,12 +359,14 @@ Phase 0–8 roadmap — read it before making design decisions.
   get a key or connection that can write. Keys from before phase 30 have
   null permissions and read as read-only. **Each tool goes through the
   route's own logic**, moved into `services/tags.ts`, `collections.ts`,
-  `game-links.ts` and `time-to-beat.ts`, which throw a `ServiceError` the
-  route sends as `{ message }` with its status and the tool reports as an
-  error result. Two deliberate differences from the web routes:
-  `create_collection` calls `createCollection(…, "private")`, ignoring
-  `publish_mode` and any `isPublic`, and `tag_games` **adds** one tag rather
-  than replacing the set the way `PUT /api/library/:id/tags` does. Games
+  `checklists.ts`, `game-links.ts` and `time-to-beat.ts`, which throw a
+  `ServiceError` the route sends as `{ message }` with its status and the
+  tool reports as an error result. Three deliberate differences from the
+  web routes: `create_collection` and `create_checklist` call their
+  service with `"private"`, ignoring `publish_mode` and any `isPublic`;
+  `tag_games` **adds** one tag rather than replacing the set the way
+  `PUT /api/library/:id/tags` does; and `create_checklist` appends with
+  `skipExisting`, so a repeated call can't double a list (below). Games
   are named by id or **exact** title (`titleKey`: case, accents and
   punctuation aside) through the same `pickByTitle` `get_game` uses, but
   with partial matching off — a near miss comes back with ids rather than
@@ -526,6 +529,7 @@ was dev-only). Never use `db push`.
 
 | 29 MCP server + API keys | see git log | **Claude can read your library.** `POST /api/mcp` is a stateless, read-only MCP server with seven tools — `list_library`, `get_game`, `get_dashboard`, `list_collections`, `get_collection`, `list_categories`, `get_backlog_candidates` — answering from the loaders the web routes use (extracted into exported functions for it). Authenticated by **personal API keys** (better-auth's api-key plugin, migration 0030) made on **Preferences → API keys**: named per device, shown once with the `claude mcp add` command filled in, listed with last-used dates, revoked inline. A key works only at `/api/mcp`. `check:mcp` covers auth, cross-user isolation and every tool against a real database (44 checks) |
 | 30 Claude can make changes | see git log | **Seven MCP write tools**, opt-in: `create_tag`, `tag_games` (adds one tag, keeps the rest), `untag_games`, `create_collection` (always private), `add_games_to_collection`, `link_games`, `set_time_to_beat`. A key writes only if made with **Allow changes** (the api-key plugin's `permissions`, no migration — the column was already there); an OAuth token only with `library:write`, an unticked-by-default line on the consent page. Existing keys and connectors stay read-only. The routes' logic moved into `services/tags.ts`, `collections.ts`, `game-links.ts`, `time-to-beat.ts` (with `ServiceError`), so a tool and its route can't drift. One write per request, `mcp_write` events. `check:mcp` grew to 121: read-only refusals for every tool, cross-user isolation for tags, collections, links and play times, tag_games keeping existing tags, private-under-`always`, the route/tool normalisation match, the batch cap, and consent with and without Allow changes |
+| 31 checklists over MCP | see git log | **`create_checklist`**, the eighth write tool: a progress list for a game in your library — `main_story` (the one timed list the Progress tab divides time to beat across, optionally `sequential`) or `extra` (default) — with items as strings or `{ text, chapter }`, up to 500 per call. Always private. Same title (ignoring case) appends to that list, skipping entries it already has, so a repeat adds nothing; a second main story list is refused naming the first. List creation and entry appends moved out of `routes/checklists.ts` into `services/checklists.ts` (`createChecklist`, `addChecklistEntries`, `mainListOf`), which the three create routes now call — creating a list and its entries is one transaction now, and the add-entry route refuses a blank entry instead of storing it. `check:mcp` grew to 137: the item schema's two shapes, order and chapters, private-under-`always`, the progress estimate picking it up, repeat/append/occurrence counting, the main-story refusal, cross-user isolation, the content filter on create and append, and the web routes still behaving |
 | 29b claude.ai over OAuth | see git log | **claude.ai's custom connector can sign in.** better-auth's OAuth 2.1 provider (migration 0031) with dynamic client registration fenced by a redirect-URI allowlist, opaque `gmat_`/`gmrt_` tokens hashed with our own function, and discovery at `/.well-known/oauth-protected-resource` + `oauth-authorization-server` (new Traefik router, nginx `location`, Vite proxy). `/api/mcp` takes an API key *or* an access token granted `library:read`, and a 401 carries `WWW-Authenticate: Bearer resource_metadata=…`. The existing login page continues the flow (two-factor included); `/oauth/consent` asks Allow/Deny; Preferences → API keys lists connected apps and disconnects them. `check:mcp` grew to 71 checks: discovery, registration allowlist, a 2FA account's sign-in, consent/deny, PKCE token exchange, refresh, insufficient scope, disconnect |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
@@ -579,6 +583,41 @@ file to be provided for reference).
   game is something the web app allows on a public collection too, and
   game titles aren't user text, so nothing is filtered. Making one public
   is still web-only.
+- **`create_checklist` is find-or-create by title**, like
+  `create_collection` by name: a list for that game with the same title
+  (ignoring case; the first in the Progress tab's order if there are
+  several) gets the items appended, and the result says so. Appending
+  skips entries the list already has — same chapter and text, ignoring
+  case — and counts *occurrences*, so a first call can make four "Mask
+  Shard" entries and repeating it adds none. The flip side is that a later
+  call can't add a fifth identical "Mask Shard"; it has to be named
+  differently. That's what lets every write tool keep `idempotentHint`.
+  The web app's add-entry route appends whatever you typed, every time.
+- **Checklists over MCP are your own games only.** The routes would accept
+  any catalog game, but a list lives on the Progress tab, which only a
+  library entry has — so the tool resolves the game with `resolveEntries`,
+  the same lookup tags and play times use, rather than the
+  any-game resolver collections and links use.
+- **A second main story list is refused with the name of the first.** The
+  service's 409 says only "You already have a main story list"; the tool
+  checks first so it can tell the model which list to add to instead.
+- **`sequential` is main-story-only in the service now**, not just in the
+  UI: the Progress tab only draws the switch on the main story list, while
+  the tick logic honours the flag on any list, so a sequential extra would
+  auto-fill with no visible control to stop it. `createChecklist` drops the
+  flag for extras (the tool says it did); `PATCH /api/checklists/:id` still
+  accepts it on any list, as it always has.
+- **Claude can make a list but not tick it.** Ticking is progress through
+  the game, which the user does in the app — and a model that ticks items
+  is a model deciding what you've played. A `tick_checklist_items` tool
+  would want the same opt-in thinking as the rest of phase 30. Likewise
+  there's no editing, reordering or removing entries over MCP: a wrong
+  entry is one click on the Progress tab's edit mode.
+- **A list Claude writes from memory can be wrong**, which is why the tool
+  description tells it to say where the items came from. Mission lists are
+  exactly the content the wiki scraper (phase 16) got wrong more often than
+  right; the difference is that this one is private, reviewable and was
+  asked for.
 - **API keys and connected apps are web-only**, like 2FA setup. Mobile
   neither lists nor revokes them.
 - better-auth logs `Failed to validate API key` at ERROR for every bad key

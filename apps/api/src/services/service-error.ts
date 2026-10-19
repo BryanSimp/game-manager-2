@@ -4,10 +4,10 @@ import type { FastifyReply } from "fastify";
  * A write refused for a reason the caller can act on — bad input, not
  * yours, already taken. Thrown by the service functions that a web route
  * and an MCP write tool both call (`services/tags.ts`, `collections.ts`,
- * `game-links.ts`, `time-to-beat.ts`), so the two can't drift on what they
- * accept: the route sends it as `status` with `{ message }`, exactly the
- * reply it used to build inline, and the tool reports the message to the
- * model as an error result.
+ * `checklists.ts`, `game-links.ts`, `time-to-beat.ts`), so the two can't
+ * drift on what they accept: the route sends it as `status` with
+ * `{ message }`, exactly the reply it used to build inline, and the tool
+ * reports the message to the model as an error result.
  */
 export class ServiceError extends Error {
   constructor(
