@@ -108,6 +108,9 @@ async function file(
 
 // ---- helpers --------------------------------------------------------------
 
+/** A stored timestamp as the day the tools report it. */
+const dayOf = (value: Date | null | undefined) => (value ? value.toISOString().slice(0, 10) : null);
+
 const MCP_HEADERS = {
   "content-type": "application/json",
   accept: "application/json, text/event-stream",
@@ -140,7 +143,7 @@ async function tool(key: string, name: string, args: Record<string, unknown> = {
   };
 }
 
-async function asUser(cookie: string, method: "GET" | "POST" | "PUT" | "DELETE", url: string, payload?: unknown) {
+async function asUser(cookie: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", url: string, payload?: unknown) {
   return app.inject({
     method,
     url,
@@ -415,11 +418,26 @@ try {
   const listRes = await rpc(aliceKey, "tools/list");
   const tools = (listRes.json() as { result: { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }> } }).result.tools;
   const names = tools.map((t) => t.name).sort();
-  const READ_TOOLS = ["get_achievements", "get_backlog_candidates", "get_checklist", "get_collection", "get_dashboard", "get_game", "list_categories", "list_collections", "list_library"];
+  const READ_TOOLS = ["get_achievements", "get_backlog_candidates", "get_checklist", "get_collection", "get_dashboard", "get_game", "list_categories", "list_collections", "list_library", "list_tags"];
   const WRITE_TOOLS = ["add_games_to_collection", "create_checklist", "create_collection", "create_tag", "link_games", "set_time_to_beat", "tag_games", "tick_checklist_items", "untag_games"];
+  // phase 34: the ones that overwrite or remove
+  const EDIT_TOOLS = [
+    "delete_checklist",
+    "delete_collection",
+    "delete_game",
+    "delete_tags",
+    "edit_checklist_items",
+    "remove_games_from_collection",
+    "unlink_games",
+    "update_checklist",
+    "update_collection",
+    "update_game",
+    "update_games",
+    "update_tag",
+  ];
   check(
-    "tools/list offers the nine read tools and the nine write tools, even to a read-only key",
-    JSON.stringify(names) === JSON.stringify([...READ_TOOLS, ...WRITE_TOOLS].sort()),
+    "tools/list offers the ten read tools and all twenty-one write tools, even to a read-only key",
+    JSON.stringify(names) === JSON.stringify([...READ_TOOLS, ...WRITE_TOOLS, ...EDIT_TOOLS].sort()),
     names,
   );
   const annotated = tools as Array<{ name: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }>;
@@ -428,10 +446,17 @@ try {
     annotated.filter((t) => READ_TOOLS.includes(t.name)).every((t) => t.annotations?.readOnlyHint === true),
   );
   check(
-    "write tools are annotated readOnlyHint: false, destructiveHint: false",
+    "additive write tools are annotated readOnlyHint: false, destructiveHint: false",
     annotated
       .filter((t) => WRITE_TOOLS.includes(t.name))
       .every((t) => t.annotations?.readOnlyHint === false && t.annotations?.destructiveHint === false),
+  );
+  check(
+    "tools that overwrite or delete are annotated destructiveHint: true",
+    annotated
+      .filter((t) => EDIT_TOOLS.includes(t.name))
+      .every((t) => t.annotations?.readOnlyHint === false && t.annotations?.destructiveHint === true),
+    annotated.filter((t) => EDIT_TOOLS.includes(t.name) && t.annotations?.destructiveHint !== true).map((t) => t.name),
   );
   const checklistItems = (tools as Array<{ name: string; inputSchema?: any }>).find((t) => t.name === "create_checklist")
     ?.inputSchema?.properties?.items?.items;
@@ -600,6 +625,18 @@ try {
     set_time_to_beat: { game: aHollow.id, mainHours: 1 },
     create_checklist: { game: aHollow.id, title: `refused-${run}`, items: ["Refused item"] },
     tick_checklist_items: { game: aHollow.id, list: "Main quest", numbers: [3, 4] },
+    update_game: { game: aHollow.id, notes: `refused-${run}`, endless: true },
+    update_games: { games: [aHollow.id], category: "Dropped" },
+    delete_game: { game: aHollow.id, confirm: true },
+    update_tag: { tag: tag!.name, name: `refused-${run}` },
+    delete_tags: { tags: [tag!.name], confirm: true },
+    unlink_games: { game: aHollow.id, relatedGame: hollowDlc.title },
+    update_checklist: { game: aHollow.id, list: "Main quest", title: `refused-${run}` },
+    edit_checklist_items: { game: aHollow.id, list: "Main quest", remove: [1] },
+    delete_checklist: { game: aHollow.id, list: "Main quest", confirm: true },
+    remove_games_from_collection: { collectionId: aliceCollection, games: [hollow.title] },
+    update_collection: { collectionId: aliceCollection, name: `refused-${run}` },
+    delete_collection: { collectionId: aliceCollection, confirm: true },
   };
   const refusals = await Promise.all(
     Object.entries(refusedArgs).map(async ([name, args]) => ({ name, ...(await tool(aliceKey, name, args)) })),
@@ -608,6 +645,22 @@ try {
     "every write tool refuses a read-only key, saying how to get one that can write",
     refusals.every((r) => r.isError && r.text.includes("This key is read-only") && r.text.includes("Allow changes")),
     refusals.filter((r) => !r.isError || !r.text.includes("read-only")).map((r) => [r.name, r.text]),
+  );
+  const [hollowAfterRefusals] = await db.select().from(schema.userGames).where(eq(schema.userGames.id, aHollow.id));
+  const hollowLinks = await db.select().from(schema.userGameLinks).where(eq(schema.userGameLinks.userId, alice.id));
+  const [mainQuestAfter] = await db.select().from(schema.checklistTemplates).where(eq(schema.checklistTemplates.id, list!.id));
+  const [tagAfter] = await db.select().from(schema.tags).where(eq(schema.tags.id, tag!.id));
+  const [aliceColAfter] = await db.select().from(schema.collections).where(eq(schema.collections.id, aliceCollection));
+  check(
+    "…and the refused edits and deletes left the game, its link, list, tag and collection as they were",
+    hollowAfterRefusals?.notes === "Stuck on the Mantis Lords." &&
+      hollowAfterRefusals.status === "playing" &&
+      hollowAfterRefusals.ttbEnabled === true &&
+      hollowLinks.length === 1 &&
+      mainQuestAfter?.title === "Main quest" &&
+      (await db.select().from(schema.checklistItems).where(eq(schema.checklistItems.templateId, list!.id))).length === 4 &&
+      tagAfter?.name === tag!.name &&
+      aliceColAfter?.name === `Hollow run ${run}`,
   );
   const legacy = await tool(bobKey, "create_tag", { name: `bob-legacy-${run}` });
   check("a key made before writes existed (no permissions at all) is read-only", legacy.isError && legacy.text.includes("read-only"), legacy.text);
@@ -1478,6 +1531,557 @@ try {
     { bulk: bulkRoute.body, one: oneRoute.body, bad: badRoute.statusCode, items: storyDetail.items },
   );
 
+  // ---- phase 34: changing and removing, as dana (her own library, so the
+  // counts the checks above and below rely on for alice stay put)
+  const dana = await makeUser("dana");
+  const danaKeyRes = await asUser(dana.cookie, "POST", "/api/api-keys", { name: "Claude (changes)", allowChanges: true });
+  const danaKey = danaKeyRes.json().key as string;
+  const gba = await makePlatform("Game Boy Advance");
+  const [twinA, twinB] = await db
+    .insert(schema.platforms)
+    .values([
+      { name: `Twin One ${run}`, abbreviation: `TW${run}` },
+      { name: `Twin Two ${run}`, abbreviation: `TW${run}` },
+    ])
+    .returning();
+  createdPlatforms.push(twinA!.id, twinB!.id);
+
+  const emeraldGame = await makeGame("Pokemon Emerald Version", { ttbMain: 30 * 3600 });
+  const gorillaGame = await makeGame("Gorilla Tag", {
+    ttbMain: 997.5 * 3600,
+    ttbMainExtra: 20629.5 * 3600,
+    ttbCompletionist: 277430.5 * 3600,
+    ttbSource: "igdb",
+  });
+  const warningGame = await makeGame("Content Warning", { ttbMain: 106 * 3600, ttbSource: "igdb" });
+  const kirbyGame = await makeGame("Kirby and the Amazing Mirror");
+  const ootOld = await makeGame("Ocarina", { releaseDate: "1998-11-21" });
+  const ootNew = await makeGame("Ocarina", { releaseDate: "2026-01-01" });
+  const metroidGame = await makeGame("Super Metroid", { ttbMain: 8 * 3600, ttbSource: "igdb" });
+  const mccGame = await makeGame("Master Chief Collection");
+  const haloGame = await makeGame("Halo Combat Evolved");
+  const bonelabGame = await makeGame("Bonelab", { ttbMain: 5 * 3600, ttbSource: "igdb" });
+
+  const dEmerald = await file(dana.id, emeraldGame.id, "backlog", {
+    startedAt: new Date("2026-08-15T12:00:00Z"),
+    finishedAt: new Date("2026-08-01T12:00:00Z"),
+  });
+  const dGorilla = await file(dana.id, gorillaGame.id, "backlog");
+  const dWarning = await file(dana.id, warningGame.id, "backlog");
+  const dKirby = await file(dana.id, kirbyGame.id, "backlog");
+  const dOotOld = await file(dana.id, ootOld.id, "finished", { finishedAt: new Date("1999-01-01T12:00:00Z") });
+  const dOotNew = await file(dana.id, ootNew.id, "backlog");
+  const dMetroid = await file(dana.id, metroidGame.id, "playing", { startedAt: new Date("2026-09-01T12:00:00Z") });
+  await file(dana.id, mccGame.id, "backlog");
+  await file(dana.id, haloGame.id, "finished");
+  const dBonelab = await file(dana.id, bonelabGame.id, "backlog");
+  const DANA_GAMES = 10;
+  await db.insert(schema.userGamePlatforms).values(
+    [dEmerald, dGorilla, dWarning, dOotOld, dOotNew, dMetroid, dBonelab].map((e) => ({
+      userGameId: e.id,
+      platformId: steam.id,
+      format: "digital" as const,
+    })),
+  );
+  const danaEntry = async (id: string) =>
+    (await db.select().from(schema.userGames).where(eq(schema.userGames.id, id)))[0];
+
+  console.log("\nReads: paging, fields and missing-X filters");
+  const seen: string[] = [];
+  let offset: number | null = 0;
+  let pages = 0;
+  while (offset !== null && pages < 10) {
+    const page = await tool(danaKey, "list_library", { limit: 3, offset, fields: ["category"] });
+    seen.push(...page.data.games.map((g: { id: string }) => g.id));
+    offset = page.data.nextOffset;
+    pages += 1;
+  }
+  check(
+    "list_library pages walk the whole library with no duplicates and no gaps",
+    pages === 4 && seen.length === DANA_GAMES && new Set(seen).size === DANA_GAMES,
+    { pages, seen: seen.length, unique: new Set(seen).size },
+  );
+  const lastPage = await tool(danaKey, "list_library", { limit: 3, offset: 9 });
+  check(
+    "…the last page says so with nextOffset null, and total is always the full match count",
+    lastPage.data.total === DANA_GAMES && lastPage.data.returned === 1 && lastPage.data.nextOffset === null && lastPage.data.offset === 9,
+    lastPage.data,
+  );
+  const slim = await tool(danaKey, "list_library", { fields: ["tags"], limit: 2 });
+  check(
+    "fields cuts each row to id, title and the fields named",
+    slim.data.games.every((g: Record<string, unknown>) => JSON.stringify(Object.keys(g).sort()) === JSON.stringify(["id", "tags", "title"])) &&
+      slim.text.length < 400,
+    slim.data,
+  );
+  const twoCats = await tool(danaKey, "list_library", { category: ["Backlog", "finished"] });
+  check("category takes a list (any of)", twoCats.data.total === 9 && twoCats.data.filters.category.length === 2, twoCats.data.total);
+  const noPlatform = await tool(danaKey, "list_library", { hasPlatform: false, fields: ["platforms"] });
+  check(
+    "hasPlatform: false finds the games filed under no platform",
+    noPlatform.data.total === 3 && noPlatform.data.games.some((g: { id: string }) => g.id === dKirby.id),
+    noPlatform.data,
+  );
+  const noTtb = await tool(danaKey, "list_library", { hasTimeToBeat: false });
+  check("hasTimeToBeat: false finds the games with no figure from anywhere", noTtb.data.total === 5, noTtb.data.total);
+  const fromIgdb = await tool(danaKey, "list_library", { timeToBeatSource: "igdb" });
+  check("timeToBeatSource narrows to where the figure comes from", fromIgdb.data.total === 5, fromIgdb.data.total);
+
+  await tool(danaKey, "tag_games", { tag: `Platformer ${run}`, group: "Genre", games: [dKirby.id, dMetroid.id] });
+  await tool(danaKey, "tag_games", { tag: `Shooter ${run}`, group: "genre", games: [haloGame.title] });
+  const noGenre = await tool(danaKey, "list_library", { missingTagGroup: "GENRE", fields: ["tags"] });
+  check(
+    "missingTagGroup answers \"which games have no Genre tag?\" in one call",
+    noGenre.data.total === DANA_GAMES - 3 && !noGenre.data.games.some((g: { id: string }) => g.id === dKirby.id) && !noGenre.data.note,
+    noGenre.data,
+  );
+  await tool(danaKey, "untag_games", { tag: `Platformer ${run}`, games: [dKirby.id] });
+  const noGenreAfter = await tool(danaKey, "list_library", { missingTagGroup: "Genre" });
+  check(
+    "…and picks up a game whose genre tag is taken off",
+    noGenreAfter.data.total === DANA_GAMES - 2 && noGenreAfter.data.games.some((g: { id: string }) => g.id === dKirby.id),
+    noGenreAfter.data.total,
+  );
+  const noSuchGroup = await tool(danaKey, "list_library", { missingTagGroup: "Mood", limit: 1 });
+  check(
+    "a tag group nobody's tags are in matches everything, and the result says so, naming the real groups",
+    noSuchGroup.data.total === DANA_GAMES && noSuchGroup.data.note?.includes("Genre"),
+    noSuchGroup.data.note,
+  );
+  const untaggedOnes = await tool(danaKey, "list_library", { hasTags: false });
+  check("hasTags: false finds untagged games", untaggedOnes.data.total === DANA_GAMES - 2, untaggedOnes.data.total);
+
+  console.log("\nEdits: games");
+  const emeraldRating = await tool(danaKey, "update_game", { game: dEmerald.id, rating: 4 });
+  check(
+    "update_game changes only what it's given, and warns about dates it didn't touch being the wrong way round",
+    emeraldRating.data?.changed?.rating?.to === 4 &&
+      Object.keys(emeraldRating.data.changed).length === 1 &&
+      emeraldRating.data.note?.includes("before its start date"),
+    emeraldRating.data ?? emeraldRating.text,
+  );
+  const stillInverted = await tool(danaKey, "update_game", { game: dEmerald.id, finishedAt: "2026-07-01" });
+  check(
+    "a finish date before the start date is refused, and nothing changes",
+    stillInverted.isError && stillInverted.text.includes("before it was started") && dayOf((await danaEntry(dEmerald.id))?.finishedAt) === "2026-08-01",
+    stillInverted.text,
+  );
+  const fixed = await tool(danaKey, "update_game", {
+    game: emeraldGame.title,
+    startedAt: "2026-07-20",
+    finishedAt: "2026-08-01",
+    category: "Finished",
+  });
+  const emeraldRow = await danaEntry(dEmerald.id);
+  check(
+    "…until both are put right: Pokémon Emerald is fixed, and filed as Finished without a fresh date stamp",
+    fixed.data?.changed?.startedAt?.from === "2026-08-15" &&
+      fixed.data.changed.startedAt.to === "2026-07-20" &&
+      fixed.data.changed.category?.to === "Finished" &&
+      !fixed.data.note &&
+      dayOf(emeraldRow?.startedAt) === "2026-07-20" &&
+      dayOf(emeraldRow?.finishedAt) === "2026-08-01" &&
+      emeraldRow?.status === "finished",
+    fixed.data ?? fixed.text,
+  );
+  const halfStars = await tool(danaKey, "update_game", { game: dEmerald.id, rating: 4.3 });
+  const future = await tool(danaKey, "update_game", { game: dEmerald.id, finishedAt: "2099-01-01" });
+  const badCategory = await tool(danaKey, "update_game", { game: dEmerald.id, category: "Nonsense" });
+  const emptyCall = await tool(danaKey, "update_game", { game: dEmerald.id });
+  check(
+    "ratings off the half-star grid, dates in the future, unknown categories and empty calls are refused",
+    halfStars.isError && future.isError && badCategory.isError && badCategory.text.includes("Backlog") && emptyCall.isError,
+    { halfStars: halfStars.text, future: future.text, badCategory: badCategory.text, nothing: emptyCall.text },
+  );
+  const toPlaying = await tool(danaKey, "update_game", { game: dKirby.id, category: "Playing" });
+  check(
+    "moving a game to Playing stamps today's start date, as the app does, and says so",
+    toPlaying.data?.changed?.startedAt?.from === null &&
+      toPlaying.data.changed.startedAt.to === dayOf(new Date()) &&
+      toPlaying.data.note?.includes("startedAt was set to today"),
+    toPlaying.data ?? toPlaying.text,
+  );
+  const onGba = await tool(danaKey, "update_game", {
+    game: dKirby.id,
+    platforms: [{ platform: gba.name, format: "physical" }],
+    notes: "Cartridge in the drawer",
+    completed100: true,
+  });
+  const kirbyConsole = await db
+    .select()
+    .from(schema.userConsoles)
+    .where(and(eq(schema.userConsoles.userId, dana.id), eq(schema.userConsoles.platformId, gba.id)));
+  check(
+    "update_game files a platformless game under a platform, with notes and 100%, and adds the console to the user's list",
+    JSON.stringify(onGba.data?.changed?.platforms?.to) === JSON.stringify([`${gba.name}, physical`]) &&
+      onGba.data.changed.notes?.to === "Cartridge in the drawer" &&
+      onGba.data.changed.completed100?.to === true &&
+      kirbyConsole.length === 1,
+    onGba.data ?? onGba.text,
+  );
+  const addSteam = await tool(danaKey, "update_game", { game: dKirby.id, platforms: [{ platform: steam.name, format: "digital" }] });
+  const removeGba = await tool(danaKey, "update_game", { game: dKirby.id, platforms: [{ platform: gba.name }], platformMode: "remove" });
+  const kirbyNow = (await tool(danaKey, "get_game", { id: dKirby.id })).data;
+  check(
+    "platformMode add keeps what's there, remove takes one off whatever its format",
+    addSteam.data?.changed?.platforms?.to?.length === 2 &&
+      removeGba.data?.changed?.platforms?.to?.length === 1 &&
+      kirbyNow.platforms.length === 1 &&
+      kirbyNow.platforms[0].platform === steam.name &&
+      kirbyNow.platforms[0].partOf === pc.name,
+    { addSteam: addSteam.data ?? addSteam.text, removeGba: removeGba.data ?? removeGba.text, now: kirbyNow.platforms },
+  );
+  const noFormat = await tool(danaKey, "update_game", { game: dKirby.id, platforms: [{ platform: gba.name }] });
+  const twins = await tool(danaKey, "update_game", { game: dKirby.id, platforms: [{ platform: `TW${run}`, format: "digital" }] });
+  const unknownPlatform = await tool(danaKey, "update_game", { game: dKirby.id, platforms: [{ platform: `Game Boy Advance ${run}`, format: "physical" }, { platform: "Virtual Boy zzq", format: "physical" }] });
+  const kirbyAfterRefusals = (await tool(danaKey, "get_game", { id: dKirby.id })).data;
+  check(
+    "a platform with no format, two platforms answering to one abbreviation, or an unknown one is refused — before anything is written",
+    noFormat.isError && noFormat.text.includes("physical or digital") &&
+      twins.isError && twins.text.includes(twinA!.name) && twins.text.includes(twinB!.name) &&
+      unknownPlatform.isError && unknownPlatform.text.includes("Virtual Boy zzq") &&
+      kirbyAfterRefusals.platforms.length === 1,
+    { noFormat: noFormat.text, twins: twins.text, unknown: unknownPlatform.text },
+  );
+  const cleared = await tool(danaKey, "update_game", { game: dKirby.id, notes: null, platforms: [], platformMode: "replace" });
+  check(
+    "null clears notes, and replace with [] clears the platforms",
+    cleared.data?.changed?.notes?.to === null && cleared.data.changed.platforms?.to?.length === 0,
+    cleared.data ?? cleared.text,
+  );
+  const crossUpdate = await tool(danaKey, "update_game", { game: bSecret.id, notes: "dana was here" });
+  const bobRow = (await db.select().from(schema.userGames).where(eq(schema.userGames.id, bSecret.id)))[0];
+  check("dana can't update bob's game", crossUpdate.isError && bobRow?.notes === "bob's private notes", crossUpdate.text);
+  const webInverted = await asUser(dana.cookie, "PATCH", `/api/library/${dEmerald.id}`, { finishedAt: "2026-07-01" });
+  const webRating = await asUser(dana.cookie, "PATCH", `/api/library/${dEmerald.id}`, { rating: 4.5 });
+  check(
+    "the web route runs the same rules: an inverted date is a 400, a rating is fine",
+    webInverted.statusCode === 400 && webRating.statusCode === 200 && (await danaEntry(dEmerald.id))?.rating === "4.5",
+    { inverted: webInverted.body, rating: webRating.body },
+  );
+
+  const dashBefore = (await tool(danaKey, "get_dashboard")).data;
+  const endless = await tool(danaKey, "update_games", { games: [gorillaGame.title, dWarning.id, `No Such Game zzq ${run}`], endless: true });
+  const dashAfter = (await tool(danaKey, "get_dashboard")).data;
+  check(
+    "update_games marks many games endless at once, reporting what it couldn't find",
+    endless.data?.changed === 2 && endless.data.unchanged === 0 && endless.data.notFound.length === 1,
+    endless.data ?? endless.text,
+  );
+  check(
+    "…and Gorilla Tag's 997.5 hours leave the dashboard's backlog total",
+    dashBefore.backlogHours - dashAfter.backlogHours === 997.5 + 106,
+    { before: dashBefore.backlogHours, after: dashAfter.backlogHours },
+  );
+  const endlessAgain = await tool(danaKey, "update_games", { games: [gorillaGame.title, dWarning.id], endless: true });
+  const endlessList = await tool(danaKey, "list_library", { endless: true });
+  check(
+    "…the same call again changes nothing, and list_library filters by it",
+    endlessAgain.data?.changed === 0 && endlessAgain.data.unchanged === 2 && endlessList.data.total === 2,
+    { again: endlessAgain.data, filter: endlessList.data.total },
+  );
+  const shelved = await tool(danaKey, "update_games", { games: [dGorilla.id, bSecret.id], category: "Shelved" });
+  check(
+    "update_games moves games between categories, and never touches someone else's",
+    shelved.data?.changed === 1 && shelved.data.notFound.length === 1 && (await danaEntry(dGorilla.id))?.status === "shelved",
+    shelved.data ?? shelved.text,
+  );
+
+  const ambiguousOot = await tool(danaKey, "delete_game", { game: ootOld.title });
+  check("delete_game on a title two entries share asks for the id", ambiguousOot.isError && ambiguousOot.text.includes(dOotNew.id), ambiguousOot.text);
+  await tool(danaKey, "create_checklist", { game: dOotNew.id, title: "Temples", items: ["Forest"] });
+  const preview = await tool(danaKey, "delete_game", { game: dOotNew.id });
+  check(
+    "without confirm, delete_game only shows what would go and what stays",
+    preview.data?.deleted === false &&
+      preview.data.id === dOotNew.id &&
+      preview.data.keeps.checklists[0]?.startsWith("Temples") &&
+      preview.data.note.includes("confirm: true") &&
+      (await danaEntry(dOotNew.id)) !== undefined,
+    preview.data ?? preview.text,
+  );
+  const deletedGame = await tool(danaKey, "delete_game", { game: dOotNew.id, confirm: true });
+  const ootLists = await db.select().from(schema.checklistTemplates).where(and(eq(schema.checklistTemplates.gameId, ootNew.id), eq(schema.checklistTemplates.authorUserId, dana.id)));
+  check(
+    "with confirm it removes the duplicate, keeps the other one, and leaves the game's checklist for if it comes back",
+    deletedGame.data?.deleted === true &&
+      (await danaEntry(dOotNew.id)) === undefined &&
+      (await danaEntry(dOotOld.id)) !== undefined &&
+      ootLists.length === 1,
+    deletedGame.data ?? deletedGame.text,
+  );
+  const deleteBobs = await tool(danaKey, "delete_game", { game: bSecret.id, confirm: true });
+  check("dana can't delete bob's game", deleteBobs.isError && (await db.select().from(schema.userGames).where(eq(schema.userGames.id, bSecret.id))).length === 1, deleteBobs.text);
+
+  console.log("\nEdits: tags");
+  const colored = await tool(danaKey, "tag_games", { tag: `Franchise A ${run}`, group: "Franchise", color: "#ef4444", games: [dMetroid.id, dKirby.id] });
+  await tool(danaKey, "tag_games", { tag: `Franchise B ${run}`, group: "Franchise", games: [dEmerald.id] });
+  check("tag_games gives a tag it makes the colour asked for", colored.data?.tag.color === "#ef4444", colored.data ?? colored.text);
+  const tagList = await tool(danaKey, "list_tags");
+  const franchiseA = tagList.data?.tags.find((t: { name: string }) => t.name === `Franchise A ${run}`);
+  check(
+    "list_tags shows every tag with its group, colour and game count, and the groups",
+    tagList.data?.total === 4 && franchiseA?.games === 2 && franchiseA.group === "Franchise" && tagList.data.groups.includes("Franchise"),
+    tagList.data,
+  );
+  const renamed = await tool(danaKey, "update_tag", { tag: `franchise a ${run}`, name: `Metroid ${run}`, color: null, group: "Series" });
+  const metroidTags = (await tool(danaKey, "get_game", { id: dMetroid.id })).data.tags as string[];
+  check(
+    "update_tag renames, recolours and regroups a tag, which stays on its games",
+    renamed.data?.tag.name === `Metroid ${run}` && renamed.data.tag.color === null && renamed.data.tag.group === "Series" && renamed.data.games === 2 && metroidTags.includes(`Metroid ${run}`),
+    renamed.data ?? renamed.text,
+  );
+  const renameClash = await tool(danaKey, "update_tag", { tag: `Metroid ${run}`, name: `Franchise B ${run}` });
+  check("renaming onto a tag the user already has is refused", renameClash.isError && renameClash.text.includes("already have"), renameClash.text);
+  const tagPreview = await tool(danaKey, "delete_tags", { group: "franchise", tags: [`Metroid ${run}`, `nope ${run}`] });
+  check(
+    "delete_tags without confirm lists what would go and how many games carry it, and deletes nothing",
+    tagPreview.data?.deleted === 0 &&
+      tagPreview.data.wouldDelete.length === 2 &&
+      tagPreview.data.wouldUntag === 3 &&
+      tagPreview.data.notFound.length === 1 &&
+      (await db.select().from(schema.tags).where(eq(schema.tags.userId, dana.id))).length === 4,
+    tagPreview.data ?? tagPreview.text,
+  );
+  const tagsGone = await tool(danaKey, "delete_tags", { group: "franchise", tags: [`Metroid ${run}`], confirm: true });
+  const danaTagsLeft = await db.select().from(schema.tags).where(eq(schema.tags.userId, dana.id));
+  check(
+    "with confirm it deletes them, the tags come off their games, and the games stay",
+    tagsGone.data?.deleted === 2 &&
+      tagsGone.data.untagged === 3 &&
+      danaTagsLeft.length === 2 &&
+      (await danaEntry(dMetroid.id)) !== undefined &&
+      !((await tool(danaKey, "get_game", { id: dMetroid.id })).data.tags as string[]).includes(`Metroid ${run}`),
+    tagsGone.data ?? tagsGone.text,
+  );
+  const bobsTagEdit = await tool(danaKey, "update_tag", { tag: `bob-only-${run}`, name: "stolen" });
+  const bobsTagDelete = await tool(danaKey, "delete_tags", { tags: [`bob-only-${run}`], confirm: true });
+  const bobTagStill = await db.select().from(schema.tags).where(and(eq(schema.tags.userId, bob.id), eq(schema.tags.name, `bob-only-${run}`)));
+  check("dana can't rename or delete bob's tag", bobsTagEdit.isError && bobsTagDelete.data?.deleted === 0 && bobTagStill.length === 1, { edit: bobsTagEdit.text, del: bobsTagDelete.data });
+  const webTagRename = await asUser(dana.cookie, "PATCH", `/api/tags/${danaTagsLeft[0]!.id}`, { name: danaTagsLeft[1]!.name });
+  check("the web route's rename onto a taken name is a 409 now, not a 500", webTagRename.statusCode === 409, webTagRename.statusCode);
+
+  console.log("\nEdits: links and compilations");
+  await tool(danaKey, "link_games", { game: mccGame.title, relatedGame: haloGame.title, role: "remake" });
+  const relink = await tool(danaKey, "link_games", { game: mccGame.title, relatedGame: haloGame.title, role: "contains" });
+  check("a second link between the same pair is refused, naming the first", relink.isError && relink.text.includes("Remakes"), relink.text);
+  const unlinked = await tool(danaKey, "unlink_games", { game: haloGame.title, relatedGame: mccGame.title });
+  check(
+    "unlink_games removes it from either end, and says what was undone",
+    unlinked.data?.removed === 1 && unlinked.data.unlinked[0] === `"${haloGame.title}" is a remake or remaster of "${mccGame.title}"`,
+    unlinked.data ?? unlinked.text,
+  );
+  const contains = await tool(danaKey, "link_games", { game: mccGame.title, relatedGame: haloGame.title, role: "contains" });
+  const haloView = (await tool(danaKey, "get_game", { title: haloGame.title })).data;
+  const mccView = (await tool(danaKey, "get_game", { title: mccGame.title })).data;
+  check(
+    "a compilation contains its games, and each game says it's included in the compilation",
+    contains.data?.created === true &&
+      contains.data.link === `"${haloGame.title}" is included in "${mccGame.title}"` &&
+      haloView.linkedGames["Included in"]?.[0]?.title === mccGame.title &&
+      mccView.linkedGames.Includes?.[0]?.title === haloGame.title &&
+      !haloView.linkedGames["Remakes & remasters"] &&
+      !haloView.linkedGames.Original,
+    { link: contains.data ?? contains.text, halo: haloView.linkedGames, mcc: mccView.linkedGames },
+  );
+  const linkRows = await db.select().from(schema.userGameLinks).where(eq(schema.userGameLinks.userId, dana.id));
+  const webLinks = (await asUser(dana.cookie, "GET", `/api/games/${haloGame.id}/links`)).json() as { sections: Array<{ role: string; links: unknown[] }> };
+  check(
+    "…stored once, as a compilation, and the web Linked tab gets both new sections",
+    linkRows.length === 1 && linkRows[0]!.kind === "compilation" && linkRows[0]!.gameId === mccGame.id &&
+      webLinks.sections.find((s) => s.role === "included_in")?.links.length === 1 &&
+      webLinks.sections.some((s) => s.role === "contains"),
+    { rows: linkRows, sections: webLinks.sections.map((s) => [s.role, s.links.length]) },
+  );
+  const notLinked = await tool(danaKey, "unlink_games", { game: haloGame.title, relatedGame: kirbyGame.title });
+  check("unlinking games that aren't linked says what the game is linked to", notLinked.isError && notLinked.text.includes(mccGame.title), notLinked.text);
+
+  console.log("\nEdits: checklists");
+  const bosses = ["Ridley", "Kraid", "Phantoon", "Draygon", "Mother Brain"];
+  const sourced = await tool(danaKey, "create_checklist", {
+    game: dMetroid.id,
+    title: "Bosses",
+    items: bosses,
+    source: "https://example.com/super-metroid/bosses",
+  });
+  await tool(danaKey, "tick_checklist_items", { game: dMetroid.id, list: "Bosses", numbers: [2, 5] });
+  const read = (await tool(danaKey, "get_checklist", { game: dMetroid.id, list: "bosses" })).data;
+  check(
+    "create_checklist records where its items came from, and get_checklist returns it",
+    sourced.data?.checklist.source === "https://example.com/super-metroid/bosses" && read?.source === "https://example.com/super-metroid/bosses",
+    { created: sourced.data ?? sourced.text, read: read?.source },
+  );
+  const otherSource = await tool(danaKey, "create_checklist", { game: dMetroid.id, title: "Bosses", items: ["Mother Brain"], source: "memory" });
+  check("…and appending with another source keeps the first, saying so", otherSource.data?.note?.includes("source was left"), otherSource.data ?? otherSource.text);
+  const [bossList] = await db.select().from(schema.checklistTemplates).where(and(eq(schema.checklistTemplates.gameId, metroidGame.id), eq(schema.checklistTemplates.authorUserId, dana.id)));
+  const webDetail = (await asUser(dana.cookie, "GET", `/api/checklists/${bossList!.id}`)).json() as { source: string | null };
+  check("the web app's list detail carries the source too", webDetail.source === "https://example.com/super-metroid/bosses", webDetail);
+
+  // play order: Kraid, Phantoon, Draygon, Ridley, Mother Brain — and Draygon's chapter
+  const edited = await tool(danaKey, "edit_checklist_items", {
+    game: dMetroid.id,
+    list: "Bosses",
+    order: [2, 3, 4, 1, 5],
+    edit: [{ number: 4, text: "Draygon (Maridia)", chapter: "Maridia" }],
+  });
+  const afterEdit = (await tool(danaKey, "get_checklist", { game: dMetroid.id, list: "Bosses" })).data;
+  check(
+    "edit_checklist_items reorders and edits in one call, numbers meaning the list before it",
+    edited.data?.reordered === true &&
+      edited.data.edited === 1 &&
+      JSON.stringify(afterEdit.items.map((i: { text: string }) => i.text)) ===
+        JSON.stringify(["Kraid", "Phantoon", "Draygon (Maridia)", "Ridley", "Mother Brain"]) &&
+      afterEdit.items[2].chapter === "Maridia" &&
+      afterEdit.items[0].done === true &&
+      afterEdit.items[4].done === true,
+    { result: edited.data ?? edited.text, items: afterEdit?.items },
+  );
+  const moved = await tool(danaKey, "edit_checklist_items", { game: dMetroid.id, list: "Bosses", order: [4], remove: [1], edit: [{ number: 3, chapter: null }] });
+  const afterMove = (await tool(danaKey, "get_checklist", { game: dMetroid.id, list: "Bosses" })).data;
+  check(
+    "a partial order moves the named items to the front; removing a ticked item takes its tick; a null chapter clears it",
+    moved.data?.removed?.[0]?.text === "Kraid" &&
+      JSON.stringify(afterMove.items.map((i: { text: string }) => i.text)) === JSON.stringify(["Ridley", "Phantoon", "Draygon (Maridia)", "Mother Brain"]) &&
+      afterMove.items[2].chapter === undefined &&
+      afterMove.done === 1 &&
+      moved.data.listProgress.done === 1 &&
+      moved.data.note?.includes("get_checklist"),
+    { result: moved.data ?? moved.text, items: afterMove?.items },
+  );
+  const badEdit = await tool(danaKey, "edit_checklist_items", { game: dMetroid.id, list: "Bosses", remove: [2, 9], edit: [{ number: 2, text: "x" }] });
+  const afterBad = (await tool(danaKey, "get_checklist", { game: dMetroid.id, list: "Bosses" })).data;
+  check(
+    "a number that isn't on the list, or one both edited and removed, changes nothing at all",
+    badEdit.isError && badEdit.text.includes("Nothing was changed") && badEdit.text.includes("#9") && badEdit.text.includes("both edited and removed") && afterBad.total === 4,
+    badEdit.text,
+  );
+  const toMain = await tool(danaKey, "update_checklist", { game: dMetroid.id, list: "Bosses", title: "Story bosses", kind: "main_story", sequential: true });
+  check(
+    "update_checklist renames a list and makes it the main story list, which the progress estimate then uses",
+    toMain.data?.list.title === "Story bosses" &&
+      toMain.data.list.kind === "main story" &&
+      toMain.data.list.sequential === true &&
+      toMain.data.gameProgress?.percent === 25 &&
+      toMain.data.note?.includes("main story list now"),
+    toMain.data ?? toMain.text,
+  );
+  await tool(danaKey, "create_checklist", { game: dMetroid.id, title: "Items", items: ["Morph Ball", "Bombs"] });
+  const secondMainList = await tool(danaKey, "update_checklist", { game: dMetroid.id, list: "Items", kind: "main_story" });
+  const clash = await tool(danaKey, "update_checklist", { game: dMetroid.id, list: "Items", title: "story BOSSES" });
+  const seqExtra = await tool(danaKey, "update_checklist", { game: dMetroid.id, list: "Items", sequential: true });
+  check(
+    "a second main story list is refused naming the first; a title another list has, or sequential on an extra, is refused",
+    secondMainList.isError && secondMainList.text.includes("Story bosses") && clash.isError && clash.text.includes("already has a list") && seqExtra.isError,
+    { secondMainList: secondMainList.text, clash: clash.text, seqExtra: seqExtra.text },
+  );
+  const toExtra = await tool(danaKey, "update_checklist", { game: dMetroid.id, list: "Story bosses", kind: "extra", source: null });
+  check(
+    "turning the main story list into an extra stops it being sequential and takes the progress with it, saying so",
+    toExtra.data?.list.kind === "extra" && toExtra.data.list.sequential === false && toExtra.data.list.source === null && toExtra.data.gameProgress === null && toExtra.data.note?.includes("no progress percentage"),
+    toExtra.data ?? toExtra.text,
+  );
+  const listPreview = await tool(danaKey, "delete_checklist", { game: dMetroid.id, list: "Items" });
+  check(
+    "delete_checklist without confirm shows the list and deletes nothing",
+    listPreview.data?.deleted === false && listPreview.data.items === 2 && (await db.select().from(schema.checklistTemplates).where(eq(schema.checklistTemplates.authorUserId, dana.id))).length === 3,
+    listPreview.data ?? listPreview.text,
+  );
+  const listGone = await tool(danaKey, "delete_checklist", { game: dMetroid.id, list: "Items", confirm: true });
+  const metroidLists = (await tool(danaKey, "get_game", { id: dMetroid.id })).data.checklists;
+  check("with confirm the list is gone", listGone.data?.deleted === true && metroidLists.length === 1, { result: listGone.data ?? listGone.text, lists: metroidLists });
+  const bobsListDelete = await tool(danaKey, "delete_checklist", { game: bSecret.id, confirm: true });
+  check("dana can't reach bob's lists", bobsListDelete.isError, bobsListDelete.text);
+
+  console.log("\nEdits: collections");
+  const marathon = await tool(danaKey, "create_collection", { name: `Retro ${run}`, games: [dKirby.id, dMetroid.id, dEmerald.id, dOotOld.id] });
+  const marathonId = marathon.data.collection.id as string;
+  await tool(danaKey, "create_collection", { name: `Taken ${run}` });
+  const reordered = await tool(danaKey, "update_collection", {
+    collectionName: `retro ${run}`,
+    name: `Retro marathon ${run}`,
+    description: "Handhelds and SNES",
+    order: [emeraldGame.title, dOotOld.id],
+  });
+  const marathonView = (await tool(danaKey, "get_collection", { id: marathonId })).data;
+  check(
+    "update_collection renames, describes and reorders — games left out follow in their order",
+    reordered.data?.changed?.name?.to === `Retro marathon ${run}` &&
+      reordered.data.changed.description?.to === "Handhelds and SNES" &&
+      JSON.stringify(marathonView.games.map((g: { title: string }) => g.title)) ===
+        JSON.stringify([emeraldGame.title, ootOld.title, kirbyGame.title, metroidGame.title]),
+    { result: reordered.data ?? reordered.text, order: marathonView?.games.map((g: { title: string }) => g.title) },
+  );
+  const holeInOrder = await tool(danaKey, "update_collection", { collectionId: marathonId, name: "Should not stick", order: [haloGame.title] });
+  const takenName = await tool(danaKey, "update_collection", { collectionId: marathonId, name: `Taken ${run}` });
+  const [marathonRow] = await db.select().from(schema.collections).where(eq(schema.collections.id, marathonId));
+  check(
+    "an order naming a game that isn't in it changes nothing, and a taken name is refused",
+    holeInOrder.isError && holeInOrder.text.includes("Nothing was changed") && takenName.isError && marathonRow?.name === `Retro marathon ${run}`,
+    { hole: holeInOrder.text, taken: takenName.text },
+  );
+  const removedGames = await tool(danaKey, "remove_games_from_collection", { collectionId: marathonId, games: [kirbyGame.title, haloGame.title] });
+  const nodesLeft = await db
+    .select()
+    .from(schema.collectionGraphNodes)
+    .innerJoin(schema.collectionGraphs, eq(schema.collectionGraphs.id, schema.collectionGraphNodes.graphId))
+    .where(eq(schema.collectionGraphs.collectionId, marathonId));
+  check(
+    "remove_games_from_collection takes a game off the list and its graph, and says which weren't in it",
+    removedGames.data?.removed === 1 && removedGames.data.notFound.length === 1 && removedGames.data.gamesInCollection === 3 && nodesLeft.length === 3 && (await danaEntry(dKirby.id)) !== undefined,
+    removedGames.data ?? removedGames.text,
+  );
+  const partialDelete = await tool(danaKey, "delete_collection", { collectionName: "Retro", confirm: true });
+  const colPreview = await tool(danaKey, "delete_collection", { collectionName: `retro marathon ${run}` });
+  check(
+    "delete_collection needs the exact name, and without confirm only previews",
+    partialDelete.isError && colPreview.data?.deleted === false && colPreview.data.games === 3 && colPreview.data.graphs[0] === "Play order" &&
+      (await db.select().from(schema.collections).where(eq(schema.collections.id, marathonId))).length === 1,
+    { partial: partialDelete.text, preview: colPreview.data ?? colPreview.text },
+  );
+  const colGone = await tool(danaKey, "delete_collection", { collectionId: marathonId, confirm: true });
+  check(
+    "with confirm the collection goes, and its games stay in the library",
+    colGone.data?.deleted === true && (await db.select().from(schema.collections).where(eq(schema.collections.id, marathonId))).length === 0 && (await danaEntry(dMetroid.id)) !== undefined,
+    colGone.data ?? colGone.text,
+  );
+  const bobsColEdit = await tool(danaKey, "update_collection", { collectionId: bobCollection, name: "mine now" });
+  const bobsColDelete = await tool(danaKey, "delete_collection", { collectionId: bobCollection, confirm: true });
+  check(
+    "dana can't rename or delete bob's collection",
+    bobsColEdit.isError && bobsColDelete.isError && (await db.select().from(schema.collections).where(eq(schema.collections.id, bobCollection))).length === 1,
+    { edit: bobsColEdit.text, del: bobsColDelete.text },
+  );
+
+  console.log("\nEdits: time to beat as given");
+  const bonelab = await tool(danaKey, "set_time_to_beat", { game: dBonelab.id, mainHours: 6, completionistHours: 14 });
+  check(
+    "two figures in order stay in the fields given — Bonelab's 14h completionist isn't moved to main + extras",
+    bonelab.data?.yourTimeToBeatHours?.main === 6 &&
+      bonelab.data.yourTimeToBeatHours.mainExtra === null &&
+      bonelab.data.yourTimeToBeatHours.completionist === 14 &&
+      bonelab.data.source === "yours" &&
+      bonelab.data.catalogTimeToBeatHours?.main === 5 &&
+      !bonelab.data.reordered,
+    bonelab.data ?? bonelab.text,
+  );
+  const outOfOrder = await tool(danaKey, "set_time_to_beat", { game: dBonelab.id, mainHours: 20, mainExtraHours: 10 });
+  check(
+    "figures out of order are still sorted, and the result says so",
+    outOfOrder.data?.reordered === true && outOfOrder.data.reorderNote?.includes("sorted") && outOfOrder.data.yourTimeToBeatHours.main === 10,
+    outOfOrder.data ?? outOfOrder.text,
+  );
+  const bonelabCleared = await tool(danaKey, "set_time_to_beat", { game: dBonelab.id, mainHours: null, mainExtraHours: null, completionistHours: null });
+  check(
+    "clearing reports where the figure comes from now, and IGDB's figure, as a set does",
+    bonelabCleared.data?.cleared === true && bonelabCleared.data.source === "igdb" && bonelabCleared.data.catalogTimeToBeatHours?.main === 5,
+    bonelabCleared.data ?? bonelabCleared.text,
+  );
+  const yoursOnly = await tool(danaKey, "list_library", { timeToBeatSource: "yours" });
+  check("…and list_library no longer counts it as the user's own figure", yoursOnly.data.total === 0, yoursOnly.data.total);
+
+  const untouchedAlice = await tool(aliceKey, "list_library");
+  check("none of dana's changes reached alice's library", untouchedAlice.data.total === 7, untouchedAlice.data.total);
+
   console.log("\nWrites: limits and logging");
   const batch = await app.inject({
     method: "POST",
@@ -1505,6 +2109,16 @@ try {
     WRITE_TOOLS.every((name) => loggedTools.has(name)) &&
       !writeEvents.some((e) => JSON.stringify(e.meta).includes(run)),
     { tools: [...loggedTools], sample: writeEvents.slice(0, 3).map((e) => e.meta) },
+  );
+  const danaEvents = await db
+    .select()
+    .from(schema.analyticsEvents)
+    .where(and(eq(schema.analyticsEvents.userId, dana.id), eq(schema.analyticsEvents.type, "mcp_write")));
+  const danaTools = new Set(danaEvents.map((e) => (e.meta as { tool?: string } | null)?.tool));
+  check(
+    "…and so does every edit and delete tool, never with a title",
+    EDIT_TOOLS.every((name) => danaTools.has(name)) && !danaEvents.some((e) => JSON.stringify(e.meta).includes(run)),
+    { missing: EDIT_TOOLS.filter((name) => !danaTools.has(name)), sample: danaEvents.slice(0, 3).map((e) => e.meta) },
   );
 
   console.log("\nRevoking");

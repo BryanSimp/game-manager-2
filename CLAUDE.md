@@ -219,11 +219,16 @@ Phase 0–8 roadmap — read it before making design decisions.
   own entry). The row is **directional**: `game_id` is the base and
   `related_game_id` is what hangs off it, with `kind` saying what the related
   game is *to* the base. **Kinds and roles are two different things.** There
-  are three stored kinds — `dlc`, `sequel`, `remake` (which covers remasters;
-  0027 folded `remaster` into it) — and six *roles*, which are a kind read from
-  one end (`GAME_LINK_ROLES`/`GAME_LINK_ROLE_META` in shared constants): the
-  base game sees `dlc`/`sequel`/`remake`, the related game sees
-  `base_game`/`prequel`/`original`. **There is no `prequel` kind on purpose**:
+  are four stored kinds — `dlc`, `sequel`, `remake` (which covers remasters;
+  0027 folded `remaster` into it) and `compilation` (phase 34: the base is a
+  collection or bundle, the related game one of the games in it) — and eight
+  *roles*, which are a kind read from one end
+  (`GAME_LINK_ROLES`/`GAME_LINK_ROLE_META` in shared constants): the base
+  game sees `dlc`/`sequel`/`remake`/`contains`, the related game sees
+  `base_game`/`prequel`/`original`/`included_in`. `kind` is text, so a kind
+  needs no migration — only its two roles. Before `compilation`, The Master
+  Chief Collection was "DLC" of Halo 3's and a two-game bundle was a "remake"
+  of the game in it. **There is no `prequel` kind on purpose**:
   "A is the prequel to B" is the same fact as "B is the sequel to A", and
   storing it once is what makes a link show on both games without the two
   pages ever disagreeing. The UI and the API only speak roles — `POST
@@ -332,7 +337,7 @@ Phase 0–8 roadmap — read it before making design decisions.
   request builds a fresh `McpServer` whose tools are closed over the caller,
   so there are no MCP sessions to mix up between users; GET/DELETE are a 405.
   The credential that reaches the route works nowhere else, so what it can
-  change is exactly the nine write tools (below) and nothing more. The tools
+  change is exactly the write tools (below) and nothing more. The tools
   (`services/mcp-tools.ts`) read through the *same* loaders the web routes
   use — `loadLibraryEntries`/`loadEntryProgress` (`routes/library.ts`),
   `loadDashboard`, `loadCollections`/`loadCollectionDetail`,
@@ -349,10 +354,9 @@ Phase 0–8 roadmap — read it before making design decisions.
   write tools — `create_tag`, `tag_games`, `untag_games`,
   `create_collection`, `add_games_to_collection`, `create_checklist`
   (phase 31), `tick_checklist_items` (phase 32), `link_games`,
-  `set_time_to_beat` — and a deliberate list of what's *not* there: no
-  deleting, no renaming or deleting tags, collections or checklists, no
-  editing, reordering or removing checklist items, no category, rating,
-  notes, platform or date changes, no publishing, nothing on the account. **Writes are a second grant**, asked for when the credential is
+  `set_time_to_beat` — all additive. Phase 34 added the ones that change
+  and remove (next item); still not there: publishing, and anything on the
+  account. **Writes are a second grant**, asked for when the credential is
   made: an API key's `permissions` (`{ library: ["read", "write"] }`, set
   only by `routes/api-keys.ts` from the card's "Allow changes" box) or an
   OAuth token carrying `library:write`. `McpCaller.canWrite` holds the
@@ -379,6 +383,49 @@ Phase 0–8 roadmap — read it before making design decisions.
   (`WRITES_PER_REQUEST`), because the SDK accepts a 100-message JSON-RPC
   batch and `mcpRateLimit` counts requests. Each write logs `mcp_write`
   with the tool name and counts, never titles.
+- **Claude can fix and remove, too** (phase 34, `services/mcp-edit-tools.ts`).
+  Twelve tools, on the same "Allow changes" grant — no new scope, since a
+  connector that may tag a game may as well untag a mistake: `update_game`
+  (category, rating, started/finished dates, notes, 100%, endless,
+  platforms with `add`/`replace`/`remove`), `update_games` (the bulk bar:
+  category, endless, 100% across up to 100 games), `delete_game`,
+  `update_tag`, `delete_tags` (by name or by group), `unlink_games`,
+  `update_checklist` (title, kind, sequential, source),
+  `edit_checklist_items` (edit/remove/reorder by number, atomically),
+  `delete_checklist`, `update_collection` (name, description, colour,
+  order), `remove_games_from_collection` and `delete_collection`. Plus one
+  read, `list_tags`. **A delete previews unless confirmed**: the four
+  `delete_*` tools answer a call without `confirm: true` with what *would*
+  go — and for `delete_game`, what stays because it belongs to the game
+  rather than the entry (checklists, links, collections, your play time) —
+  and change nothing, so the model can put it in front of the user first.
+  `delete_collection` takes the exact name or the id, never the partial
+  match the read tools allow. They're annotated `destructiveHint: true`
+  (the additive nine stay `false`), so a client can ask before each one.
+  **Same services as the routes**, again: `services/library-entries.ts` is
+  new (`updateLibraryEntry`, `updateLibraryEntries`, `setEntryPlatforms`,
+  `deleteLibraryEntry`) and `PATCH /api/library/:id`, the bulk-update,
+  platforms and delete routes all call it; tags, collections, checklists
+  and links gained `updateTag`/`deleteTag`, `updateCollection`/
+  `removeGamesFromCollection`/`orderCollection`/`deleteCollection`,
+  `updateChecklist`/`editChecklistEntries`/`deleteChecklist` and
+  `unlinkGames`, which their routes call where one exists. **Dates are
+  editable now** — `startedAt`/`finishedAt` were only ever stamped, so a
+  stamp that was wrong (or a game finished before it was added) stayed
+  wrong. A finish date before the start date is refused *when the update
+  sets a date*, not otherwise, so an entry that already has them inverted
+  can still be rated; the tool says so when it sees one. Dates are stored
+  at noon UTC so the day reads back the same everywhere, and nothing after
+  tomorrow (UTC) is accepted. A date given in the same update beats the
+  first-transition stamp. Platforms are named ("GBA", "Game Boy
+  Advance", "Steam"): full name first, then abbreviation, and two
+  platforms answering to one name is an error rather than a guess.
+  **`list_library` pages and filters** (`offset`/`nextOffset`, `fields`,
+  `category` as a list, `hasTags`, `missingTagGroup`, `hasTimeToBeat`,
+  `timeToBeatSource`, `hasChecklist`, `hasPlatform`, `endless`): a
+  594-game library didn't fit in one 500-row page, and full rows ran to
+  ~190k characters. Every sort ends on title then id, so pages can't
+  overlap or skip.
 - **API keys are better-auth's api-key plugin** (`@better-auth/api-key`,
   table `api_key`, migration 0030), but the browser never talks to the plugin:
   `routes/api-keys.ts` wraps it (create calls `auth.api.createApiKey`
@@ -534,6 +581,7 @@ was dev-only). Never use `db push`.
 | 31 checklists over MCP | see git log | **`create_checklist`**, the eighth write tool: a progress list for a game in your library — `main_story` (the one timed list the Progress tab divides time to beat across, optionally `sequential`) or `extra` (default) — with items as strings or `{ text, chapter }`, up to 500 per call. Always private. Same title (ignoring case) appends to that list, skipping entries it already has, so a repeat adds nothing; a second main story list is refused naming the first. List creation and entry appends moved out of `routes/checklists.ts` into `services/checklists.ts` (`createChecklist`, `addChecklistEntries`, `mainListOf`), which the three create routes now call — creating a list and its entries is one transaction now, and the add-entry route refuses a blank entry instead of storing it. `check:mcp` grew to 137: the item schema's two shapes, order and chapters, private-under-`always`, the progress estimate picking it up, repeat/append/occurrence counting, the main-story refusal, cross-user isolation, the content filter on create and append, and the web routes still behaving |
 | 32 ticking over MCP, Steam achievements | see git log | **`tick_checklist_items`**, the ninth write tool: tick (or with `done: false`, untick) items on one of your checklists for a game in your library, named by exact text (`titleKey`, optionally `{ text, chapter }`) and/or 1-based number, plus `steamAchievements` to tick every item named exactly like an achievement you've unlocked. Nothing is guessed — a text matching no item, or several, comes back in `notFound` with item numbers. A sequential main story list fills in the items before the furthest one, as the Progress tab does; unticking clears only what was named. The result has the list's done/total and the game's progress percent and hours remaining (`loadEntryProgress`). Two read tools to go with it: **`get_checklist`** (a list item by item, numbered) and **`get_achievements`** (a game's synced Steam achievements, unlocked newest first); `get_game` gained achievement counts. Ticking moved out of both `PUT …/items/check` routes into `services/checklists.ts` (`setChecklistItemsDone`, `setChecklistItemDone`, `loadChecklistItems`, `throughLastTarget`), and the achievements query out of its route into `loadAchievements`. The consent page's write line now mentions ticking. `check:mcp` grew to 163: the read-only refusal, text/number/chapter ticks, duplicate and near-miss misses, sequential fill-in, untick of one item, Steam matching, progress moving in `get_game`, cross-user isolation and the routes still behaving |
 | 33 your time to beat overrides IGDB's | see git log | **Your own play time wins, for you.** `resolveTtb` is yours → catalog → community now (it was catalog → yours → community, so a figure you typed for a game IGDB knows saved and then never showed). `resolveTtbFor` looks your submissions up for every game and only averages the ones left blank. The game page's card says **Override ✎** when IGDB's figure is showing, and once yours is, keeps "IGDB says …" beneath it — `GET /api/games/:gameId/community` gained `catalog` for that — with clearing every field going back to IGDB's; mobile's card does the same. Everyone else still sees IGDB's figure. The MCP `set_time_to_beat` tool says it overrides IGDB's and returns `catalogTimeToBeatHours` beside what it stored. No migration. The "Players say" line is left out when your own figure is the only submission, since that average is just yours again. `check:mcp` grew to 168: the override reaching `get_game`, the progress estimate, collection hours and the community route, bob still seeing IGDB's, and clearing going back |
+| 34 Claude can fix things | see git log | **The MCP server can change and remove, not just add** — every wall a real session tidying a 594-game library hit. Twelve write tools on the existing "Allow changes" grant (`services/mcp-edit-tools.ts`): `update_game` (category, rating, dates, notes, 100%, endless, platforms), `update_games` (bulk category/endless/100%), `delete_game`, `update_tag`, `delete_tags`, `unlink_games`, `update_checklist`, `edit_checklist_items`, `delete_checklist`, `update_collection`, `remove_games_from_collection`, `delete_collection`; and `list_tags`. Deletes preview unless `confirm: true`. `list_library` pages (`offset`/`nextOffset`), trims rows (`fields`) and finds what's missing (`missingTagGroup`, `hasTimeToBeat`, `hasChecklist`, `hasPlatform`, `endless`…). A **`compilation`** link kind (`contains`/`included_in`) for bundles, on the web Linked tab's menu too. Checklists record a **`source`** (migration 0032, shown under the list on the web). Your own time to beat keeps each figure in the field you typed it in unless they're out of order (`orderOwnTtb`) — "6h main, 14h completionist" no longer becomes main + extras — and `set_time_to_beat` reports `source` and `reordered`. The route logic moved into services (`library-entries.ts` is new), so `PATCH /api/library/:id` takes dates now, and renaming a tag onto a taken name is a 409 rather than a 500. The consent page's "Allow changes" line says it can delete. `check:mcp` grew to 237 |
 | 29b claude.ai over OAuth | see git log | **claude.ai's custom connector can sign in.** better-auth's OAuth 2.1 provider (migration 0031) with dynamic client registration fenced by a redirect-URI allowlist, opaque `gmat_`/`gmrt_` tokens hashed with our own function, and discovery at `/.well-known/oauth-protected-resource` + `oauth-authorization-server` (new Traefik router, nginx `location`, Vite proxy). `/api/mcp` takes an API key *or* an access token granted `library:read`, and a 401 carries `WWW-Authenticate: Bearer resource_metadata=…`. The existing login page continues the flow (two-factor included); `/oauth/consent` asks Allow/Deny; Preferences → API keys lists connected apps and disconnects them. `check:mcp` grew to 71 checks: discovery, registration allowlist, a 2FA account's sign-in, consent/deny, PKCE token exchange, refresh, insufficient scope, disconnect |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
@@ -571,22 +619,55 @@ file to be provided for reference).
 - **The write tools haven't met a real Claude yet.** `check:mcp` drives
   every one in-process, but what a model does with them — whether it reads
   `notFound` and retries with the ids it's offered, whether it asks before
-  a big `tag_games` — is only knowable by using it.
+  a big `tag_games`, whether it really shows a delete's preview to the user
+  before sending `confirm: true` — is only knowable by using it. The
+  phase 34 tools were shaped by a real session's failures, but they're
+  untested against one.
+- **The delete preview is a convention, not a lock.** Nothing stops a
+  model calling `delete_*` with `confirm: true` first time; what stops
+  a surprise is the tool description, the server instructions,
+  `destructiveHint` (claude.ai can ask the user before such a call) and
+  the user's own "Allow changes" opt-in. A server-issued confirmation
+  token would make the preview mandatory, at the cost of a second
+  round trip on every delete and state to keep between requests on a
+  server that's otherwise stateless.
+- **No `merge_games`.** The duplicate the session found (two "Ocarina of
+  Time" entries, one empty) is `delete_game` on the empty one. A merge —
+  carrying tags, platforms, dates, checklists, collection places and links
+  from one catalog game to another — is a much bigger write with conflicts
+  (two main story lists, two collection slots) for a case that's rare.
+- **Dates can be edited only over MCP and the raw PATCH.** `PATCH
+  /api/library/:id` takes `startedAt`/`finishedAt` since phase 34, but no
+  web or mobile screen has a date field yet; the app still only stamps
+  them on the first move to Playing or Finished.
+- **A checklist's `source` is web-visible, mobile-invisible.** The
+  Progress tab shows it under the list (a link when it's an http(s) URL,
+  the words otherwise); mobile's read-only lists don't show it. It's
+  separate from the legacy `source_url`, which the web labels CC-BY-SA —
+  true of the scraped Fandom pages, not of whatever a model names.
 - **"Allow changes" can't be added to an existing key or connection.** A
   key's grant is fixed when it's made (there's no update route), and an
   OAuth client registered before phase 30 can't ask for `library:write`.
   The fix in both cases is a new one: a new key, or removing and re-adding
   the connector. Deliberate — an upgrade-in-place is exactly the "writes by
   surprise" path the opt-in exists to rule out.
-- **`set_time_to_beat` follows `normalizeTtb` to the letter**, including
-  its two-figure rule: main + completionist, with nothing in between, is
-  stored as main + main-extras. That's the route's behaviour and the tool
-  description says so (and to give all three); changing it would change
-  the web form too.
-- **MCP write tools can add games to a published collection.** Adding a
-  game is something the web app allows on a public collection too, and
-  game titles aren't user text, so nothing is filtered. Making one public
-  is still web-only.
+- **Your own time to beat stays in the fields you put it in** (phase 34,
+  `orderOwnTtb` in `services/time-to-beat.ts`). It used to go through
+  `normalizeTtb`, whose two-figure rule turned "main 6, completionist 14"
+  into main + main-extras — Bonelab's completionist figure silently became
+  its main + extras. Now figures already in order (main ≤ main + extras ≤
+  completionist, blanks skipped) are stored as given, for the web form and
+  the tool alike, and only out-of-order ones are sorted, which
+  `set_time_to_beat` reports as `reordered`. IGDB's ingest still
+  normalises: a two-figure pair from IGDB *is* main + main-extras. A user
+  figure with a blank main + extras means the `main_extra` progress basis
+  falls back to the main story, as `ttbForBasis` always did.
+- **MCP write tools can change a published collection or list.** Adding,
+  removing and reordering games, and renaming or redescribing it, are all
+  things the web app allows on a public collection too; names and
+  descriptions go through the content filter as on the web, game titles
+  aren't user text. The result says the change is public. Making one
+  public is still web-only.
 - **`create_checklist` is find-or-create by title**, like
   `create_collection` by name: a list for that game with the same title
   (ignoring case; the first in the Progress tab's order if there are
@@ -609,8 +690,12 @@ file to be provided for reference).
   UI: the Progress tab only draws the switch on the main story list, while
   the tick logic honours the flag on any list, so a sequential extra would
   auto-fill with no visible control to stop it. `createChecklist` drops the
-  flag for extras (the tool says it did); `PATCH /api/checklists/:id` still
-  accepts it on any list, as it always has.
+  flag for extras (the tool says it did), `updateChecklist` refuses it on
+  one and clears it when a main story list becomes an extra;
+  `PATCH /api/checklists/:id` still accepts it on any list, as it always
+  has. A list's **kind** can change only over MCP (`update_checklist`): the
+  web app has no control for it, and making a list the main story is
+  refused while the game has another.
 - **Claude ticks what you tell it you've done** (phase 32,
   `tick_checklist_items`). Phase 31 left ticking out because a model that
   ticks items is a model deciding what you've played; the answer is that
@@ -625,9 +710,18 @@ file to be provided for reference).
   `steamAchievements`: items whose text is exactly an unlocked
   achievement's name, which is Steam's word rather than the model's. It
   rides on the same "Allow changes" grant as every other write — no new
-  scope — because a tick is as reversible as a tag. Still no editing,
-  reordering or removing entries over MCP: a wrong entry is one click on
-  the Progress tab's edit mode.
+  scope — because a tick is as reversible as a tag. Editing, reordering and
+  removing entries came in phase 34 (`edit_checklist_items`), by number
+  only — never by text — so "the second Mask Shard" is always the one the
+  model read off `get_checklist`.
+- **`edit_checklist_items` numbers mean the list before the call.** Edits,
+  removes and the new order all name items by their numbers as
+  `get_checklist` showed them, are checked together, and apply in one
+  transaction or not at all — a stray number means the model is working
+  from a stale copy, so nothing is half-applied. `order` takes the
+  collection-order rule (named items first, the rest after in their
+  order), and positions are rewritten 0..n−1, which also tidies the gaps
+  the web app's swap-two-positions reorder relies on being distinct.
 - **Items are numbered from 1 in the Progress tab's order** — position,
   then text, `loadChecklistItems` — by both `get_checklist` and
   `tick_checklist_items`, so "item 12" is the twelfth row on screen.
@@ -694,8 +788,10 @@ file to be provided for reference).
   catalog page too: clicking a DLC you linked but don't own lands there, and a
   link that only showed on games you own would only show half of itself. The
   four roles you add (`primary` in the meta) are always drawn, empty or not;
-  `base_game` and `original` only appear once filled, since most games are
-  neither DLC nor a remake — both are still in the add menu. The link type is
+  `base_game`, `original` and `included_in` only appear once filled, since
+  most games are neither DLC, a remake nor part of a compilation, and
+  `contains` likewise, since almost no game *is* one — all four are still
+  in the add menu, the last under its own "for a compilation" heading. The link type is
   chosen from a menu ("＋ Add a link ▾"), then the picker takes any number of
   games without reopening, and marks results already linked with the section
   they're under (matched by catalog id *and* IGDB id, so a result can be
@@ -803,13 +899,14 @@ file to be provided for reference).
   rearranging one graph can't scramble another, or a numbered run you set by
   hand. Migration 0016 backfilled `sort_order` from the layout of the day
   (top-to-bottom, left-to-right) so "Custom order" didn't open as a jumble.
-- **A collection's name is the only thing about it you can edit.**
+- **A collection's name is the only thing about it the apps can edit.**
   `description` and `accent_color` are real columns the API reads and writes
   — the cards show a description when there is one, and the list view takes
   its accent from the colour — but no form in either app sets them, at
-  creation or after. Rename landed alone (phase 27b) because it was the one
-  asked for; an edit form that covers all three is the obvious shape if the
-  other two are ever wanted. Collection names are unique per user *exactly*,
+  creation or after; only the MCP tools do (`create_collection`,
+  `update_collection`). Rename landed alone (phase 27b) because it was the
+  one asked for; an edit form that covers all three is the obvious shape if
+  the other two are ever wanted in the apps. Collection names are unique per user *exactly*,
   not case-insensitively like graph names: "zelda" beside "Zelda" is allowed.
 - **A new graph starts as a grid in list order, or as a copy.** That's the
   one moment the list order reaches a graph: `POST …/graphs` lays the games

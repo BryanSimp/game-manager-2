@@ -136,6 +136,7 @@ async function summarize(
     title: t.title,
     kind: t.kind,
     sourceUrl: t.sourceUrl,
+    source: t.source,
     sequential: t.sequential,
     isPublic: t.isPublic,
     position: t.position,
@@ -328,6 +329,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       title: tpl.title,
       kind: tpl.kind,
       sourceUrl: tpl.sourceUrl,
+      source: tpl.source,
       sequential: tpl.sequential,
       isPublic: tpl.isPublic,
       mine: tpl.authorUserId === user.id,
@@ -364,7 +366,11 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
         .select({ text: schema.checklistItems.text, category: schema.checklistItems.category })
         .from(schema.checklistItems)
         .where(eq(schema.checklistItems.templateId, tpl.id));
-      const texts = [parsed.data.title ?? tpl.title, ...items.flatMap((i) => [i.text, i.category])];
+      const texts = [
+        parsed.data.title ?? tpl.title,
+        tpl.source,
+        ...items.flatMap((i) => [i.text, i.category]),
+      ];
       if (await rejectBadContent(reply, user.id, texts)) return;
     } else if (await rejectBadContent(reply, user.id, [parsed.data.title])) {
       return;
@@ -423,8 +429,10 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
         authorUserId: user.id,
         title: tpl.title,
         kind: tpl.kind,
-        // a scraped list's CC-BY-SA attribution travels with the copy
+        // a scraped list's CC-BY-SA attribution travels with the copy, and
+        // so does whatever source its author named
         sourceUrl: tpl.sourceUrl,
+        source: tpl.source,
         sequential: tpl.sequential,
         // A copy always starts private — publishing someone else's work is
         // their call, not yours. "Publish automatically" does not reach here

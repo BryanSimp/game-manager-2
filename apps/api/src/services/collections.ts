@@ -1,11 +1,11 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { COLLECTION_NAME_MAX, DEFAULT_COLLECTION_GRAPH_NAME } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { logEvent } from "./analytics.js";
 import { inspectAll } from "./content-filter.js";
 import { publishModeFor } from "./preferences.js";
-import { ServiceError } from "./service-error.js";
+import { ServiceError, isUniqueViolation } from "./service-error.js";
 
 /**
  * Making a collection and filling it — shared by the web routes
@@ -218,4 +218,174 @@ export async function addGamesToCollection(
     added.push(gameId);
   }
   return { collection, added, already, total: n };
+}
+
+/**
+ * Change a collection's name, description, colour or published state —
+ * `PATCH /api/collections/:id`, and the MCP `update_collection` tool (which
+ * never passes `isPublic`: publishing is a deliberate act in the app).
+ *
+ * "Never publish" is a guarantee rather than a default: both apps hide the
+ * control, and this refuses anything that asks anyway. Unpublishing is never
+ * refused — the setting governs what goes out, not what comes back.
+ *
+ * Publishing re-checks the whole collection, not just the fields given: a
+ * collection written before the filter existed would otherwise walk straight
+ * into the public list on an isPublic-only update. Graph names are part of
+ * "the whole collection" — they're the tabs a visitor reads.
+ */
+export async function updateCollection(userId: string, collectionId: string, input: unknown): Promise<Collection> {
+  const parsed = collectionSchema.partial().safeParse(input);
+  if (!parsed.success) {
+    throw new ServiceError(400, parsed.error.issues[0]?.message ?? "Invalid collection");
+  }
+  const existing = await ownedCollection(userId, collectionId);
+  if (!existing) throw new ServiceError(404, "Collection not found");
+
+  if (parsed.data.isPublic === true && (await publishModeFor(userId)) === "never") {
+    throw new ServiceError(403, "Publishing is turned off in your preferences");
+  }
+  const toCheck =
+    parsed.data.isPublic === true
+      ? [
+          parsed.data.name ?? existing.name,
+          parsed.data.description ?? existing.description,
+          ...(await graphsOf(existing.id)).map((g) => g.name),
+        ]
+      : [parsed.data.name, parsed.data.description];
+  const issue = inspectAll(toCheck);
+  if (issue) {
+    logEvent("content_blocked", userId, { surface: "collection", kind: issue.kind });
+    throw new ServiceError(400, issue.message);
+  }
+  if (Object.keys(parsed.data).length === 0) return existing;
+
+  try {
+    const [updated] = await db
+      .update(schema.collections)
+      .set(parsed.data)
+      .where(and(eq(schema.collections.id, existing.id), eq(schema.collections.userId, userId)))
+      .returning();
+    if (!updated) throw new ServiceError(404, "Collection not found");
+    return updated;
+  } catch (err) {
+    // (user_id, name) is unique, so renaming onto a name you already use is
+    // a 409 like it is on create — not the raw 500 it used to be
+    if (isUniqueViolation(err)) throw new ServiceError(409, "You already have a collection with that name");
+    throw err;
+  }
+}
+
+/**
+ * Take games out of one of the user's collections: off the flat list, off
+ * every graph, and any arrow that touched them. `removed` and `notIn` are
+ * catalog ids, so a caller can say which were never there.
+ */
+export async function removeGamesFromCollection(
+  userId: string,
+  collectionId: string,
+  gameIds: string[],
+): Promise<{ collection: Collection; removed: string[]; notIn: string[]; total: number }> {
+  const collection = await ownedCollection(userId, collectionId);
+  if (!collection) throw new ServiceError(404, "Collection not found");
+  const wanted = [...new Set(gameIds)];
+  if (wanted.length === 0) {
+    const [row] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.collectionGames)
+      .where(eq(schema.collectionGames.collectionId, collection.id));
+    return { collection, removed: [], notIn: [], total: row?.n ?? 0 };
+  }
+
+  const removed = await db.transaction(async (tx) => {
+    const rows = await tx
+      .delete(schema.collectionGames)
+      .where(and(eq(schema.collectionGames.collectionId, collection.id), inArray(schema.collectionGames.gameId, wanted)))
+      .returning({ gameId: schema.collectionGames.gameId });
+    const graphIds = (
+      await tx
+        .select({ id: schema.collectionGraphs.id })
+        .from(schema.collectionGraphs)
+        .where(eq(schema.collectionGraphs.collectionId, collection.id))
+    ).map((g) => g.id);
+    if (graphIds.length > 0) {
+      await tx
+        .delete(schema.collectionGraphNodes)
+        .where(
+          and(
+            inArray(schema.collectionGraphNodes.graphId, graphIds),
+            inArray(schema.collectionGraphNodes.gameId, wanted),
+          ),
+        );
+    }
+    await tx
+      .delete(schema.collectionLinks)
+      .where(
+        and(
+          eq(schema.collectionLinks.collectionId, collection.id),
+          or(inArray(schema.collectionLinks.fromGameId, wanted), inArray(schema.collectionLinks.toGameId, wanted)),
+        ),
+      );
+    return rows.map((r) => r.gameId);
+  });
+  const gone = new Set(removed);
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.collectionGames)
+    .where(eq(schema.collectionGames.collectionId, collection.id));
+  return { collection, removed, notIn: wanted.filter((id) => !gone.has(id)), total: row?.n ?? 0 };
+}
+
+/**
+ * Set the flat list order. Independent of the graphs: the list view is for
+ * "1, 2, 3…" and a graph is for branches, and people want both.
+ *
+ * Ids not in the collection are ignored, and anything the caller left out
+ * keeps its place after the ones it named, so a stale client can't silently
+ * drop a game that was added from another device. `ordered` is how many
+ * games the collection holds.
+ */
+export async function orderCollection(
+  userId: string,
+  collectionId: string,
+  gameIds: string[],
+): Promise<{ collection: Collection; ordered: number }> {
+  const collection = await ownedCollection(userId, collectionId);
+  if (!collection) throw new ServiceError(404, "Collection not found");
+
+  const existing = await db
+    .select({ gameId: schema.collectionGames.gameId })
+    .from(schema.collectionGames)
+    .where(eq(schema.collectionGames.collectionId, collection.id))
+    .orderBy(asc(schema.collectionGames.sortOrder));
+  const known = new Set(existing.map((e) => e.gameId));
+  const ordered = [...new Set(gameIds)].filter((gameId) => known.has(gameId));
+  const seen = new Set(ordered);
+  const rest = existing.map((e) => e.gameId).filter((gameId) => !seen.has(gameId));
+
+  await db.transaction(async (tx) => {
+    let position = 0;
+    for (const gameId of [...ordered, ...rest]) {
+      position += 1;
+      await tx
+        .update(schema.collectionGames)
+        .set({ sortOrder: position })
+        .where(and(eq(schema.collectionGames.collectionId, collection.id), eq(schema.collectionGames.gameId, gameId)));
+    }
+  });
+  return { collection, ordered: existing.length };
+}
+
+/**
+ * Delete one of the user's collections, with its graphs and arrows. The
+ * games stay in the catalog and in the library; copies other people adopted
+ * are theirs and stay too (their provenance link is set to null).
+ */
+export async function deleteCollection(userId: string, collectionId: string): Promise<Collection> {
+  const collection = await ownedCollection(userId, collectionId);
+  if (!collection) throw new ServiceError(404, "Collection not found");
+  await db
+    .delete(schema.collections)
+    .where(and(eq(schema.collections.id, collection.id), eq(schema.collections.userId, userId)));
+  return collection;
 }

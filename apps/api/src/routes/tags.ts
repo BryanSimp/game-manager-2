@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { requireUser } from "../plugins/auth.js";
 import { replyWithServiceError } from "../services/service-error.js";
-import { createTag, ownedTagIds, tagSchema } from "../services/tags.js";
+import { createTag, deleteTag, ownedTagIds, updateTag } from "../services/tags.js";
 
 const setTagsSchema = z.object({
   tagIds: z.array(z.string().uuid()).max(100),
@@ -36,32 +36,22 @@ export function registerTagRoutes(app: FastifyInstance): void {
   app.patch<{ Params: { id: string } }>("/api/tags/:id", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const parsed = tagSchema.partial().safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+    try {
+      return await updateTag(user.id, request.params.id, request.body);
+    } catch (err) {
+      return replyWithServiceError(reply, err);
     }
-    const patch: Record<string, unknown> = {};
-    if (parsed.data.name !== undefined) patch.name = parsed.data.name.trim();
-    if (parsed.data.color !== undefined) patch.color = parsed.data.color;
-    if (parsed.data.groupName !== undefined) patch.groupName = parsed.data.groupName?.trim() || null;
-    const updated = await db
-      .update(schema.tags)
-      .set(patch)
-      .where(and(eq(schema.tags.id, request.params.id), eq(schema.tags.userId, user.id)))
-      .returning();
-    if (updated.length === 0) return reply.status(404).send({ message: "Tag not found" });
-    return updated[0];
   });
 
   app.delete<{ Params: { id: string } }>("/api/tags/:id", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const deleted = await db
-      .delete(schema.tags)
-      .where(and(eq(schema.tags.id, request.params.id), eq(schema.tags.userId, user.id)))
-      .returning({ id: schema.tags.id });
-    if (deleted.length === 0) return reply.status(404).send({ message: "Tag not found" });
-    return { ok: true };
+    try {
+      await deleteTag(user.id, request.params.id);
+      return { ok: true };
+    } catch (err) {
+      return replyWithServiceError(reply, err);
+    }
   });
 
   app.put<{ Params: { id: string } }>("/api/library/:id/tags", async (request, reply) => {

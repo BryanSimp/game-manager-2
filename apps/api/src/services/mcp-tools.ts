@@ -20,6 +20,7 @@ import {
   loadChecklistItems,
   setChecklistItemsDone,
   throughLastTarget,
+  updateChecklist,
   type ChecklistItemState,
   type ChecklistTemplate,
 } from "./checklists.js";
@@ -29,7 +30,7 @@ import {
   findCollectionByName,
   type Collection,
 } from "./collections.js";
-import { communityRatings } from "./community.js";
+import { communityRatings, resolveTtbFor } from "./community.js";
 import { linkGames } from "./game-links.js";
 import { igdbConfigured, searchIgdb } from "./igdb.js";
 import type { McpCaller } from "./mcp-auth.js";
@@ -64,11 +65,12 @@ import { loadAchievements } from "../routes/steam.js";
  * something to a UI (cover URLs, colours, sort positions) are left out. The
  * one id kept is a library entry's, because `get_game` takes it.
  *
- * The write tools at the bottom go through the same service functions the
+ * The write tools at the bottom — and the editing and deleting ones in
+ * `services/mcp-edit-tools.ts` — go through the same service functions the
  * web routes do (`services/tags.ts`, `collections.ts`, `checklists.ts`,
- * `game-links.ts`, `time-to-beat.ts`), so validation, ownership and the
- * content filter are the app's own, and each refuses unless the caller's
- * credential allows changes (`requireWrite`). Checklist items are numbered
+ * `game-links.ts`, `time-to-beat.ts`, `library-entries.ts`), so
+ * validation, ownership and the content filter are the app's own, and each
+ * refuses unless the caller's credential allows changes (`requireWrite`). Checklist items are numbered
  * the same way for reading (`get_checklist`) and ticking: from 1, in the
  * Progress tab's order (`loadChecklistItems`).
  */
@@ -77,13 +79,13 @@ import { loadAchievements } from "../routes/steam.js";
 export class McpToolError extends Error {}
 
 /** Seconds → hours, one decimal. Null stays null: unknown isn't zero. */
-function hours(seconds: number | null | undefined): number | null {
+export function hours(seconds: number | null | undefined): number | null {
   if (seconds == null) return null;
   return Math.round(seconds / 360) / 10;
 }
 
 /** A timestamp as a calendar date — the time of day a game was finished is noise. */
-function day(value: Date | string | null | undefined): string | null {
+export function day(value: Date | string | null | undefined): string | null {
   if (!value) return null;
   const date = typeof value === "string" ? new Date(value) : value;
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
@@ -95,7 +97,7 @@ function year(releaseDate: string | null | undefined): number | null {
   return Number.isFinite(y) && y > 0 ? y : null;
 }
 
-const fold = (s: string) => s.trim().toLowerCase();
+export const fold = (s: string) => s.trim().toLowerCase();
 
 /**
  * A title for comparing as "the same title": case, accents, trademark signs
@@ -103,7 +105,7 @@ const fold = (s: string) => s.trim().toLowerCase();
  * title of "Hollow Knight: Silksong" and "Pokemon" of "Pokémon". Letters in
  * any script survive (`\p{L}`), so a Japanese title isn't folded to nothing.
  */
-function titleKey(s: string): string {
+export function titleKey(s: string): string {
   return s
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
@@ -114,34 +116,35 @@ function titleKey(s: string): string {
     .trim();
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The library JSON types platforms and tags as unknown[] (they're built by
 // two small select()s in routes/library.ts); these are their real shapes.
-interface EntryPlatform {
+export interface EntryPlatform {
   name: string;
   abbreviation: string | null;
   parentName: string | null;
   format: "physical" | "digital";
 }
-interface EntryTag {
+export interface EntryTag {
   name: string;
+  groupName: string | null;
 }
 
-type Categories = Map<string, CategoryView>;
+export type Categories = Map<string, CategoryView>;
 
-async function categoriesFor(userId: string): Promise<Categories> {
+export async function categoriesFor(userId: string): Promise<Categories> {
   const list = await listCategories(userId);
   return new Map(list.map((c) => [c.key, c]));
 }
 
 /** A list's kind the way the Progress tab sorts them: the one main story list, then extras. */
-function listKindName(kind: ChecklistKind): "main story" | "extra" {
+export function listKindName(kind: ChecklistKind): "main story" | "extra" {
   return kind === MAIN_LIST_KIND ? "main story" : "extra";
 }
 
 /** A stored status as the name a person would use for it. */
-function categoryName(categories: Categories, key: string | null | undefined): string | null {
+export function categoryName(categories: Categories, key: string | null | undefined): string | null {
   if (!key) return null;
   return categories.get(key)?.label ?? "Uncategorized";
 }
@@ -151,7 +154,7 @@ function categoryName(categories: Categories, key: string | null | undefined): s
  * "Replay someday"). Unknown names are an error that lists the real ones, so
  * the model can correct itself instead of concluding the category is empty.
  */
-function resolveCategory(categories: Categories, input: string): CategoryView {
+export function resolveCategory(categories: Categories, input: string): CategoryView {
   const wanted = fold(input);
   for (const c of categories.values()) {
     if (c.key === input || fold(c.label) === wanted || fold(c.key) === wanted) return c;
@@ -181,7 +184,7 @@ function platformsOf(loaded: LoadedLibraryEntry) {
 }
 
 /** One library entry, compactly — the row `list_library` returns. */
-function compactEntry(loaded: LoadedLibraryEntry, categories: Categories) {
+export function compactEntry(loaded: LoadedLibraryEntry, categories: Categories) {
   const { entry, row } = loaded;
   const game = entry.game;
   const hasList = entry.missionsTotal > 0;
@@ -238,32 +241,102 @@ export async function toolListCategories(userId: string) {
 export const LIBRARY_SORTS = ["title", "rating", "recently_added", "shortest", "longest"] as const;
 export type LibrarySort = (typeof LIBRARY_SORTS)[number];
 
-export async function toolListLibrary(
-  userId: string,
-  args: {
-    category?: string;
-    platform?: string;
-    tag?: string;
-    search?: string;
-    sort?: LibrarySort;
-    limit?: number;
-  },
-) {
+/** The fields a `list_library` row can be cut down to; `id` and `title` always come. */
+export const LIBRARY_FIELDS = [
+  "releaseYear",
+  "category",
+  "rating",
+  "platforms",
+  "tags",
+  "startedAt",
+  "finishedAt",
+  "completed100",
+  "endless",
+  "steamHours",
+  "timeToBeatHours",
+  "progress",
+] as const;
+export type LibraryField = (typeof LIBRARY_FIELDS)[number];
+
+/** Where a game's time to beat comes from, as `timeToBeatHours.source` reports it. */
+export const TTB_SOURCES = ["yours", "igdb", "manual", "community"] as const;
+
+/** The most games one `list_library` page may hold. */
+export const LIBRARY_PAGE_MAX = 500;
+
+export interface ListLibraryArgs {
+  category?: string | string[];
+  platform?: string;
+  tag?: string;
+  search?: string;
+  hasTags?: boolean;
+  missingTagGroup?: string;
+  hasTimeToBeat?: boolean;
+  timeToBeatSource?: (typeof TTB_SOURCES)[number];
+  hasChecklist?: boolean;
+  hasPlatform?: boolean;
+  endless?: boolean;
+  sort?: LibrarySort;
+  offset?: number;
+  limit?: number;
+  fields?: LibraryField[];
+}
+
+/** The game ids the user keeps any checklist for — main story or extra. */
+async function gamesWithChecklists(userId: string): Promise<Set<string>> {
+  const rows = await db
+    .selectDistinct({ gameId: schema.checklistTemplates.gameId })
+    .from(schema.checklistTemplates)
+    .where(eq(schema.checklistTemplates.authorUserId, userId));
+  return new Set(rows.map((r) => r.gameId));
+}
+
+export async function toolListLibrary(userId: string, args: ListLibraryArgs) {
   const [loaded, categories] = await Promise.all([
     loadLibraryEntries(userId),
     categoriesFor(userId),
   ]);
-  const category = args.category ? resolveCategory(categories, args.category) : null;
+  const wantedCategories = (Array.isArray(args.category) ? args.category : args.category ? [args.category] : []).map(
+    (c) => resolveCategory(categories, c),
+  );
+  const categoryKeys = new Set(wantedCategories.map((c) => c.key));
   const search = args.search ? fold(args.search) : null;
   const tag = args.tag ? fold(args.tag) : null;
+  const group = args.missingTagGroup ? fold(args.missingTagGroup) : null;
+  const withLists = args.hasChecklist === undefined ? null : await gamesWithChecklists(userId);
+  const notes: string[] = [];
+  if (args.missingTagGroup) {
+    // a group nobody's tags are in matches every game, which reads as "the
+    // whole library is missing it" — say so, with the groups that do exist
+    const groups = await db
+      .selectDistinct({ groupName: schema.tags.groupName })
+      .from(schema.tags)
+      .where(eq(schema.tags.userId, userId));
+    const names = groups.map((g) => g.groupName).filter((g): g is string => !!g);
+    if (!names.some((g) => fold(g) === group)) {
+      notes.push(
+        `None of your tags is in a group called "${args.missingTagGroup}", so every game matches. Your tag groups: ${names.sort((a, b) => a.localeCompare(b)).join(", ") || "none"}.`,
+      );
+    }
+  }
 
   let matched = loaded.filter((l) => {
-    if (category && l.entry.status !== category.key) return false;
-    if (args.platform && !onPlatform(l.entry.platforms as EntryPlatform[], args.platform)) {
-      return false;
-    }
-    if (tag && !(l.entry.tags as EntryTag[]).some((t) => fold(t.name) === tag)) return false;
-    if (search && !fold(l.entry.game.title).includes(search)) return false;
+    const { entry } = l;
+    const tags = entry.tags as EntryTag[];
+    const platforms = entry.platforms as EntryPlatform[];
+    if (categoryKeys.size > 0 && !categoryKeys.has(entry.status)) return false;
+    if (args.platform && !onPlatform(platforms, args.platform)) return false;
+    if (tag && !tags.some((t) => fold(t.name) === tag)) return false;
+    if (search && !fold(entry.game.title).includes(search)) return false;
+    if (args.hasTags !== undefined && tags.length > 0 !== args.hasTags) return false;
+    if (group !== null && tags.some((t) => fold(t.groupName ?? "") === group)) return false;
+    if (args.hasPlatform !== undefined && platforms.length > 0 !== args.hasPlatform) return false;
+    if (args.endless !== undefined && !entry.ttbEnabled !== args.endless) return false;
+    const hasTtb =
+      entry.game.ttbMain !== null || entry.game.ttbMainExtra !== null || entry.game.ttbCompletionist !== null;
+    if (args.hasTimeToBeat !== undefined && hasTtb !== args.hasTimeToBeat) return false;
+    if (args.timeToBeatSource && (!hasTtb || entry.game.ttbSource !== args.timeToBeatSource)) return false;
+    if (withLists && withLists.has(entry.game.id) !== args.hasChecklist) return false;
     return true;
   });
 
@@ -275,46 +348,75 @@ export async function toolListLibrary(
     if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
     return (x - y) * dir;
   };
+  // every sort ends in title order, then id, so pages never overlap or skip
+  // a game however many share a rating or a length
+  const byTitle = (a: LoadedLibraryEntry, b: LoadedLibraryEntry) =>
+    a.entry.game.title.localeCompare(b.entry.game.title) || a.entry.id.localeCompare(b.entry.id);
+  const then =
+    (first: (a: LoadedLibraryEntry, b: LoadedLibraryEntry) => number) =>
+    (a: LoadedLibraryEntry, b: LoadedLibraryEntry) =>
+      first(a, b) || byTitle(a, b);
   switch (args.sort ?? "title") {
     case "rating":
-      matched = [...matched].sort((a, b) => (b.entry.rating ?? -1) - (a.entry.rating ?? -1));
+      matched = [...matched].sort(then((a, b) => (b.entry.rating ?? -1) - (a.entry.rating ?? -1)));
       break;
     case "recently_added":
       matched = [...matched].sort(
-        (a, b) => +new Date(b.entry.createdAt) - +new Date(a.entry.createdAt),
+        then((a, b) => +new Date(b.entry.createdAt) - +new Date(a.entry.createdAt)),
       );
       break;
     case "shortest":
-      matched = [...matched].sort(byLength(1));
+      matched = [...matched].sort(then(byLength(1)));
       break;
     case "longest":
-      matched = [...matched].sort(byLength(-1));
+      matched = [...matched].sort(then(byLength(-1)));
       break;
     default:
-      // already in title order from the loader
+      matched = [...matched].sort(byTitle);
       break;
   }
 
+  const offset = args.offset ?? 0;
   const limit = args.limit ?? 100;
+  const page = matched.slice(offset, offset + limit);
+  const fields = args.fields?.length ? new Set<string>(args.fields) : null;
+  const next = offset + page.length;
   return {
     total: matched.length,
-    returned: Math.min(matched.length, limit),
+    offset,
+    returned: page.length,
+    // where the next page starts, or null on the last one
+    nextOffset: next < matched.length ? next : null,
     filters: {
-      ...(category ? { category: category.label } : {}),
+      ...(wantedCategories.length ? { category: wantedCategories.map((c) => c.label) } : {}),
       ...(args.platform ? { platform: args.platform } : {}),
       ...(args.tag ? { tag: args.tag } : {}),
       ...(args.search ? { search: args.search } : {}),
+      ...(args.hasTags !== undefined ? { hasTags: args.hasTags } : {}),
+      ...(args.missingTagGroup ? { missingTagGroup: args.missingTagGroup } : {}),
+      ...(args.hasTimeToBeat !== undefined ? { hasTimeToBeat: args.hasTimeToBeat } : {}),
+      ...(args.timeToBeatSource ? { timeToBeatSource: args.timeToBeatSource } : {}),
+      ...(args.hasChecklist !== undefined ? { hasChecklist: args.hasChecklist } : {}),
+      ...(args.hasPlatform !== undefined ? { hasPlatform: args.hasPlatform } : {}),
+      ...(args.endless !== undefined ? { endless: args.endless } : {}),
     },
-    games: matched.slice(0, limit).map((l) => compactEntry(l, categories)),
+    games: page.map((l) => {
+      const row = compactEntry(l, categories);
+      if (!fields) return row;
+      return Object.fromEntries(
+        Object.entries(row).filter(([key]) => key === "id" || key === "title" || fields.has(key)),
+      );
+    }),
+    ...(notes.length ? { note: notes.join(" ") } : {}),
   };
 }
 
-interface Titled {
+export interface Titled {
   id: string;
   title: string;
 }
 
-type Picked<T> =
+export type Picked<T> =
   | { kind: "one"; item: T }
   /** several share the exact title — or, with partial lookup on, contain it */
   | { kind: "several"; items: T[] }
@@ -330,7 +432,7 @@ type Picked<T> =
  * one; writes turn it off, because tagging the wrong game is worse than
  * asking again, and get the near misses back to offer instead.
  */
-function pickByTitle<T extends Titled>(items: T[], input: string, partial: boolean): Picked<T> {
+export function pickByTitle<T extends Titled>(items: T[], input: string, partial: boolean): Picked<T> {
   const wanted = titleKey(input);
   const exact = wanted ? items.filter((i) => titleKey(i.title) === wanted) : [];
   if (exact.length === 1) return { kind: "one", item: exact[0]! };
@@ -347,7 +449,7 @@ function pickByTitle<T extends Titled>(items: T[], input: string, partial: boole
 }
 
 /** "Title (id …); Title (id …)" — what an ambiguous lookup offers back. */
-function withIds(items: Titled[]): string {
+export function withIds(items: Titled[]): string {
   return items
     .slice(0, 15)
     .map((i) => `${i.title} (id ${i.id})`)
@@ -384,12 +486,14 @@ async function findEntry(userId: string, args: { id?: string; title?: string }) 
 
 /**
  * One of the user's own collections, by id or by name — an exact name
- * (ignoring case) first, then a single partial match. Never anyone else's,
+ * (ignoring case) first, then a single partial match unless `exact` is on.
+ * Never anyone else's,
  * public or not: these tools describe and change the caller's library only.
  */
-async function findOwnedCollection(
+export async function findOwnedCollection(
   userId: string,
   args: { id?: string; name?: string },
+  options: { exact?: boolean } = {},
 ): Promise<{ id: string; name: string; isPublic: boolean }> {
   const mine = await db
     .select({
@@ -406,9 +510,12 @@ async function findOwnedCollection(
   }
   const wanted = fold(args.name ?? "");
   if (!wanted) throw new McpToolError("Give either an id or a name.");
+  // deleting goes by the exact name only: one partial match standing in for
+  // a name is fine for reading, not for removing
   const hit =
     mine.find((c) => fold(c.name) === wanted) ??
     (() => {
+      if (options.exact) return undefined;
       const partial = mine.filter((c) => fold(c.name).includes(wanted));
       return partial.length === 1 ? partial[0] : undefined;
     })();
@@ -661,7 +768,7 @@ export async function toolGetBacklogCandidates(
  * the way the write tools name one — or an error saying why not, with ids
  * to pick from when the title was ambiguous or a near miss.
  */
-async function ownedEntry(userId: string, ref: string): Promise<LibraryRow> {
+export async function ownedEntry(userId: string, ref: string): Promise<LibraryRow> {
   const { found, missing } = resolveEntries(await libraryIndex(userId), [ref]);
   const entry = found[0];
   if (!entry) throw new McpToolError(missing[0]?.reason ?? "Give a game id or title.");
@@ -669,7 +776,7 @@ async function ownedEntry(userId: string, ref: string): Promise<LibraryRow> {
 }
 
 /** `"Main quest" (main story), "Bosses" (extra)` — a game's lists, named back. */
-function listNames(lists: ChecklistTemplate[]): string {
+export function listNames(lists: ChecklistTemplate[]): string {
   return lists.map((l) => `"${l.title}" (${listKindName(l.kind)})`).join(", ");
 }
 
@@ -677,7 +784,7 @@ function listNames(lists: ChecklistTemplate[]): string {
  * The list a tool means: the one with this title, ignoring case — the match
  * `create_checklist` makes — or, with no title, the game's only list.
  */
-function pickList(game: string, lists: ChecklistTemplate[], title: string | undefined): ChecklistTemplate {
+export function pickList(game: string, lists: ChecklistTemplate[], title: string | undefined): ChecklistTemplate {
   if (lists.length === 0) {
     throw new McpToolError(`"${game}" has no checklists yet — create_checklist makes one.`);
   }
@@ -703,6 +810,8 @@ export async function toolGetChecklist(userId: string, args: { game: string; lis
     kind: listKindName(checklist.kind),
     // whether ticking an item fills in the ones before it
     sequential: fillsInSequence(checklist),
+    // where the items came from, when whoever made the list said
+    source: checklist.source ?? checklist.sourceUrl,
     done: items.filter((it) => it.completedAt).length,
     total: items.length,
     // numbered from 1 in the Progress tab's order: the numbers
@@ -752,13 +861,15 @@ export async function toolGetAchievements(userId: string, args: { game: string; 
 // ---------------------------------------------------------------------------
 // Writes
 //
-// Nine tools. Seven only add: tags and tag assignments, collections and the
-// games in them, progress checklists and their items, links between games,
-// and the user's own time-to-beat figures. `untag_games` removes an
+// The additive nine. Seven only add: tags and tag assignments, collections
+// and the games in them, progress checklists and their items, links between
+// games, and the user's own time-to-beat figures. `untag_games` removes an
 // assignment, never a tag, and `tick_checklist_items` records progress —
-// ticking items, or unticking exactly the ones it's told to. Nothing here
-// deletes, renames, recategorises, rates, publishes or touches the account —
-// that's the whole list, and adding to it is a decision, not a refactor.
+// ticking items, or unticking exactly the ones it's told to. The tools that
+// change or remove what's there — categories, ratings, dates, platforms,
+// renames, deletes — are in `services/mcp-edit-tools.ts` (phase 34), and
+// share the helpers exported from here. Nothing in either publishes or
+// touches the account: adding to the list is a decision, not a refactor.
 
 /** The most games one write may name — the same cap as `PUT /api/library/:id/tags`. */
 export const MAX_GAMES_PER_WRITE = 100;
@@ -783,7 +894,7 @@ export const READ_ONLY_CONNECTION_MESSAGE =
   'This connection is read-only. To let it make changes, remove the Game Manager connector and add it again, then tick "Allow changes" on Game Manager\'s consent screen.';
 
 /** Refuse a write, saying how to get one, unless the credential allows it. */
-function requireWrite(access: McpAccess): void {
+export function requireWrite(access: McpAccess): void {
   if (access.canWrite) return;
   throw new McpToolError(
     access.via === "api_key" ? READ_ONLY_KEY_MESSAGE : READ_ONLY_CONNECTION_MESSAGE,
@@ -791,12 +902,12 @@ function requireWrite(access: McpAccess): void {
 }
 
 /** A game a write tool couldn't place, and why — returned rather than thrown. */
-interface Miss {
+export interface Miss {
   input: string;
   reason: string;
 }
 
-interface LibraryRow {
+export interface LibraryRow {
   /** the library entry's id */
   id: string;
   gameId: string;
@@ -804,7 +915,7 @@ interface LibraryRow {
 }
 
 /** The user's library as the write tools need it: entry id, game id, title. */
-async function libraryIndex(userId: string): Promise<LibraryRow[]> {
+export async function libraryIndex(userId: string): Promise<LibraryRow[]> {
   return db
     .select({ id: schema.userGames.id, gameId: schema.userGames.gameId, title: schema.games.title })
     .from(schema.userGames)
@@ -837,7 +948,7 @@ function indexById(library: LibraryRow[]): Map<string, LibraryRow> {
  * game the user owns), or an exact title. For the tools that only make sense
  * on games you own: tags and your own play times.
  */
-function resolveEntries(library: LibraryRow[], refs: string[]) {
+export function resolveEntries(library: LibraryRow[], refs: string[]) {
   const byId = indexById(library);
   const found: LibraryRow[] = [];
   const missing: Miss[] = [];
@@ -857,7 +968,7 @@ function resolveEntries(library: LibraryRow[], refs: string[]) {
   return { found, missing };
 }
 
-interface ResolvedGame {
+export interface ResolvedGame {
   gameId: string;
   title: string;
 }
@@ -875,11 +986,13 @@ const yearOf = (seconds: number | undefined) =>
  * the web app's search-and-add does. Several exact matches come back as an
  * error listing `igdb:<id>` references to pass instead.
  */
-async function gameResolver(userId: string) {
+export async function gameResolver(userId: string, options: { igdb?: boolean } = {}) {
   const library = await libraryIndex(userId);
   const byId = indexById(library);
   let igdbLeft = IGDB_LOOKUPS_PER_CALL;
-  let igdbOn: boolean | null = null;
+  // off for tools that only make sense on games already in the catalog
+  // (unlinking): nothing is fetched, so nothing is added to the catalog
+  let igdbOn: boolean | null = options.igdb === false ? false : null;
   const igdbReady = async () => (igdbOn ??= await igdbConfigured());
 
   async function fromIgdb(igdbId: number): Promise<ResolvedGame | string> {
@@ -1001,8 +1114,16 @@ async function resolveGames(userId: string, refs: string[]) {
   return { found, missing };
 }
 
-function tagSummary(tag: Tag) {
+export function tagSummary(tag: Tag) {
   return { name: tag.name, color: tag.color, group: tag.groupName };
+}
+
+/** Did the caller ask for a colour or group an existing tag doesn't have? */
+function tagDiffers(tag: Tag, args: { color?: string; group?: string }): boolean {
+  return (
+    (args.color !== undefined && args.color.toLowerCase() !== tag.color?.toLowerCase()) ||
+    (args.group !== undefined && fold(args.group) !== fold(tag.groupName ?? ""))
+  );
 }
 
 /** The user's tag with this name, made (with `extra`) if they don't have one yet. */
@@ -1032,29 +1153,26 @@ export async function toolCreateTag(
 ) {
   requireWrite(access);
   const { tag, created } = await tagNamed(access.userId, args.name, args);
-  // an existing tag is returned as it is: renaming or restyling tags isn't
-  // something these tools do
-  const differs =
-    !created &&
-    ((args.color !== undefined && args.color.toLowerCase() !== tag.color?.toLowerCase()) ||
-      (args.group !== undefined && fold(args.group) !== fold(tag.groupName ?? "")));
+  // an existing tag is returned as it is: update_tag is what restyles one
+  const differs = !created && tagDiffers(tag, args);
   logEvent("mcp_write", access.userId, { tool: "create_tag", created });
   return {
     created,
     tag: tagSummary(tag),
     ...(differs
-      ? { note: "You already had this tag, so it was left as it was — its colour and group weren't changed." }
+      ? { note: "You already had this tag, so it was left as it was — its colour and group weren't changed. update_tag changes them." }
       : {}),
   };
 }
 
 export async function toolTagGames(
   access: McpAccess,
-  args: { tag: string; group?: string; games: string[] },
+  args: { tag: string; group?: string; color?: string; games: string[] },
 ) {
   requireWrite(access);
   const { found, missing } = resolveEntries(await libraryIndex(access.userId), args.games);
-  const { tag, created } = await tagNamed(access.userId, args.tag, { group: args.group });
+  const { tag, created } = await tagNamed(access.userId, args.tag, { group: args.group, color: args.color });
+  const keptAsItWas = !created && tagDiffers(tag, args);
   const result = await addTagToEntries(
     access.userId,
     tag.id,
@@ -1073,6 +1191,9 @@ export async function toolTagGames(
     tagged: result.added.length,
     alreadyHad: result.already.length,
     notFound: missing,
+    ...(keptAsItWas
+      ? { note: "The tag already existed, so its colour and group were left as they were — update_tag changes them." }
+      : {}),
   };
 }
 
@@ -1203,7 +1324,7 @@ export async function toolAddGamesToCollection(
 }
 
 /** The user's own lists for a game, in the order the Progress tab shows them. */
-async function listsOf(userId: string, gameId: string): Promise<ChecklistTemplate[]> {
+export async function listsOf(userId: string, gameId: string): Promise<ChecklistTemplate[]> {
   return db
     .select()
     .from(schema.checklistTemplates)
@@ -1230,6 +1351,7 @@ export async function toolCreateChecklist(
     kind?: (typeof CHECKLIST_KIND_INPUTS)[number];
     items: ChecklistItemArg[];
     sequential?: boolean;
+    source?: string;
   },
 ) {
   requireWrite(access);
@@ -1266,6 +1388,13 @@ export async function toolCreateChecklist(
     if (args.sequential !== undefined && args.sequential !== checklist.sequential) {
       notes.push("Its sequential setting was left as it was.");
     }
+    if (args.source !== undefined && fold(args.source) !== fold(checklist.source ?? "")) {
+      if (checklist.source) {
+        notes.push(`Its source was left as it was ("${checklist.source}") — update_checklist changes it.`);
+      } else {
+        checklist = await updateChecklist(access.userId, checklist.id, { source: args.source });
+      }
+    }
     if (checklist.isPublic) notes.push("That list is published, so the new items are public too.");
   } else {
     if (kind === MAIN_LIST_KIND) {
@@ -1282,7 +1411,7 @@ export async function toolCreateChecklist(
     const result = await createChecklist(
       access.userId,
       entry.gameId,
-      { title: args.title, kind, entries: items, sequential: args.sequential },
+      { title: args.title, kind, entries: items, sequential: args.sequential, source: args.source },
       "private",
     );
     checklist = result.checklist;
@@ -1309,6 +1438,7 @@ export async function toolCreateChecklist(
       sequential: checklist.sequential,
       public: checklist.isPublic,
       items: total,
+      source: checklist.source,
     },
     added,
     alreadyOnList: already,
@@ -1552,13 +1682,15 @@ export async function toolTickChecklistItems(
 }
 
 /** A link said as a sentence, so the result reads back what was recorded. */
-const LINK_SENTENCE: Record<GameLinkRole, (game: string, related: string) => string> = {
+export const LINK_SENTENCE: Record<GameLinkRole, (game: string, related: string) => string> = {
   dlc: (game, related) => `"${related}" is DLC for "${game}"`,
   prequel: (game, related) => `"${related}" comes before "${game}"`,
   sequel: (game, related) => `"${related}" follows "${game}"`,
   remake: (game, related) => `"${related}" is a remake or remaster of "${game}"`,
   base_game: (game, related) => `"${game}" is DLC for "${related}"`,
   original: (game, related) => `"${game}" is a remake or remaster of "${related}"`,
+  contains: (game, related) => `"${related}" is included in "${game}"`,
+  included_in: (game, related) => `"${game}" is included in "${related}"`,
 };
 
 export async function toolLinkGames(
@@ -1614,12 +1746,14 @@ export async function toolSetTimeToBeat(
   const entry = found[0];
   if (!entry) throw new McpToolError(missing[0]?.reason ?? "Give a game id or title.");
 
-  const { times, cleared } = await setTimeToBeat(access.userId, entry.id, input);
+  const { times, cleared, reordered } = await setTimeToBeat(access.userId, entry.id, input);
   const [catalog] = await db
     .select({
+      id: schema.games.id,
       ttbMain: schema.games.ttbMain,
       ttbMainExtra: schema.games.ttbMainExtra,
       ttbCompletionist: schema.games.ttbCompletionist,
+      ttbSource: schema.games.ttbSource,
     })
     .from(schema.games)
     .where(eq(schema.games.id, entry.gameId));
@@ -1631,14 +1765,18 @@ export async function toolSetTimeToBeat(
           completionist: hours(catalog.ttbCompletionist),
         }
       : null;
+  // what the game shows the user now — the same resolver every reader uses
+  const shown = catalog ? (await resolveTtbFor(access.userId, [catalog])).get(catalog.id) : undefined;
   logEvent("mcp_write", access.userId, {
     tool: "set_time_to_beat",
     fields: Object.keys(input).length,
     cleared,
   });
+  const sentence = (t: { ttbMain: number | null; ttbMainExtra: number | null; ttbCompletionist: number | null }) =>
+    `main ${hours(t.ttbMain) ?? "—"}, main + extras ${hours(t.ttbMainExtra) ?? "—"}, completionist ${hours(t.ttbCompletionist) ?? "—"}`;
   return {
     game: entry.title,
-    // what's stored now, after main <= main+extras <= completionist was enforced
+    // what's stored now: as given when in order, sorted when not
     yourTimeToBeatHours: cleared
       ? null
       : {
@@ -1647,8 +1785,16 @@ export async function toolSetTimeToBeat(
           completionist: hours(times.ttbCompletionist),
         },
     cleared,
+    // where the figure the user sees now comes from: "yours", "igdb", "community", or null for none
+    source: shown?.ttbSource ?? null,
     // the figure yours overrides (IGDB's), or goes back to once cleared
     catalogTimeToBeatHours: catalogHours,
+    ...(reordered
+      ? {
+          reordered: true,
+          reorderNote: `The figures were out of order (main ≤ main + extras ≤ completionist), so they were sorted into ${sentence(times)}. Check that's what the user meant.`,
+        }
+      : {}),
     note: cleared
       ? catalogHours
         ? "The user's figure is gone, so the game shows IGDB's again."

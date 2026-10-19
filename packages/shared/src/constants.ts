@@ -154,7 +154,7 @@ export const MCP_WRITE_SCOPE = "library:write";
 export const OAUTH_SCOPE_LABELS: Record<string, string> = {
   [MCP_SCOPE]: "Read your library, collections, progress and stats. On its own, it can't change anything.",
   [MCP_WRITE_SCOPE]:
-    "Add tags, collections, progress checklists, linked games and time-to-beat figures, and tick checklist items off as you play. It can't delete anything or change categories or ratings.",
+    "Organise your library: categories, ratings, dates, notes and platforms; tags, collections, progress checklists, linked games and time-to-beat figures; ticking checklist items off as you play. It can also delete tags, collections, checklists and games from your library, after showing what would go. It can't publish anything or touch your account.",
   offline_access: "Stay connected until you disconnect it, without asking you to sign in again.",
   openid: "Know which Game Manager account you are.",
   profile: "See your display name.",
@@ -205,10 +205,18 @@ export const PUBLISH_MODE_LABELS: Record<PublishMode, { label: string; blurb: st
  *               because telling a rebuild from a polish was a decision to make
  *               every time you linked something, for a distinction nothing in
  *               the app acts on. Migration 0027 folded `remaster` into it.
+ *  - `compilation` — the base is a compilation, collection or bundle, and the
+ *               related game is one of the games in it (The Master Chief
+ *               Collection → Halo 3). Before it existed, bundles were filed as
+ *               "DLC for the collection" or "a remake of the original", which
+ *               read as something they aren't.
+ *
+ * `kind` is a text column, so a new kind needs no migration — only an entry
+ * here and its two roles below.
  *
  * The UI never speaks in kinds — see `GAME_LINK_ROLES`.
  */
-export const GAME_LINK_KINDS = ["dlc", "sequel", "remake"] as const;
+export const GAME_LINK_KINDS = ["dlc", "sequel", "remake", "compilation"] as const;
 export type GameLinkKind = (typeof GAME_LINK_KINDS)[number];
 
 /**
@@ -216,17 +224,21 @@ export type GameLinkKind = (typeof GAME_LINK_KINDS)[number];
  * end: the same `dlc` row is a `dlc` role on the base game's page and a
  * `base_game` role on the DLC's page.
  *
- * In display order. The two that describe what a game *is* — DLC for
- * something, a remake of something — lead, and only appear when filled; the
- * four you add (`primary`) are always shown, in the order they were asked for.
+ * In display order. The three that describe what a game *is* — DLC for
+ * something, a remake of something, part of a compilation — lead, and only
+ * appear when filled; the four you add (`primary`) are always shown, in the
+ * order they were asked for; and what a compilation includes comes last, only
+ * when filled, since almost no game is one.
  */
 export const GAME_LINK_ROLES = [
   "base_game",
   "original",
+  "included_in",
   "dlc",
   "prequel",
   "sequel",
   "remake",
+  "contains",
 ] as const;
 export type GameLinkRole = (typeof GAME_LINK_ROLES)[number];
 
@@ -304,6 +316,24 @@ export const GAME_LINK_ROLE_META: Record<GameLinkRole, GameLinkRoleMeta> = {
     section: "Original",
     singular: "Original",
     hint: "The game this one remakes or remasters",
+  },
+  contains: {
+    kind: "compilation",
+    side: "base",
+    inverse: "included_in",
+    primary: false,
+    section: "Includes",
+    singular: "Game it includes",
+    hint: "A game this compilation or collection includes",
+  },
+  included_in: {
+    kind: "compilation",
+    side: "related",
+    inverse: "contains",
+    primary: false,
+    section: "Included in",
+    singular: "Compilation it's part of",
+    hint: "A compilation, collection or bundle this game is part of",
   },
 };
 

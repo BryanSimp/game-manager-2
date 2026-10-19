@@ -55,6 +55,13 @@ export const checklistTemplates = pgTable(
     // was wrong more often than right -- so nothing writes this any more, but
     // lists that predate the removal keep their attribution link.
     sourceUrl: text("source_url"),
+    // Where the entries came from, as whoever made the list said: a URL or a
+    // line of text ("the game's manual", "a guide on GameFAQs"). Separate
+    // from source_url because that one is shown with a CC-BY-SA notice that
+    // was true of the scraped Fandom pages and isn't of an arbitrary source.
+    // Written by the MCP checklist tools, which build lists from sources a
+    // model can name; the web app shows it under the list.
+    source: text("source"),
     // story missions are played in order, so ticking #15 implies #1-14 are
     // done too. Off by default — collectibles and side quests have no order.
     sequential: boolean("sequential").notNull().default(false),

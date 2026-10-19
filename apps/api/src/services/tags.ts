@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
-import { ServiceError } from "./service-error.js";
+import { ServiceError, isUniqueViolation } from "./service-error.js";
 
 /**
  * Tags, for the web routes (`routes/tags.ts`) and the MCP write tools
@@ -74,7 +74,7 @@ export async function ownedTagIds(userId: string, tagIds: string[]): Promise<str
 }
 
 /** The tag, if it's the user's; a 404 otherwise. */
-async function ownedTag(userId: string, tagId: string): Promise<Tag> {
+export async function ownedTag(userId: string, tagId: string): Promise<Tag> {
   const [tag] = await db
     .select()
     .from(schema.tags)
@@ -150,4 +150,59 @@ export async function removeTagFromEntries(
     removed: entries.filter((id) => removed.has(id)),
     notTagged: entries.filter((id) => !removed.has(id)),
   };
+}
+
+/**
+ * Rename, recolour or regroup one of the user's tags — `PATCH /api/tags/:id`
+ * and the MCP `update_tag` tool. A null colour or group clears it. Renaming
+ * onto a name the user already has, exactly, is a 409 (the unique index
+ * decides, as on create).
+ */
+export async function updateTag(userId: string, tagId: string, input: unknown): Promise<Tag> {
+  const parsed = tagSchema.partial().safeParse(input);
+  if (!parsed.success) {
+    throw new ServiceError(400, parsed.error.issues[0]?.message ?? "Invalid tag");
+  }
+  const patch: Partial<typeof schema.tags.$inferInsert> = {};
+  if (parsed.data.name !== undefined) patch.name = parsed.data.name.trim();
+  if (parsed.data.color !== undefined) patch.color = parsed.data.color;
+  if (parsed.data.groupName !== undefined) patch.groupName = parsed.data.groupName?.trim() || null;
+  if (patch.name === "") throw new ServiceError(400, "A tag needs a name");
+  if (Object.keys(patch).length === 0) return ownedTag(userId, tagId);
+  try {
+    const [updated] = await db
+      .update(schema.tags)
+      .set(patch)
+      .where(and(eq(schema.tags.id, tagId), eq(schema.tags.userId, userId)))
+      .returning();
+    if (!updated) throw new ServiceError(404, "Tag not found");
+    return updated;
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new ServiceError(409, "You already have a tag with that name");
+    throw err;
+  }
+}
+
+/** How many of the user's games carry each of these tags. */
+export async function tagUsage(userId: string, tagIds: string[]): Promise<Map<string, number>> {
+  if (tagIds.length === 0) return new Map();
+  const rows = await db
+    .select({ tagId: schema.userGameTags.tagId, count: sql<number>`count(*)::int` })
+    .from(schema.userGameTags)
+    .innerJoin(schema.userGames, eq(schema.userGames.id, schema.userGameTags.userGameId))
+    .where(and(eq(schema.userGames.userId, userId), inArray(schema.userGameTags.tagId, tagIds)))
+    .groupBy(schema.userGameTags.tagId);
+  return new Map(rows.map((r) => [r.tagId, r.count]));
+}
+
+/**
+ * Delete one of the user's tags — `DELETE /api/tags/:id` and the MCP
+ * `delete_tags` tool. It comes off every game that had it (the assignments
+ * cascade); the games themselves are untouched.
+ */
+export async function deleteTag(userId: string, tagId: string): Promise<{ tag: Tag; games: number }> {
+  const tag = await ownedTag(userId, tagId);
+  const games = (await tagUsage(userId, [tag.id])).get(tag.id) ?? 0;
+  await db.delete(schema.tags).where(and(eq(schema.tags.id, tag.id), eq(schema.tags.userId, userId)));
+  return { tag, games };
 }
