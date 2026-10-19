@@ -211,11 +211,21 @@ export interface CommunityStats {
     ttbCompletionist: number | null;
     count: number;
   } | null;
-  /** your own submission, so the editor can show what you said */
+  /** your own submission, so the editor can show what you said — and, when set, what you see */
   yours: {
     ttbMain: number | null;
     ttbMainExtra: number | null;
     ttbCompletionist: number | null;
+  } | null;
+  /**
+   * The catalog's own figure (IGDB's, or a legacy hand-set one), which yours
+   * overrides; null when the catalog has none
+   */
+  catalog: {
+    ttbMain: number | null;
+    ttbMainExtra: number | null;
+    ttbCompletionist: number | null;
+    source: "igdb" | "manual";
   } | null;
   minRatings: number;
 }

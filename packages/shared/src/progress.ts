@@ -114,23 +114,31 @@ function anySet(ttb: TtbTriple): boolean {
 }
 
 /**
- * Pick which play time to show, in order of how much it's worth trusting:
+ * Pick which play time to show:
  *
- *  1. the catalog row, when it has anything — IGDB's figures, or a manual
+ *  1. your own submission, when you've made one — it overrides IGDB's
+ *     figure, *for you*: you typed it because the catalog's number doesn't
+ *     describe how the game goes for you (or there wasn't one), and a figure
+ *     you entered that never showed was a control that did nothing;
+ *  2. the catalog row, when it has anything — IGDB's figures, or a manual
  *     value written before play times went per-user;
- *  2. your own submission, because you've actually played it;
  *  3. the average of everyone else's, which is the whole point of collecting
  *     them: IGDB has no time-to-beat for most niche titles, and one player
  *     saying "14 hours" is better than a blank.
  *
- * Nothing here writes: the caller merges this into a response and the stored
- * columns are untouched.
+ * Only the first is per-person: someone else's submission never displaces
+ * IGDB's figure for you (an average reaches you only when there's nothing
+ * else). Nothing here writes: the caller merges this into a response and the
+ * stored columns are untouched.
  */
 export function resolveTtb(
   catalog: TtbTriple & { ttbSource: string | null },
   own: TtbTriple | null,
   community: (TtbTriple & { count: number }) | null,
 ): ResolvedTtb {
+  if (own && anySet(own)) {
+    return { ...own, ttbSource: "yours" };
+  }
   if (anySet(catalog)) {
     return {
       ttbMain: catalog.ttbMain,
@@ -138,9 +146,6 @@ export function resolveTtb(
       ttbCompletionist: catalog.ttbCompletionist,
       ttbSource: catalog.ttbSource === "manual" ? "manual" : "igdb",
     };
-  }
-  if (own && anySet(own)) {
-    return { ...own, ttbSource: "yours" };
   }
   if (community && anySet(community)) {
     return {

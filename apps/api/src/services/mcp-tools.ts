@@ -1615,6 +1615,22 @@ export async function toolSetTimeToBeat(
   if (!entry) throw new McpToolError(missing[0]?.reason ?? "Give a game id or title.");
 
   const { times, cleared } = await setTimeToBeat(access.userId, entry.id, input);
+  const [catalog] = await db
+    .select({
+      ttbMain: schema.games.ttbMain,
+      ttbMainExtra: schema.games.ttbMainExtra,
+      ttbCompletionist: schema.games.ttbCompletionist,
+    })
+    .from(schema.games)
+    .where(eq(schema.games.id, entry.gameId));
+  const catalogHours =
+    catalog && (catalog.ttbMain != null || catalog.ttbMainExtra != null || catalog.ttbCompletionist != null)
+      ? {
+          main: hours(catalog.ttbMain),
+          mainExtra: hours(catalog.ttbMainExtra),
+          completionist: hours(catalog.ttbCompletionist),
+        }
+      : null;
   logEvent("mcp_write", access.userId, {
     tool: "set_time_to_beat",
     fields: Object.keys(input).length,
@@ -1631,5 +1647,14 @@ export async function toolSetTimeToBeat(
           completionist: hours(times.ttbCompletionist),
         },
     cleared,
+    // the figure yours overrides (IGDB's), or goes back to once cleared
+    catalogTimeToBeatHours: catalogHours,
+    note: cleared
+      ? catalogHours
+        ? "The user's figure is gone, so the game shows IGDB's again."
+        : "The user's figure is gone; the game shows the community average, if there is one."
+      : catalogHours
+        ? "The user now sees their own figure in place of IGDB's (only they do). Clearing all three goes back to IGDB's."
+        : "The user now sees their own figure.",
   };
 }

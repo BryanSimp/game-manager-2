@@ -275,8 +275,9 @@ export default function GameDetailScreen() {
  * How long to beat, editable.
  *
  * What you enter is *your* figure, not a correction to the shared catalog:
- * IGDB has no times for most niche games, so the average of everyone's
- * submissions is what fills the gap. See `resolveTtb` for which one a game
+ * it's what you see in place of IGDB's (for you alone), and IGDB has no times
+ * for most niche games, so the average of everyone's submissions is what
+ * fills the gap for everyone else. See `resolveTtb` for which one a game
  * ends up showing.
  */
 function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
@@ -322,14 +323,28 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
     },
   });
 
+  const catalog = community.data?.catalog ?? null;
+  const catalogName = catalog?.source === "manual" ? "the catalog's" : "IGDB's";
   const sourceNote =
     g.ttbSource === "community"
       ? `Averaged from ${g.ttbCount ?? 0} player${g.ttbCount === 1 ? "" : "s"}`
       : g.ttbSource === "yours"
-        ? "Your own figure"
+        ? catalog
+          ? `Yours, in place of ${catalogName}`
+          : "Your own figure"
         : g.ttbSource === "manual"
           ? "Set by hand"
           : "From IGDB";
+  // what you're overriding stays in view
+  const overridden =
+    g.ttbSource === "yours" && catalog
+      ? [
+          catalog.ttbMain != null && `${formatHours(catalog.ttbMain)} main`,
+          catalog.ttbCompletionist != null && `${formatHours(catalog.ttbCompletionist)} completionist`,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
 
   if (!hasAny && !editing) {
     return (
@@ -363,8 +378,9 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
             <HoursField label="Main + extras" value={extra} onChange={setExtra} />
             <HoursField label="Completionist" value={full} onChange={setFull} />
             <Text style={[type.micro, { marginTop: space.sm }]}>
-              Hours, as it went for you. Clear every field to withdraw your figure. Yours drives
-              your own estimate; the average of everyone's fills in games IGDB has no data for.
+              Hours, as it went for you. Yours replaces IGDB's figure for you (nobody else sees it
+              in its place) and drives your own estimate. Clear every field to withdraw yours
+              {catalog ? ` and go back to ${catalogName}` : ""}.
             </Text>
             {save.isError && (
               <Text style={[type.caption, { color: colors.danger, marginTop: space.xs }]}>
@@ -387,8 +403,17 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
             <TtbRow label="Main story" value={formatHours(g.ttbMain)} />
             <TtbRow label="Main + extras" value={formatHours(g.ttbMainExtra)} />
             <TtbRow label="Completionist" value={formatHours(g.ttbCompletionist)} />
-            {/* the figure on show is IGDB's, but players have said otherwise */}
-            {g.ttbSource !== "community" && community.data?.timeToBeat?.ttbMain != null ? (
+            {overridden ? (
+              <Text style={[type.micro, { marginTop: space.xs }]}>
+                {catalog?.source === "manual" ? "Catalog" : "IGDB"} says {overridden}
+              </Text>
+            ) : null}
+            {/* the figure on show is IGDB's (or yours), but players have said
+                otherwise — unless yours is the only submission, which would
+                just repeat it */}
+            {g.ttbSource !== "community" &&
+            community.data?.timeToBeat?.ttbMain != null &&
+            !(g.ttbSource === "yours" && community.data.timeToBeat.count <= 1) ? (
               <Text style={[type.micro, { marginTop: space.xs }]}>
                 Players say {formatHours(community.data.timeToBeat.ttbMain)} (
                 {community.data.timeToBeat.count} submitted)
@@ -397,7 +422,13 @@ function TimeToBeatSection({ entry }: { entry: LibraryEntry }) {
             <View style={styles.ttbFooter}>
               <Text style={type.micro}>{sourceNote}</Text>
               <Button
-                label={community.data?.yours ? "Edit yours" : "Add yours"}
+                label={
+                  community.data?.yours
+                    ? "Edit yours"
+                    : g.ttbSource === "igdb" || g.ttbSource === "manual"
+                      ? "Override"
+                      : "Add yours"
+                }
                 icon="create-outline"
                 tone="ghost"
                 onPress={startEditing}

@@ -111,34 +111,30 @@ type CatalogTtb = TtbTriple & { id: string; ttbSource: string | null };
 /**
  * Resolve play times for a batch of catalog rows.
  *
- * Only the games whose catalog figures are entirely blank are looked up: a
- * game IGDB knows the length of needs no fallback, and skipping them keeps
- * `GET /api/library` — the app's hottest route — down to two extra grouped
- * queries over a usually-small subset.
+ * Your own submissions are looked up for every game, since one overrides
+ * IGDB's figure — that's a single query on the (user, game) primary key.
+ * The community average, the expensive half, is only computed for games with
+ * neither your figure nor a catalog one, which keeps `GET /api/library` — the
+ * app's hottest route — to one grouped query over a usually-small subset.
  */
 export async function resolveTtbFor(
   userId: string,
   games: CatalogTtb[],
 ): Promise<Map<string, ResolvedTtb>> {
+  if (games.length === 0) return new Map();
+  const own = await ownTimes(
+    userId,
+    games.map((g) => g.id),
+  );
+  const blank = (t: TtbTriple) => t.ttbMain == null && t.ttbMainExtra == null && t.ttbCompletionist == null;
+  const needCommunity = games
+    .filter((g) => blank(g) && !own.has(g.id))
+    .map((g) => g.id);
+  const community = await communityTimes(needCommunity);
+
   const resolved = new Map<string, ResolvedTtb>();
-  const needFallback: string[] = [];
-
   for (const game of games) {
-    if (game.ttbMain != null || game.ttbMainExtra != null || game.ttbCompletionist != null) {
-      resolved.set(game.id, resolveTtb(game, null, null));
-    } else {
-      needFallback.push(game.id);
-    }
-  }
-  if (needFallback.length === 0) return resolved;
-
-  const [own, community] = await Promise.all([
-    ownTimes(userId, needFallback),
-    communityTimes(needFallback),
-  ]);
-  for (const id of needFallback) {
-    const game = games.find((g) => g.id === id)!;
-    resolved.set(id, resolveTtb(game, own.get(id) ?? null, community.get(id) ?? null));
+    resolved.set(game.id, resolveTtb(game, own.get(game.id) ?? null, community.get(game.id) ?? null));
   }
   return resolved;
 }

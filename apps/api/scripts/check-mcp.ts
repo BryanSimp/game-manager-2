@@ -862,6 +862,66 @@ try {
   const notOwnedTtb = await tool(aliceWriteKey, "set_time_to_beat", { game: notOwned.title, mainHours: 5 });
   check("…nor on a game she doesn't own", notOwnedTtb.isError, notOwnedTtb.text);
 
+  // hollow has IGDB's 27h: alice's own figure replaces it for her, and only her
+  const override = await tool(aliceWriteKey, "set_time_to_beat", {
+    game: aHollow.id,
+    mainHours: 30,
+    mainExtraHours: 45,
+    completionistHours: 70,
+  });
+  const overriddenGame = await tool(aliceKey, "get_game", { id: aHollow.id });
+  const overriddenCol = await tool(aliceKey, "get_collection", { id: aliceCollection });
+  const communityRoute = (await asUser(alice.cookie, "GET", `/api/games/${hollow.id}/community`)).json();
+  check(
+    "set_time_to_beat on a game IGDB has a figure for overrides it, saying so with IGDB's figure beside it",
+    override.data?.yourTimeToBeatHours?.main === 30 &&
+      override.data.catalogTimeToBeatHours?.main === 27 &&
+      override.data.note?.includes("in place of IGDB's"),
+    override.data ?? override.text,
+  );
+  check(
+    "…and every reader uses it: get_game, the progress estimate, collection hours",
+    overriddenGame.data?.timeToBeatHours?.main === 30 &&
+      overriddenGame.data.timeToBeatHours.completionist === 70 &&
+      overriddenGame.data.timeToBeatHours.source === "yours" &&
+      overriddenGame.data.progress?.totalHours === 30 &&
+      overriddenGame.data.progress.remainingHours === 15 &&
+      overriddenCol.data?.games.find((g: { title: string }) => g.title === hollow.title)?.hours === 30,
+    { game: overriddenGame.data?.timeToBeatHours, progress: overriddenGame.data?.progress, collection: overriddenCol.data?.games },
+  );
+  check(
+    "…while the community route still reports IGDB's own figure for the card to show beneath it",
+    communityRoute.catalog?.ttbMain === 27 * 3600 &&
+      communityRoute.catalog.source === "igdb" &&
+      communityRoute.yours?.ttbMain === 30 * 3600,
+    communityRoute,
+  );
+  const bobSees = (await asUser(bob.cookie, "GET", `/api/games/${hollow.id}`)).json();
+  check(
+    "…and nobody else's view changes: bob still sees IGDB's figure",
+    bobSees.game?.ttbMain === 27 * 3600 && bobSees.game.ttbSource === "igdb",
+    bobSees.game,
+  );
+  const backToIgdb = await tool(aliceWriteKey, "set_time_to_beat", {
+    game: aHollow.id,
+    mainHours: null,
+    mainExtraHours: null,
+    completionistHours: null,
+  });
+  const restoredGame = await tool(aliceKey, "get_game", { id: aHollow.id });
+  const [hollowRow] = await db.select().from(schema.games).where(eq(schema.games.id, hollow.id));
+  check(
+    "clearing the override goes back to IGDB's figure, which was never touched",
+    backToIgdb.data?.cleared === true &&
+      backToIgdb.data.note?.includes("IGDB's again") &&
+      restoredGame.data?.timeToBeatHours?.main === 27 &&
+      restoredGame.data.timeToBeatHours.source === "igdb" &&
+      restoredGame.data.progress?.totalHours === 27 &&
+      hollowRow?.ttbMain === 27 * 3600 &&
+      hollowRow.ttbSource === "igdb",
+    { result: backToIgdb.data ?? backToIgdb.text, game: restoredGame.data?.timeToBeatHours },
+  );
+
   console.log("\nWrites: checklists");
   const listsOf = (gameId: string, userId = alice.id) =>
     db
