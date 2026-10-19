@@ -31,18 +31,42 @@ const ttbInputSchema = z.object({
 });
 
 /**
+ * Your figures, kept in the fields you put them in when they're already in
+ * order (main ≤ main + extras ≤ completionist, blanks skipped) — "6h main,
+ * 14h completionist" is two figures you placed, not a pair to guess the
+ * columns of. Only when they're out of order does `normalizeTtb` sort them,
+ * which also re-fills from the left: that's the typo case, and the columns
+ * can't be trusted then. (IGDB's ingest still always normalises; there a
+ * two-figure pair *is* main + main-extras.)
+ */
+export function orderOwnTtb(ttb: TtbTriple): TtbTriple {
+  const clean = (v: number | null) => (typeof v === "number" && v > 0 ? v : null);
+  const placed = {
+    ttbMain: clean(ttb.ttbMain),
+    ttbMainExtra: clean(ttb.ttbMainExtra),
+    ttbCompletionist: clean(ttb.ttbCompletionist),
+  };
+  const known = [placed.ttbMain, placed.ttbMainExtra, placed.ttbCompletionist].filter(
+    (v): v is number => v !== null,
+  );
+  const inOrder = known.every((v, i) => i === 0 || known[i - 1]! <= v);
+  return inOrder ? placed : normalizeTtb(placed);
+}
+
+/**
  * Merge a submission into the user's own figures for one library entry.
  *
  * An omitted key keeps what you had; an explicit null clears it, and
- * clearing them all removes your submission entirely. `normalizeTtb`
- * enforces main <= main+extras <= completionist, the same as on ingest, so a
- * typo can't invert the columns. Returns what's stored afterwards.
+ * clearing them all removes your submission entirely. `orderOwnTtb` keeps
+ * each figure where it was put unless they're out of order, which it sorts —
+ * so a typo can't invert the columns, and `reordered` says when that
+ * happened. Returns what's stored afterwards.
  */
 export async function setTimeToBeat(
   userId: string,
   entryId: string,
   input: unknown,
-): Promise<{ gameId: string; times: TtbTriple; cleared: boolean }> {
+): Promise<{ gameId: string; times: TtbTriple; cleared: boolean; reordered: boolean }> {
   const entry = await db.query.userGames.findFirst({
     where: (ug, { and: andW, eq: eqW }) => andW(eqW(ug.id, entryId), eqW(ug.userId, userId)),
     columns: { gameId: true },
@@ -59,7 +83,7 @@ export async function setTimeToBeat(
       and(eq(schema.userTimeToBeat.userId, userId), eq(schema.userTimeToBeat.gameId, entry.gameId)),
     );
 
-  const merged = normalizeTtb({
+  const asGiven: TtbTriple = {
     ttbMain: parsed.data.ttbMain === undefined ? (mine?.mainSeconds ?? null) : parsed.data.ttbMain,
     ttbMainExtra:
       parsed.data.ttbMainExtra === undefined
@@ -69,7 +93,12 @@ export async function setTimeToBeat(
       parsed.data.ttbCompletionist === undefined
         ? (mine?.completionistSeconds ?? null)
         : parsed.data.ttbCompletionist,
-  });
+  };
+  const merged = orderOwnTtb(asGiven);
+  const reordered =
+    (asGiven.ttbMain || null) !== merged.ttbMain ||
+    (asGiven.ttbMainExtra || null) !== merged.ttbMainExtra ||
+    (asGiven.ttbCompletionist || null) !== merged.ttbCompletionist;
 
   const hasAny =
     merged.ttbMain != null || merged.ttbMainExtra != null || merged.ttbCompletionist != null;
@@ -91,7 +120,7 @@ export async function setTimeToBeat(
       .update(schema.games)
       .set({ ttbMain: null, ttbMainExtra: null, ttbCompletionist: null, ttbSource: null })
       .where(and(eq(schema.games.id, entry.gameId), eq(schema.games.ttbSource, "manual")));
-    return { gameId: entry.gameId, times: merged, cleared: true };
+    return { gameId: entry.gameId, times: merged, cleared: true, reordered: false };
   }
 
   await db
@@ -113,5 +142,5 @@ export async function setTimeToBeat(
       },
     });
   logEvent("time_submitted", userId, { gameId: entry.gameId });
-  return { gameId: entry.gameId, times: merged, cleared: false };
+  return { gameId: entry.gameId, times: merged, cleared: false, reordered };
 }

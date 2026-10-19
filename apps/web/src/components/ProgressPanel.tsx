@@ -890,6 +890,7 @@ function ListCard({
                   · CC-BY-SA
                 </p>
               )}
+              {detail.data?.source && <ListSource source={detail.data.source} />}
             </>
           )}
 
@@ -1336,5 +1337,37 @@ function CreateList({
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Where a list's entries came from, as whoever made it said: a link when it's
+ * a web address, the words otherwise ("the game's manual"). Only a parsed
+ * http(s) URL becomes a link — anything else, `javascript:` included, is text.
+ */
+function ListSource({ source }: { source: string }) {
+  let url: URL | null = null;
+  try {
+    const parsed = new URL(source);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") url = parsed;
+  } catch {
+    // not a URL: shown as written
+  }
+  return (
+    <p className="mt-2 border-t border-zinc-800/60 pt-2 text-xs text-zinc-600">
+      Source:{" "}
+      {url ? (
+        <a
+          href={url.href}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-zinc-500 underline hover:text-zinc-300"
+        >
+          {url.host}
+        </a>
+      ) : (
+        source
+      )}
+    </p>
   );
 }

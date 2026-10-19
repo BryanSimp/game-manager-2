@@ -17,6 +17,8 @@ import { ServiceError } from "./service-error.js";
 export const CHECKLIST_TITLE_MAX = 200;
 export const CHECKLIST_ENTRY_MAX = 500;
 export const CHECKLIST_CHAPTER_MAX = 100;
+/** Where a list came from: a URL, or a line saying what the source was. */
+export const CHECKLIST_SOURCE_MAX = 500;
 /** The most entries one request may write — a long story's worth. */
 export const MAX_CHECKLIST_ENTRIES_PER_WRITE = 500;
 
@@ -109,6 +111,8 @@ export async function createChecklist(
     kind: ChecklistKind;
     entries?: ChecklistEntryInput[];
     sequential?: boolean;
+    /** where the entries came from, when the caller can say */
+    source?: string | null;
   },
   visibility: "preference" | "private",
 ): Promise<{ checklist: ChecklistTemplate; entries: number }> {
@@ -121,9 +125,10 @@ export async function createChecklist(
   const title = input.title.trim();
   if (!title) throw new ServiceError(400, "Title is required");
   const entries = cleanEntries(input.entries ?? []);
+  const source = input.source?.trim() || null;
   // every entry goes through the filter alongside the title, so there is
   // nothing left unscanned for "publish automatically" to expose
-  rejectBadContent(userId, [title, ...entries.flatMap((e) => [e.text, e.category])]);
+  rejectBadContent(userId, [title, source, ...entries.flatMap((e) => [e.text, e.category])]);
 
   if (input.kind === MAIN_LIST_KIND && (await hasMainList(userId, game.id))) {
     throw new ServiceError(409, "You already have a main story list for this game");
@@ -144,6 +149,7 @@ export async function createChecklist(
         sequential: input.kind === MAIN_LIST_KIND && input.sequential === true,
         isPublic,
         position,
+        source,
       })
       .returning();
     if (entries.length > 0) {
@@ -391,4 +397,167 @@ export function throughLastTarget(items: ChecklistItemState[], targets: Readonly
     .slice(0, last + 1)
     .filter((it) => !it.completedAt && !targets.has(it.id))
     .map((it) => it.id);
+}
+
+/** One of the user's own lists, or a 404. */
+async function ownedChecklist(userId: string, templateId: string): Promise<ChecklistTemplate> {
+  const [checklist] = await db
+    .select()
+    .from(schema.checklistTemplates)
+    .where(
+      and(
+        eq(schema.checklistTemplates.id, templateId),
+        eq(schema.checklistTemplates.authorUserId, userId),
+      ),
+    );
+  if (!checklist) throw new ServiceError(404, "Checklist not found");
+  return checklist;
+}
+
+/**
+ * Change one of your lists' own settings: its title, its kind, whether it
+ * fills in as you tick, where it came from. Publishing isn't here — `PATCH
+ * /api/checklists/:id` owns that, with its publish-mode rule and whole-list
+ * re-scan.
+ *
+ * Turning a list into the main story list is refused while the game has
+ * another one (the same 409 as making a second); turning the main story list
+ * into an extra is allowed, and takes the game's progress estimate with it.
+ * `sequential` only means something on a main story list, so it's refused on
+ * an extra rather than stored where no switch shows it — and a list that
+ * stops being the main story stops being sequential.
+ */
+export async function updateChecklist(
+  userId: string,
+  templateId: string,
+  input: { title?: string; kind?: ChecklistKind; sequential?: boolean; source?: string | null },
+): Promise<ChecklistTemplate> {
+  const checklist = await ownedChecklist(userId, templateId);
+  const title = input.title?.trim();
+  if (input.title !== undefined && !title) throw new ServiceError(400, "Title is required");
+  const source = input.source === undefined ? undefined : input.source?.trim() || null;
+  rejectBadContent(userId, [title, source]);
+
+  const kind = input.kind ?? checklist.kind;
+  if (input.kind === MAIN_LIST_KIND && checklist.kind !== MAIN_LIST_KIND) {
+    const main = await mainListOf(userId, checklist.gameId);
+    if (main) {
+      throw new ServiceError(409, `You already have a main story list for this game ("${main.title}")`);
+    }
+  }
+  if (input.sequential === true && kind !== MAIN_LIST_KIND) {
+    throw new ServiceError(400, "Only the main story list can be sequential");
+  }
+  const sequential = kind === MAIN_LIST_KIND ? (input.sequential ?? checklist.sequential) : false;
+
+  const [updated] = await db
+    .update(schema.checklistTemplates)
+    .set({
+      ...(title !== undefined ? { title } : {}),
+      ...(source !== undefined ? { source } : {}),
+      kind,
+      sequential,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.checklistTemplates.id, checklist.id))
+    .returning();
+  return updated!;
+}
+
+/** One change to an entry already on the list. A null chapter takes it out of its chapter. */
+export interface ChecklistEntryEdit {
+  id: string;
+  text?: string;
+  category?: string | null;
+}
+
+/**
+ * Edit, remove and reorder entries on one of your lists, all at once or not
+ * at all. Every id must be on the list — an id that isn't is a 400 naming
+ * nothing changed, because the caller worked the ids out from the list and a
+ * stray one means it's working from a stale copy.
+ *
+ * `order` is the entries in their new order; ones it leaves out keep their
+ * relative order after the ones it names (the rule the collection order and
+ * link order follow), so moving entry 12 to third is `[1, 2, 12]`. Removed
+ * entries take their ticks with them. Positions are rewritten 0..n-1, which
+ * also tidies the gaps the web app's swap-two-positions reorder relies on
+ * being distinct.
+ */
+export async function editChecklistEntries(
+  userId: string,
+  templateId: string,
+  input: { edits?: ChecklistEntryEdit[]; remove?: string[]; order?: string[] },
+): Promise<{ checklist: ChecklistTemplate; edited: number; removed: number; reordered: boolean; total: number }> {
+  const checklist = await ownedChecklist(userId, templateId);
+  const items = await db
+    .select({ id: schema.checklistItems.id, text: schema.checklistItems.text, category: schema.checklistItems.category })
+    .from(schema.checklistItems)
+    .where(eq(schema.checklistItems.templateId, checklist.id))
+    .orderBy(asc(schema.checklistItems.position), asc(schema.checklistItems.text));
+  const onList = new Set(items.map((it) => it.id));
+  const named = [...(input.edits ?? []).map((e) => e.id), ...(input.remove ?? []), ...(input.order ?? [])];
+  if (named.some((id) => !onList.has(id))) throw new ServiceError(400, "That entry isn't on this list");
+
+  const removing = new Set(input.remove ?? []);
+  const edits = (input.edits ?? []).filter((e) => !removing.has(e.id));
+  const cleaned = edits.map((e) => ({
+    id: e.id,
+    text: e.text === undefined ? undefined : e.text.trim(),
+    category: e.category === undefined ? undefined : e.category?.trim() || null,
+  }));
+  if (cleaned.some((e) => e.text === "")) throw new ServiceError(400, "Item text is required");
+  rejectBadContent(userId, cleaned.flatMap((e) => [e.text, e.category]));
+
+  const kept = items.filter((it) => !removing.has(it.id)).map((it) => it.id);
+  const ordered = [...new Set(input.order ?? [])].filter((id) => !removing.has(id));
+  const placed = new Set(ordered);
+  const finalOrder = [...ordered, ...kept.filter((id) => !placed.has(id))];
+  const reordered = finalOrder.some((id, i) => kept[i] !== id);
+
+  await db.transaction(async (tx) => {
+    if (removing.size > 0) {
+      await tx
+        .delete(schema.checklistItems)
+        .where(and(eq(schema.checklistItems.templateId, checklist.id), inArray(schema.checklistItems.id, [...removing])));
+    }
+    for (const e of cleaned) {
+      if (e.text === undefined && e.category === undefined) continue;
+      await tx
+        .update(schema.checklistItems)
+        .set({
+          ...(e.text !== undefined ? { text: e.text } : {}),
+          ...(e.category !== undefined ? { category: e.category } : {}),
+        })
+        .where(eq(schema.checklistItems.id, e.id));
+    }
+    if (reordered || removing.size > 0) {
+      for (const [position, id] of finalOrder.entries()) {
+        await tx.update(schema.checklistItems).set({ position }).where(eq(schema.checklistItems.id, id));
+      }
+    }
+    await tx
+      .update(schema.checklistTemplates)
+      .set({ updatedAt: new Date() })
+      .where(eq(schema.checklistTemplates.id, checklist.id));
+  });
+
+  return {
+    checklist,
+    edited: cleaned.filter((e) => e.text !== undefined || e.category !== undefined).length,
+    removed: removing.size,
+    reordered,
+    total: finalOrder.length,
+  };
+}
+
+/**
+ * Delete one of your lists, its entries and your ticks on them. Copies other
+ * people adopted are theirs and stay; a published list leaves the public
+ * list. Own lists only — the admin's moderation delete is the route's.
+ */
+export async function deleteChecklist(userId: string, templateId: string): Promise<ChecklistTemplate> {
+  const checklist = await ownedChecklist(userId, templateId);
+  await db.delete(schema.checklistTemplates).where(eq(schema.checklistTemplates.id, checklist.id));
+  return checklist;
 }

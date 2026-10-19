@@ -132,3 +132,39 @@ export async function linkGames(
     .returning({ id: schema.userGameLinks.id });
   return { id: created?.id ?? null, created: !!created };
 }
+
+/**
+ * Remove whatever link there is between two games — the MCP `unlink_games`
+ * tool, which names games rather than a link id (the web app's `DELETE
+ * /api/games/:gameId/links/:linkId` has the row in hand). A pair is stored
+ * once, in one direction, so this looks both ways; there's normally one row,
+ * but a pair linked before one-link-per-pair was enforced can have more, and
+ * all of them go. Each comes back as the role `relatedGameId` played on
+ * `gameId`'s page, so the caller can say what was undone.
+ */
+export async function unlinkGames(
+  userId: string,
+  gameId: string,
+  relatedGameId: string,
+): Promise<Array<{ id: string; role: GameLinkRole | null }>> {
+  const deleted = await db
+    .delete(schema.userGameLinks)
+    .where(
+      and(
+        eq(schema.userGameLinks.userId, userId),
+        or(
+          and(eq(schema.userGameLinks.gameId, gameId), eq(schema.userGameLinks.relatedGameId, relatedGameId)),
+          and(eq(schema.userGameLinks.gameId, relatedGameId), eq(schema.userGameLinks.relatedGameId, gameId)),
+        ),
+      ),
+    )
+    .returning({
+      id: schema.userGameLinks.id,
+      gameId: schema.userGameLinks.gameId,
+      kind: schema.userGameLinks.kind,
+    });
+  return deleted.map((row) => ({
+    id: row.id,
+    role: roleFor(row.kind, row.gameId === gameId ? "base" : "related"),
+  }));
+}

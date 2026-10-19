@@ -3,9 +3,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import {
-  MAX_CUSTOM_PROGRESS_SECONDS,
   OWNERSHIP_FORMATS,
-  PROGRESS_BASES,
   estimateProgress,
   resolveTtb,
   ttbForBasis,
@@ -26,6 +24,13 @@ import {
 import { rememberConsoles } from "../services/consoles.js";
 import { defaultPlatformFor, defaultStatusFor } from "../services/preferences.js";
 import { missionCountsByGame, type MissionCounts } from "../services/progress.js";
+import {
+  deleteLibraryEntry,
+  ownershipSchema,
+  setEntryPlatforms,
+  updateLibraryEntries,
+  updateLibraryEntry,
+} from "../services/library-entries.js";
 import { replyWithServiceError } from "../services/service-error.js";
 import { setTimeToBeat } from "../services/time-to-beat.js";
 import { logEvent } from "../services/analytics.js";
@@ -40,10 +45,7 @@ async function assertCategory(userId: string, key: string, reply: FastifyReply) 
   return false;
 }
 
-const ownership = z.object({
-  platformId: z.string().uuid(),
-  format: z.enum(OWNERSHIP_FORMATS),
-});
+const ownership = ownershipSchema;
 
 const addSchema = z
   .object({
@@ -57,29 +59,6 @@ const addSchema = z
   .refine((v) => v.igdbId || v.gameId || v.title, {
     message: "Provide igdbId, gameId, or title",
   });
-
-const updateSchema = z.object({
-  status: categoryKey.optional(),
-  rating: z.number().min(0.5).max(5).multipleOf(0.5).nullable().optional(),
-  notes: z.string().max(10_000).nullable().optional(),
-  ttbEnabled: z.boolean().optional(),
-  completed100: z.boolean().optional(),
-  progressBasis: z.enum(PROGRESS_BASES).optional(),
-  // The length the `custom` basis divides up, in seconds; null clears it.
-  // Deliberately not tied to the basis in the same request: the figure is
-  // kept when you switch to another basis, so the two are set independently.
-  progressCustomSeconds: z
-    .number()
-    .int()
-    .min(60, "A custom time needs to be at least a minute")
-    .max(MAX_CUSTOM_PROGRESS_SECONDS, "That's longer than a custom time can be")
-    .nullable()
-    .optional(),
-  // Put that length on the library card. Independent of the two above for the
-  // same reason they're independent of each other: it's kept across a change
-  // of basis, and only read while the basis is `custom`.
-  progressCustomDisplay: z.boolean().optional(),
-});
 
 const bulkUpdateSchema = z
   .object({
@@ -501,47 +480,21 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     return progress;
   });
 
+  /**
+   * Change one entry: category, rating, notes, dates, flags. The rules —
+   * a real category, first-transition date stamps, a finish date that isn't
+   * before the start — live in `updateLibraryEntry`, which the MCP
+   * `update_game` tool calls too.
+   */
   app.patch<{ Params: { id: string } }>("/api/library/:id", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const parsed = updateSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ message: parsed.error.issues[0]?.message });
+    try {
+      await updateLibraryEntry(user.id, request.params.id, request.body);
+      return { ok: true };
+    } catch (err) {
+      return replyWithServiceError(reply, err);
     }
-    const [existing] = await db
-      .select()
-      .from(schema.userGames)
-      .where(and(eq(schema.userGames.id, request.params.id), eq(schema.userGames.userId, user.id)));
-    if (!existing) return reply.status(404).send({ message: "Not found" });
-
-    const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
-    const {
-      status,
-      rating,
-      notes,
-      ttbEnabled,
-      completed100,
-      progressBasis,
-      progressCustomSeconds,
-      progressCustomDisplay,
-    } = parsed.data;
-    if (status !== undefined) {
-      if (!(await assertCategory(user.id, status, reply))) return;
-      patch.status = status;
-      // auto-stamp progress dates on first transition
-      if (status === "playing" && !existing.startedAt) patch.startedAt = new Date();
-      if (status === "finished" && !existing.finishedAt) patch.finishedAt = new Date();
-    }
-    if (rating !== undefined) patch.rating = rating === null ? null : String(rating);
-    if (notes !== undefined) patch.notes = notes;
-    if (ttbEnabled !== undefined) patch.ttbEnabled = ttbEnabled;
-    if (completed100 !== undefined) patch.completed100 = completed100;
-    if (progressBasis !== undefined) patch.progressBasis = progressBasis;
-    if (progressCustomSeconds !== undefined) patch.progressCustomSeconds = progressCustomSeconds;
-    if (progressCustomDisplay !== undefined) patch.progressCustomDisplay = progressCustomDisplay;
-
-    await db.update(schema.userGames).set(patch).where(eq(schema.userGames.id, existing.id));
-    return { ok: true };
   });
 
   // Bulk edit: same fields as PATCH minus notes/rating, across many entries
@@ -554,19 +507,12 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     }
     const { ids, status, ttbEnabled, completed100, platforms, platformMode } = parsed.data;
 
-    const patch: Partial<typeof schema.userGames.$inferInsert> = { updatedAt: new Date() };
-    if (status !== undefined) {
-      if (!(await assertCategory(user.id, status, reply))) return;
-      patch.status = status;
+    let updated;
+    try {
+      ({ updated } = await updateLibraryEntries(user.id, ids, { status, ttbEnabled, completed100 }));
+    } catch (err) {
+      return replyWithServiceError(reply, err);
     }
-    if (ttbEnabled !== undefined) patch.ttbEnabled = ttbEnabled;
-    if (completed100 !== undefined) patch.completed100 = completed100;
-
-    const updated = await db
-      .update(schema.userGames)
-      .set(patch)
-      .where(and(inArray(schema.userGames.id, ids), eq(schema.userGames.userId, user.id)))
-      .returning({ id: schema.userGames.id, startedAt: schema.userGames.startedAt, finishedAt: schema.userGames.finishedAt });
 
     // platform ownership, scoped to the entries that were actually theirs
     if (platforms !== undefined) {
@@ -606,17 +552,6 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       }
     }
 
-    // auto-stamp progress dates on first transition, matching single PATCH
-    if (status === "playing" || status === "finished") {
-      const column = status === "playing" ? "startedAt" : "finishedAt";
-      const missing = updated.filter((r) => r[column] === null).map((r) => r.id);
-      if (missing.length > 0) {
-        await db
-          .update(schema.userGames)
-          .set(status === "playing" ? { startedAt: new Date() } : { finishedAt: new Date() })
-          .where(inArray(schema.userGames.id, missing));
-      }
-    }
     return { updated: updated.length };
   });
 
@@ -627,41 +562,23 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
     if (!parsed.success) {
       return reply.status(400).send({ message: parsed.error.issues[0]?.message });
     }
-    const [existing] = await db
-      .select({ id: schema.userGames.id })
-      .from(schema.userGames)
-      .where(and(eq(schema.userGames.id, request.params.id), eq(schema.userGames.userId, user.id)));
-    if (!existing) return reply.status(404).send({ message: "Not found" });
-
-    await db
-      .delete(schema.userGamePlatforms)
-      .where(eq(schema.userGamePlatforms.userGameId, existing.id));
-    if (parsed.data.platforms.length > 0) {
-      await db
-        .insert(schema.userGamePlatforms)
-        .values(
-          parsed.data.platforms.map((p) => ({
-            userGameId: existing.id,
-            platformId: p.platformId,
-            format: p.format,
-          })),
-        )
-        .onConflictDoNothing();
-      // filing a game under a console adds it to your consoles list
-      await rememberConsoles(user.id, parsed.data.platforms.map((p) => p.platformId));
+    try {
+      await setEntryPlatforms(user.id, request.params.id, parsed.data.platforms, "replace");
+      return { ok: true };
+    } catch (err) {
+      return replyWithServiceError(reply, err);
     }
-    return { ok: true };
   });
 
   app.delete<{ Params: { id: string } }>("/api/library/:id", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const deleted = await db
-      .delete(schema.userGames)
-      .where(and(eq(schema.userGames.id, request.params.id), eq(schema.userGames.userId, user.id)))
-      .returning({ id: schema.userGames.id });
-    if (deleted.length === 0) return reply.status(404).send({ message: "Not found" });
-    return { ok: true };
+    try {
+      await deleteLibraryEntry(user.id, request.params.id);
+      return { ok: true };
+    } catch (err) {
+      return replyWithServiceError(reply, err);
+    }
   });
 
   /**

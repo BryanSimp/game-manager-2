@@ -15,12 +15,15 @@ import { logEvent } from "../services/analytics.js";
 import { isValidCategory } from "../services/categories.js";
 import {
   addGamesToCollection,
-  collectionSchema,
   createCollection,
+  deleteCollection,
   graphsOf,
   gridSlot,
+  orderCollection,
   ownedCollection,
   placeOnGraphs,
+  removeGamesFromCollection,
+  updateCollection,
 } from "../services/collections.js";
 import { resolveTtbFor } from "../services/community.js";
 import { rememberConsoles } from "../services/consoles.js";
@@ -28,7 +31,6 @@ import { inspectAll } from "../services/content-filter.js";
 import { versionsFor } from "../services/game-versions.js";
 import { matchTitle } from "../services/matcher.js";
 import { extractTitles } from "../services/noise-filter.js";
-import { publishModeFor } from "../services/preferences.js";
 import {
   addGameTime,
   emptyCollectionTime,
@@ -745,69 +747,22 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
   app.patch<{ Params: { id: string } }>("/api/collections/:id", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const parsed = collectionSchema.partial().safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ message: parsed.error.issues[0]?.message });
-    }
-    const existing = await ownedCollection(user.id, request.params.id);
-    if (!existing) return reply.status(404).send({ message: "Collection not found" });
-
-    // "Never publish" is a guarantee rather than a default: both apps hide the
-    // control, and the API refuses anything that asks anyway. Unpublishing is
-    // never refused — the setting governs what goes out, not what comes back.
-    if (parsed.data.isPublic === true && (await publishModeFor(user.id)) === "never") {
-      return reply.status(403).send({ message: "Publishing is turned off in your preferences" });
-    }
-
-    // Publishing re-checks the whole collection, not just the fields in this
-    // request: a collection written before the filter existed would otherwise
-    // walk straight into the public list on an isPublic-only PATCH. Graph
-    // names are part of "the whole collection" — they're the tabs a visitor
-    // reads.
-    const toCheck =
-      parsed.data.isPublic === true
-        ? [
-            parsed.data.name ?? existing.name,
-            parsed.data.description ?? existing.description,
-            ...(await graphsOf(existing.id)).map((g) => g.name),
-          ]
-        : [parsed.data.name, parsed.data.description];
-    const issue = inspectAll(toCheck);
-    if (issue) {
-      logEvent("content_blocked", user.id, { surface: "collection", kind: issue.kind });
-      return reply.status(400).send({ message: issue.message });
-    }
-
-    let updated;
     try {
-      updated = await db
-        .update(schema.collections)
-        .set(parsed.data)
-        .where(
-          and(eq(schema.collections.id, request.params.id), eq(schema.collections.userId, user.id)),
-        )
-        .returning();
+      return await updateCollection(user.id, request.params.id, request.body);
     } catch (err) {
-      // (user_id, name) is unique, so renaming onto a name you already use is
-      // a 409 like it is on create — not the raw 500 it used to be
-      if (isUniqueViolation(err)) {
-        return reply.status(409).send({ message: "You already have a collection with that name" });
-      }
-      throw err;
+      return replyWithServiceError(reply, err);
     }
-    if (updated.length === 0) return reply.status(404).send({ message: "Collection not found" });
-    return updated[0];
   });
 
   app.delete<{ Params: { id: string } }>("/api/collections/:id", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const deleted = await db
-      .delete(schema.collections)
-      .where(and(eq(schema.collections.id, request.params.id), eq(schema.collections.userId, user.id)))
-      .returning({ id: schema.collections.id });
-    if (deleted.length === 0) return reply.status(404).send({ message: "Collection not found" });
-    return { ok: true };
+    try {
+      await deleteCollection(user.id, request.params.id);
+      return { ok: true };
+    } catch (err) {
+      return replyWithServiceError(reply, err);
+    }
   });
 
   /**
@@ -998,83 +953,34 @@ export function registerCollectionRoutes(app: FastifyInstance): void {
     async (request, reply) => {
       const user = await requireUser(request, reply);
       if (!user) return;
-      const collection = await ownedCollection(user.id, request.params.id);
-      if (!collection) return reply.status(404).send({ message: "Collection not found" });
-      await db
-        .delete(schema.collectionGames)
-        .where(
-          and(
-            eq(schema.collectionGames.collectionId, collection.id),
-            eq(schema.collectionGames.gameId, request.params.gameId),
-          ),
-        );
-      // off every graph too: its node, and any arrow that touched it
-      const graphIds = (await graphsOf(collection.id)).map((g) => g.id);
-      if (graphIds.length > 0) {
-        await db
-          .delete(schema.collectionGraphNodes)
-          .where(
-            and(
-              inArray(schema.collectionGraphNodes.graphId, graphIds),
-              eq(schema.collectionGraphNodes.gameId, request.params.gameId),
-            ),
-          );
+      try {
+        // off the list, off every graph, and any arrow that touched it
+        await removeGamesFromCollection(user.id, request.params.id, [request.params.gameId]);
+        return { ok: true };
+      } catch (err) {
+        return replyWithServiceError(reply, err);
       }
-      await db
-        .delete(schema.collectionLinks)
-        .where(
-          and(
-            eq(schema.collectionLinks.collectionId, collection.id),
-            sql`(${schema.collectionLinks.fromGameId} = ${request.params.gameId} or ${schema.collectionLinks.toGameId} = ${request.params.gameId})`,
-          ),
-        );
-      return { ok: true };
     },
   );
 
   /**
-   * Set the flat list order. Independent of the graph: the list view is for
-   * "1, 2, 3…" and the graph is for branches, and people want both.
-   *
-   * Ids not in the collection are ignored, and anything the caller left out
-   * keeps its place at the end, so a stale client can't silently drop a game
-   * that was added from another device.
+   * Set the flat list order (`orderCollection`, shared with the MCP
+   * `update_collection` tool). Ids not in the collection are ignored, and
+   * anything the caller left out keeps its place at the end.
    */
   app.put<{ Params: { id: string } }>("/api/collections/:id/order", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return;
-    const collection = await ownedCollection(user.id, request.params.id);
-    if (!collection) return reply.status(404).send({ message: "Collection not found" });
-
     const parsed = z
       .object({ gameIds: z.array(z.string().uuid()).max(500) })
       .safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ message: "gameIds required" });
-
-    const existing = await db
-      .select({ gameId: schema.collectionGames.gameId })
-      .from(schema.collectionGames)
-      .where(eq(schema.collectionGames.collectionId, collection.id));
-    const known = new Set(existing.map((e) => e.gameId));
-
-    const ordered = parsed.data.gameIds.filter((gameId) => known.has(gameId));
-    const seen = new Set(ordered);
-    const rest = existing.map((e) => e.gameId).filter((gameId) => !seen.has(gameId));
-
-    let position = 0;
-    for (const gameId of [...ordered, ...rest]) {
-      position += 1;
-      await db
-        .update(schema.collectionGames)
-        .set({ sortOrder: position })
-        .where(
-          and(
-            eq(schema.collectionGames.collectionId, collection.id),
-            eq(schema.collectionGames.gameId, gameId),
-          ),
-        );
+    try {
+      const { ordered } = await orderCollection(user.id, request.params.id, parsed.data.gameIds);
+      return { ok: true, ordered };
+    } catch (err) {
+      return replyWithServiceError(reply, err);
     }
-    return { ok: true, ordered: position };
   });
 
   /**

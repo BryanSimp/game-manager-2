@@ -225,6 +225,13 @@
       "when": 1792345526308,
       "tag": "0031_warm_impossible_man",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792413967358,
+      "tag": "0032_faulty_wild_pack",
+      "breakpoints": true
     }
   ]
 }

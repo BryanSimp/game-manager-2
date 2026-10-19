@@ -19,8 +19,14 @@ import { Dropdown, DropdownItem, DropdownLabel } from "./Dropdown.js";
 
 /** the four you add to a game, in the order they were asked for */
 const PRIMARY_ROLES = GAME_LINK_ROLES.filter((role) => GAME_LINK_ROLE_META[role].primary);
-/** the two that say what a game belongs to, which only matter on some games */
-const BELONGS_TO_ROLES = GAME_LINK_ROLES.filter((role) => !GAME_LINK_ROLE_META[role].primary);
+/** the three that say what a game belongs to, which only matter on some games */
+const BELONGS_TO_ROLES = GAME_LINK_ROLES.filter(
+  (role) => !GAME_LINK_ROLE_META[role].primary && GAME_LINK_ROLE_META[role].side === "related",
+);
+/** what a compilation holds — rarer still, so it gets its own corner of the menu */
+const BUNDLES_ROLES = GAME_LINK_ROLES.filter(
+  (role) => !GAME_LINK_ROLE_META[role].primary && GAME_LINK_ROLE_META[role].side === "base",
+);
 
 /**
  * One game's links. Every page that shows them shares this key, so linking
@@ -179,6 +185,20 @@ function AddLinkMenu({ onPick }: { onPick: (role: GameLinkRole) => void }) {
               {GAME_LINK_ROLE_META[role].singular}
             </DropdownItem>
           ))}
+          <div className="mx-2 my-1.5 border-t border-zinc-800" />
+          <DropdownLabel>…or, for a compilation, what it includes</DropdownLabel>
+          {BUNDLES_ROLES.map((role) => (
+            <DropdownItem
+              key={role}
+              hint={GAME_LINK_ROLE_META[role].hint}
+              onSelect={() => {
+                close();
+                onPick(role);
+              }}
+            >
+              {GAME_LINK_ROLE_META[role].singular}
+            </DropdownItem>
+          ))}
         </>
       )}
     </Dropdown>
@@ -300,6 +320,13 @@ function LinkPicker({
           </optgroup>
           <optgroup label="What this game belongs to">
             {BELONGS_TO_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {GAME_LINK_ROLE_META[r].singular}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="If it's a compilation">
+            {BUNDLES_ROLES.map((r) => (
               <option key={r} value={r}>
                 {GAME_LINK_ROLE_META[r].singular}
               </option>

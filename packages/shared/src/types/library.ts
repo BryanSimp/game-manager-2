@@ -774,6 +774,11 @@ export interface ChecklistSummary {
    * rendered as a link. Nothing writes it any more.
    */
   sourceUrl: string | null;
+  /**
+   * Where the entries came from, as whoever made the list said — a URL or a
+   * line of text. Set by the MCP checklist tools; no licence is implied.
+   */
+  source: string | null;
   /** played in order: ticking an entry implies everything before it */
   sequential: boolean;
   /** author display name — set on public templates from other users */
@@ -801,6 +806,7 @@ export interface ChecklistDetail {
   kind: ChecklistKind;
   isPublic: boolean;
   sourceUrl: string | null;
+  source: string | null;
   sequential: boolean;
   mine: boolean;
   authorName: string | null;
