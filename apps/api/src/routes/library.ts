@@ -131,9 +131,9 @@ const bulkSchema = z.object({
  *
  * Play times come from `resolveTtb` rather than straight off the row: the
  * catalog columns only hold IGDB's figures (and manual values written before
- * play times went per-user), so a game IGDB has never heard of falls back to
- * your own submission and then to the average of everyone's. Callers that
- * have a resolved triple pass it; the rest get the raw row, which
+ * play times went per-user), your own submission overrides them, and a game
+ * nobody's figure covers falls back to the average of everyone's. Callers
+ * that have a resolved triple pass it; the rest get the raw row, which
  * `resolveTtb` reports as-is.
  */
 export function gameToJson(game: typeof schema.games.$inferSelect, ttb?: ResolvedTtb) {
@@ -665,8 +665,9 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
   });
 
   /**
-   * Record how long this game took *you*, for when IGDB has nothing. Values
-   * are seconds; null clears one and an omitted key keeps it. The rules —
+   * Record how long this game took *you* — which is what you see from then
+   * on, in place of IGDB's figure (`resolveTtb`). Values are seconds; null
+   * clears one and an omitted key keeps it. The rules —
    * per-user, normalized, all-null removes the submission — live in
    * `setTimeToBeat`, which the MCP `set_time_to_beat` tool calls too.
    */
@@ -696,15 +697,36 @@ export function registerLibraryRoutes(app: FastifyInstance): void {
       if (!user) return;
       const gameId = request.params.gameId;
 
-      const [ratings, times, own] = await Promise.all([
+      const [ratings, times, own, [game]] = await Promise.all([
         communityRatings([gameId]),
         communityTimes([gameId]),
         ownTimes(user.id, [gameId]),
+        db
+          .select({
+            ttbMain: schema.games.ttbMain,
+            ttbMainExtra: schema.games.ttbMainExtra,
+            ttbCompletionist: schema.games.ttbCompletionist,
+            ttbSource: schema.games.ttbSource,
+          })
+          .from(schema.games)
+          .where(eq(schema.games.id, gameId)),
       ]);
+      // the catalog's own figure, which yours overrides — the card shows it
+      // beside yours so overriding never hides what IGDB says
+      const catalog =
+        game && (game.ttbMain != null || game.ttbMainExtra != null || game.ttbCompletionist != null)
+          ? {
+              ttbMain: game.ttbMain,
+              ttbMainExtra: game.ttbMainExtra,
+              ttbCompletionist: game.ttbCompletionist,
+              source: game.ttbSource === "manual" ? ("manual" as const) : ("igdb" as const),
+            }
+          : null;
       return {
         rating: ratings.get(gameId) ?? null,
         timeToBeat: times.get(gameId) ?? null,
         yours: own.get(gameId) ?? null,
+        catalog,
         minRatings: MIN_RATINGS,
       };
     },

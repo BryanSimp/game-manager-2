@@ -68,10 +68,10 @@ export const userGames = pgTable(
  *
  * Play times used to be written straight onto the shared `games` row, which
  * meant one person's typo became everyone's number and there was nothing to
- * average. They live per-user now: your figure drives your own estimate, and
- * the average of everyone's fills in games IGDB has no data for. Legacy
- * `games.ttb_source = 'manual'` values predate this and still win — see
- * `resolveTtb` in @gm/shared for the precedence.
+ * average. They live per-user now: your figure is what you see (it overrides
+ * IGDB's, for you alone) and drives your own estimate, and the average of
+ * everyone's fills in games IGDB has no data for. See `resolveTtb` in
+ * @gm/shared for the precedence.
  */
 export const userTimeToBeat = pgTable(
   "user_time_to_beat",

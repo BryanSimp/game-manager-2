@@ -176,9 +176,10 @@ Changing, only with **Allow changes** on:
   told to tick only what you say you've done or your achievements show.
 - `link_games` — DLC, prequel/sequel or remake/remaster links, with the same rules as the Linked
   tab (no self-links, one link per pair).
-- `set_time_to_beat` — your own main / main + extras / completionist hours for a game. These feed
+- `set_time_to_beat` — your own main / main + extras / completionist hours for a game. Yours
+  replace IGDB's figure for you (as they do when you type them on the game's page), and they feed
   the community average, so Claude is told to set them only when you give a figure or a reliable
-  source does.
+  source does. Clearing them goes back to IGDB's.
 
 Games are named by id or exact title. Collections and links can include games you don't own, as
 in the web app: a title that isn't in your library is looked up in the shared catalog, then on

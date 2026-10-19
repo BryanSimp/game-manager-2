@@ -570,10 +570,12 @@ function Ttb({ label, value }: { label: string; value: string | null }) {
 /**
  * How long to beat, with a manual override.
  *
- * IGDB has no times for most niche games, so the three figures are editable.
- * What you enter is *your* submission — it drives your own estimate, and the
+ * The three figures are editable, whether or not IGDB has any. What you enter
+ * is *your* submission: it's what you see from then on, in place of IGDB's
+ * figure (for you alone — `resolveTtb`), it drives your own estimate, and the
  * average of everyone's is what the app shows other people who own a game
- * IGDB knows nothing about.
+ * IGDB knows nothing about. IGDB's figure stays on the card under yours, so
+ * overriding it never hides what it says.
  */
 function TimeToBeatCard({
   entry,
@@ -625,16 +627,36 @@ function TimeToBeatCard({
     },
   });
 
+  const catalog = community.data?.catalog ?? null;
+  const catalogName = catalog?.source === "manual" ? "the catalog's" : "IGDB's";
   const sourceNote =
     g.ttbSource === "community"
       ? `Averaged from ${g.ttbCount ?? 0} player${g.ttbCount === 1 ? "" : "s"}`
       : g.ttbSource === "yours"
-        ? "Your own figure"
+        ? catalog
+          ? `Your own figure, in place of ${catalogName}`
+          : "Your own figure"
         : g.ttbSource === "manual"
           ? "Set by hand"
           : g.ttbSource === "igdb"
             ? "From IGDB"
             : null;
+  // what you're overriding, kept in view: "IGDB's: 27h main · 60h completionist"
+  const overridden =
+    g.ttbSource === "yours" && catalog
+      ? [
+          catalog.ttbMain != null && `${formatHours(catalog.ttbMain)} main`,
+          catalog.ttbMainExtra != null && `${formatHours(catalog.ttbMainExtra)} + extras`,
+          catalog.ttbCompletionist != null && `${formatHours(catalog.ttbCompletionist)} completionist`,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
+  const editLabel = community.data?.yours
+    ? "Edit yours ✎"
+    : g.ttbSource === "igdb" || g.ttbSource === "manual"
+      ? "Override ✎"
+      : "+ Add yours";
 
   if (!hasAny && !editing) {
     return (
@@ -670,9 +692,13 @@ function TimeToBeatCard({
           <button
             onClick={startEditing}
             className="text-xs text-zinc-500 hover:text-indigo-300"
-            title={sourceNote ?? undefined}
+            title={
+              editLabel === "Override ✎"
+                ? "Use your own figures instead of IGDB's — only you see them in its place"
+                : (sourceNote ?? undefined)
+            }
           >
-            {community.data?.yours ? "Edit yours ✎" : "+ Add yours"}
+            {editLabel}
           </button>
         )}
       </div>
@@ -688,8 +714,10 @@ function TimeToBeatCard({
           <HoursField label="Main + extras" value={extra} onChange={setExtra} />
           <HoursField label="Completionist" value={full} onChange={setFull} />
           <p className="mt-2 text-xs text-zinc-500">
-            Hours, as it went for you. Clear every field to withdraw your figure. Yours drives
-            your own estimate; the average of everyone's fills in games IGDB has no data for.
+            Hours, as it went for you. Yours replaces IGDB's figure for you (nobody else sees it
+            in its place) and drives your own estimate; the average of everyone's fills in games
+            IGDB has no data for. Clear every field to withdraw yours
+            {catalog ? ` and go back to ${catalogName}` : ""}.
           </p>
           {save.isError && (
             <p className="mt-2 text-xs text-red-400">
@@ -719,9 +747,17 @@ function TimeToBeatCard({
           <Ttb label="Main + extras" value={formatHours(g.ttbMainExtra)} />
           <Ttb label="Completionist" value={formatHours(g.ttbCompletionist)} />
           {sourceNote && <p className="mt-1 text-xs text-zinc-600">{sourceNote}</p>}
-          {/* the figure on show comes from IGDB, but players have said
-              otherwise — worth seeing both */}
-          {g.ttbSource !== "community" && community.data?.timeToBeat?.ttbMain != null && (
+          {overridden && (
+            <p className="mt-1 text-xs text-zinc-600">
+              {catalog?.source === "manual" ? "Catalog" : "IGDB"} says {overridden}
+            </p>
+          )}
+          {/* the figure on show comes from IGDB (or you), but players have
+              said otherwise — worth seeing both. When yours is the only
+              submission the "average" is just yours again, so it's left out */}
+          {g.ttbSource !== "community" &&
+            community.data?.timeToBeat?.ttbMain != null &&
+            !(g.ttbSource === "yours" && community.data.timeToBeat.count <= 1) && (
             <p className="mt-1 text-xs text-zinc-600">
               Players say {formatHours(community.data.timeToBeat.ttbMain)} (
               {community.data.timeToBeat.count} submitted)
