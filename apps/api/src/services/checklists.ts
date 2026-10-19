@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { MAIN_LIST_KIND, type ChecklistKind } from "@gm/shared";
 import { db, schema } from "../db/index.js";
 import { logEvent } from "./analytics.js";
@@ -7,10 +7,11 @@ import { publishModeFor } from "./preferences.js";
 import { ServiceError } from "./service-error.js";
 
 /**
- * Making a progress list and adding entries to it — shared by the web routes
- * (`routes/checklists.ts`) and the MCP `create_checklist` tool, so both hold
- * a list to the same limits, the same content filter and the same
- * one-main-story-list-per-game rule.
+ * Making a progress list, adding entries to it and ticking them off — shared
+ * by the web routes (`routes/checklists.ts`) and the MCP `create_checklist`
+ * and `tick_checklist_items` tools, so both hold a list to the same limits,
+ * the same content filter, the same one-main-story-list-per-game rule and the
+ * same own-lists-only rule for progress.
  */
 
 export const CHECKLIST_TITLE_MAX = 200;
@@ -230,4 +231,164 @@ export async function addChecklistEntries(
     already: entries.length - fresh.length,
     total: existing.length + added.length,
   };
+}
+
+/** One entry on a list, with whether this user has ticked it. */
+export interface ChecklistItemState {
+  id: string;
+  position: number;
+  text: string;
+  category: string | null;
+  completedAt: Date | null;
+}
+
+/**
+ * A list's entries with this user's ticks, in the order the Progress tab
+ * draws them: by position, then text. `GET /api/checklists/:id` returns this,
+ * and the MCP tools number entries from it, so "item 12" is the twelfth row
+ * on screen.
+ */
+export async function loadChecklistItems(
+  userId: string,
+  templateId: string,
+): Promise<ChecklistItemState[]> {
+  return db
+    .select({
+      id: schema.checklistItems.id,
+      position: schema.checklistItems.position,
+      text: schema.checklistItems.text,
+      category: schema.checklistItems.category,
+      completedAt: schema.userChecklistItems.completedAt,
+    })
+    .from(schema.checklistItems)
+    .leftJoin(
+      schema.userChecklistItems,
+      and(
+        eq(schema.userChecklistItems.itemId, schema.checklistItems.id),
+        eq(schema.userChecklistItems.userId, userId),
+      ),
+    )
+    .where(eq(schema.checklistItems.templateId, templateId))
+    .orderBy(asc(schema.checklistItems.position), asc(schema.checklistItems.text));
+}
+
+/** Tick or untick entries already known to be on one of the user's lists; how many rows changed. */
+async function writeTicks(userId: string, itemIds: string[], done: boolean): Promise<number> {
+  if (itemIds.length === 0) return 0;
+  if (done) {
+    const inserted = await db
+      .insert(schema.userChecklistItems)
+      .values(itemIds.map((itemId) => ({ userId, itemId })))
+      .onConflictDoNothing()
+      .returning({ itemId: schema.userChecklistItems.itemId });
+    return inserted.length;
+  }
+  const deleted = await db
+    .delete(schema.userChecklistItems)
+    .where(
+      and(
+        eq(schema.userChecklistItems.userId, userId),
+        inArray(schema.userChecklistItems.itemId, itemIds),
+      ),
+    )
+    .returning({ itemId: schema.userChecklistItems.itemId });
+  return deleted.length;
+}
+
+/**
+ * Tick (or untick) entries on one of your own lists — `PUT
+ * /api/checklists/:id/items/check` and the MCP `tick_checklist_items` tool.
+ *
+ * Own lists only: progress on someone's published list means adopting it
+ * first. The ids are re-checked against the template, so a caller can't tick
+ * off someone else's list by guessing ids — ones that aren't on this list are
+ * dropped, not refused. Exactly the ids given are written; a sequential
+ * list's fill-in is worked out by the caller (`throughLastTarget`), because
+ * the web app sends the filled-in ids itself.
+ *
+ * `matched` is how many of the ids were on the list; `changed` how many of
+ * those weren't already in the state asked for.
+ */
+export async function setChecklistItemsDone(
+  userId: string,
+  templateId: string,
+  itemIds: string[],
+  done: boolean,
+): Promise<{ checklist: ChecklistTemplate; matched: number; changed: number }> {
+  const [checklist] = await db
+    .select()
+    .from(schema.checklistTemplates)
+    .where(
+      and(
+        eq(schema.checklistTemplates.id, templateId),
+        eq(schema.checklistTemplates.authorUserId, userId),
+      ),
+    );
+  if (!checklist) throw new ServiceError(404, "Checklist not found");
+  if (itemIds.length === 0) return { checklist, matched: 0, changed: 0 };
+
+  const onList = await db
+    .select({ id: schema.checklistItems.id })
+    .from(schema.checklistItems)
+    .where(
+      and(
+        eq(schema.checklistItems.templateId, checklist.id),
+        inArray(schema.checklistItems.id, itemIds),
+      ),
+    );
+  const changed = await writeTicks(
+    userId,
+    onList.map((it) => it.id),
+    done,
+  );
+  return { checklist, matched: onList.length, changed };
+}
+
+/** One entry, by its id alone — `PUT /api/checklists/items/:itemId/check`. Own lists only. */
+export async function setChecklistItemDone(
+  userId: string,
+  itemId: string,
+  done: boolean,
+): Promise<{ changed: number }> {
+  const [row] = await db
+    .select({
+      itemId: schema.checklistItems.id,
+      authorUserId: schema.checklistTemplates.authorUserId,
+    })
+    .from(schema.checklistItems)
+    .innerJoin(
+      schema.checklistTemplates,
+      eq(schema.checklistItems.templateId, schema.checklistTemplates.id),
+    )
+    .where(eq(schema.checklistItems.id, itemId));
+  if (!row || row.authorUserId !== userId) throw new ServiceError(404, "Item not found");
+  return { changed: await writeTicks(userId, [row.itemId], done) };
+}
+
+/**
+ * Does ticking an entry on this list also tick everything before it? Only on
+ * a sequential main story list — you can't have reached mission 15 without
+ * 1–14. The Progress tab only draws the switch on the main story list, so a
+ * sequential flag on an extra (settable only through the raw PATCH) isn't
+ * something anyone chose to see fill in.
+ */
+export function fillsInSequence(checklist: Pick<ChecklistTemplate, "kind" | "sequential">): boolean {
+  return checklist.kind === MAIN_LIST_KIND && checklist.sequential;
+}
+
+/**
+ * The unticked entries before the last of `targets`, in list order — what a
+ * sequential list fills in when those targets are ticked. The Progress tab
+ * does the same for one entry (`items.slice(0, index + 1)`); several targets
+ * fill in through the furthest one.
+ */
+export function throughLastTarget(items: ChecklistItemState[], targets: ReadonlySet<string>): string[] {
+  let last = -1;
+  items.forEach((it, i) => {
+    if (targets.has(it.id)) last = i;
+  });
+  return items
+    .slice(0, last + 1)
+    .filter((it) => !it.completedAt && !targets.has(it.id))
+    .map((it) => it.id);
 }

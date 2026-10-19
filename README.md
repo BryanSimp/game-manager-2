@@ -112,7 +112,8 @@ The API serves an [MCP](https://modelcontextprotocol.io) server at `/api/mcp`, s
 answer questions about your library — "what should I play next?", "how far through Hollow Knight
 am I?", "how long is the rest of my Zelda marathon?" — and, if you let it, organise it: "tag all
 my co-op games", "make a collection of the Zelda games in release order", "make a checklist of
-Hollow Knight's bosses", "link the DLC to its base games". Each person connects with their own credentials and only ever sees or changes their
+Hollow Knight's bosses", "I just beat the Mantis Lords, tick them off", "link the DLC to its base
+games". Each person connects with their own credentials and only ever sees or changes their
 own library.
 
 Reading is always on. **Changes are opt-in, per key or per connection**: a key only writes if you
@@ -150,8 +151,10 @@ then run the `claude mcp add …` command the card gave you for the new key (wit
 
 Reading, with any key or connection: `list_library` (filter by category, platform, tag or title),
 `get_game` (notes, mission progress, checklists and linked DLC/sequels/remakes), `get_dashboard`,
-`list_collections`, `get_collection` (games in play order), `list_categories` and
-`get_backlog_candidates` (Backlog, Shelved and Wishlist, shortest remaining first).
+`list_collections`, `get_collection` (games in play order), `list_categories`,
+`get_backlog_candidates` (Backlog, Shelved and Wishlist, shortest remaining first), `get_checklist`
+(one of a game's checklists, item by item and numbered) and `get_achievements` (a game's Steam
+achievements and which you've unlocked, once Steam is linked and synced).
 
 Changing, only with **Allow changes** on:
 
@@ -166,6 +169,11 @@ Changing, only with **Allow changes** on:
   grouped into chapters. A `main_story` list (one per game) is what the Progress tab divides the
   time to beat across; anything else is an extra list. Always private and nothing ticked. A title
   the game already has a list under adds to that list, skipping items it already has.
+- `tick_checklist_items` — tick items off one of your checklists (or untick them), by exact text
+  or by number, and optionally every item named exactly like a Steam achievement you've unlocked.
+  A sequential main story list fills in the items before, as the Progress tab does. Text that
+  matches no item, or several, comes back with item numbers rather than being guessed. Claude is
+  told to tick only what you say you've done or your achievements show.
 - `link_games` — DLC, prequel/sequel or remake/remaster links, with the same rules as the Linked
   tab (no self-links, one link per pair).
 - `set_time_to_beat` — your own main / main + extras / completionist hours for a game. These feed
@@ -177,7 +185,7 @@ in the web app: a title that isn't in your library is looked up in the shared ca
 IGDB.
 
 What it can't do, with any key: delete anything; rename or delete tags, collections or
-checklists; tick checklist items off or edit them; change a game's category, rating, notes,
+checklists; edit, reorder or remove checklist items; change a game's category, rating, notes,
 platforms or dates; publish a collection or checklist; or touch your account or settings. One request carries at most one change, and every change is logged (tool name and
 counts, never titles) like the web app's own writes.
 

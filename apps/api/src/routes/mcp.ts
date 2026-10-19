@@ -27,6 +27,8 @@ import {
   toolGetBacklogCandidates,
   toolGetCollection,
   toolGetDashboard,
+  toolGetAchievements,
+  toolGetChecklist,
   toolGetGame,
   toolLinkGames,
   toolListCategories,
@@ -34,6 +36,7 @@ import {
   toolListLibrary,
   toolSetTimeToBeat,
   toolTagGames,
+  toolTickChecklistItems,
   toolUntagGames,
   type McpAccess,
 } from "../services/mcp-tools.js";
@@ -45,8 +48,9 @@ import { MAX_TTB_SECONDS } from "../services/time-to-beat.js";
  *
  * This is how Claude (Claude Code, and claude.ai as a custom connector)
  * reads your library — "what should I play next?", "how far through Elden
- * Ring am I?" — and, when you've allowed it, tidies it up: tags, collections,
- * progress checklists, links between games, your own play times. It lives under `/api` so the
+ * Ring am I?" — and, when you've allowed it, tidies it up and records progress:
+ * tags, collections, progress checklists and ticking them off, links between
+ * games, your own play times. It lives under `/api` so the
  * routing that already sends `/api/*` to this server (Traefik's
  * `PathPrefix(/api)`, the self-host nginx, the Vite proxy) carries it
  * without changes.
@@ -60,7 +64,7 @@ import { MAX_TTB_SECONDS } from "../services/time-to-beat.js";
  * **Reads always, writes by permission.** The credential that reaches this
  * route works nowhere else — neither an API key nor an OAuth access token is
  * a session (see `auth.ts`), so neither can be replayed against the web
- * app's write routes. What it can change is therefore exactly the eight
+ * app's write routes. What it can change is therefore exactly the nine
  * write tools below, and only when the credential was granted changes: a key
  * made with "Allow changes", or a token with `library:write`. Every caller
  * sees every tool listed; a read-only one gets an error result from a write
@@ -73,11 +77,13 @@ import { MAX_TTB_SECONDS } from "../services/time-to-beat.js";
 
 const INSTRUCTIONS = `Game Manager is the user's personal video game library. Everything these tools return or change belongs to the signed-in user and nobody else.
 
-Reading is always allowed. Changes are limited to eight tools — create_tag, tag_games, untag_games, create_collection, add_games_to_collection, create_checklist, link_games and set_time_to_beat — and they only work when the user allowed changes for this connection (an API key made with "Allow changes" on, or "Allow changes" ticked when connecting); otherwise they return an error saying how to allow them. They add tags, collections, progress checklists, linked games and the user's own time-to-beat figures, and untag_games takes a tag off games. Nothing here can delete a game, tag, collection or checklist, rename anything, tick checklist items off, change a game's category, rating, notes, platforms or dates, or publish a collection or checklist. Only make changes the user asked for, and tell them what changed.
+Reading is always allowed. Changes are limited to nine tools — create_tag, tag_games, untag_games, create_collection, add_games_to_collection, create_checklist, tick_checklist_items, link_games and set_time_to_beat — and they only work when the user allowed changes for this connection (an API key made with "Allow changes" on, or "Allow changes" ticked when connecting); otherwise they return an error saying how to allow them. They add tags, collections, progress checklists, linked games and the user's own time-to-beat figures, untag_games takes a tag off games, and tick_checklist_items ticks checklist items off (or back on). Nothing here can delete a game, tag, collection or checklist, rename anything, change a game's category, rating, notes, platforms or dates, or publish a collection or checklist. Only make changes the user asked for, and tell them what changed.
 
 Every game in the library is filed under one category: the built-ins are Uncategorized, Wishlist, Backlog, Playing, Finished, Shelved and Dropped, and the user may have custom ones too (list_categories). Games are owned on one or more platforms, each physical or digital; PC storefronts like Steam are "part of" PC, so filtering by PC includes them. Ratings are out of 5 in half stars. Times are in hours. "Time to beat" comes from IGDB, the user's own figure or a community average. A progress percentage exists only when the user keeps a main story checklist (mission list) for the game.
 
-For "what should I play next?", start with get_backlog_candidates. To look at one game in depth, call get_game with the id from any other tool's results. The write tools take a game as its id from another tool's results or its exact title.`;
+For "what should I play next?", start with get_backlog_candidates. To look at one game in depth, call get_game with the id from any other tool's results. The write tools take a game as its id from another tool's results or its exact title.
+
+To record progress ("I just beat Margit"), get_game names the game's checklists, get_checklist shows one item by item with numbers, and tick_checklist_items ticks items by text or number. get_achievements shows the user's Steam achievements for a game, so you can tick the items their unlocks show they've done. Only tick what the user says they've done or what their unlocked achievements show.`;
 
 /** A tool's result: compact JSON as text, or the error a model can act on. */
 async function run(fn: () => Promise<unknown>) {
@@ -95,8 +101,9 @@ async function run(fn: () => Promise<unknown>) {
 }
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
-// every write only adds, or (untag_games) removes an assignment, and doing
-// one twice changes nothing more than doing it once
+// every write only adds, removes an assignment (untag_games) or a tick
+// (tick_checklist_items with done: false), and doing one twice changes
+// nothing more than doing it once
 const WRITE = {
   readOnlyHint: false,
   destructiveHint: false,
@@ -150,6 +157,17 @@ const checklistItem = z.union([
       .describe('The chapter, act or area it sits under, e.g. "Act 1" or "Limgrave".'),
   }),
 ]);
+
+/** Which of a game's checklists, the way get_checklist and tick_checklist_items take it. */
+const listRef = z
+  .string()
+  .trim()
+  .min(1)
+  .max(CHECKLIST_TITLE_MAX)
+  .optional()
+  .describe(
+    "The checklist's title, as get_game names it (ignoring case). Can be left out when the game has only one checklist.",
+  );
 
 /** What each link role says the related game is, from GAME_LINK_ROLE_META's own hints. */
 const LINK_ROLE_GUIDE = GAME_LINK_ROLES.map(
@@ -300,6 +318,39 @@ export function buildMcpServer(caller: McpCaller): McpServer {
     (args) => run(() => toolGetBacklogCandidates(userId, args)),
   );
 
+  server.registerTool(
+    "get_checklist",
+    {
+      title: "Get checklist",
+      description:
+        "One of the user's checklists for a game in their library, item by item: each item's number (from 1, in the order the game's Progress tab shows them), text, chapter, and whether it's ticked and when, plus done/total and whether ticking an item also ticks the ones before it (sequential). Use it to find what tick_checklist_items should tick — by number when the user describes items rather than naming them (\"the first three Act 1 missions\"). get_game names a game's checklists.",
+      inputSchema: {
+        game: gameRef.describe("A game in the user's library: its library id, or its exact title."),
+        list: listRef,
+      },
+      annotations: { title: "Get checklist", ...READ_ONLY },
+    },
+    (args) => run(() => toolGetChecklist(userId, args)),
+  );
+
+  server.registerTool(
+    "get_achievements",
+    {
+      title: "Get achievements",
+      description:
+        "The Steam achievements for a game in the user's library, synced from their linked Steam account: each one's name, description, whether the user has unlocked it and on what day — unlocked first, newest first, then locked ones by name — plus how many of how many are unlocked and their Steam hours. Empty, with a note, when the game isn't matched to a Steam app or hasn't been synced. Compare with get_checklist to tick items the user's unlocks show they've done: tick_checklist_items' steamAchievements option ticks items named exactly like an unlocked achievement, and items worded differently can be ticked by number.",
+      inputSchema: {
+        game: gameRef.describe("A game in the user's library: its library id, or its exact title."),
+        unlocked: z
+          .boolean()
+          .optional()
+          .describe("true for only the unlocked achievements, false for only the locked ones; leave it out for all."),
+      },
+      annotations: { title: "Get achievements", ...READ_ONLY },
+    },
+    (args) => run(() => toolGetAchievements(userId, args)),
+  );
+
   // ---- writes: listed for everyone, refused unless the credential allows
   // changes (each tool checks), one per request
 
@@ -420,7 +471,7 @@ export function buildMcpServer(caller: McpCaller): McpServer {
     {
       title: "Create checklist",
       description:
-        "Make a progress checklist for a game in the user's library — a list on the game's Progress tab that the user ticks off as they play — or add items to one they already have. Two kinds: main_story is the story's missions, chapters or bosses in play order; a game has at most one, and it's what the Progress tab divides the game's time to beat across, so it gives the game its progress percentage and hours remaining. extra (the default) is anything else — collectibles, side quests, endings, trophies — as many lists as the user likes, untimed. Items can sit under chapters (acts, areas, regions). If the game already has a list with this title (ignoring case), the items are appended to it and items it already has are skipped, so repeating a call adds nothing twice; asking for a second main story list is refused, naming the one the game has. Lists are always private (only the user can publish one, from the web app) and start with nothing ticked — ticking happens in the app. Build a list from what the user gave you or a source you can name, and tell the user where the items came from: a mission list recalled from memory is easy to get wrong.",
+        "Make a progress checklist for a game in the user's library — a list on the game's Progress tab that the user ticks off as they play — or add items to one they already have. Two kinds: main_story is the story's missions, chapters or bosses in play order; a game has at most one, and it's what the Progress tab divides the game's time to beat across, so it gives the game its progress percentage and hours remaining. extra (the default) is anything else — collectibles, side quests, endings, trophies — as many lists as the user likes, untimed. Items can sit under chapters (acts, areas, regions). If the game already has a list with this title (ignoring case), the items are appended to it and items it already has are skipped, so repeating a call adds nothing twice; asking for a second main story list is refused, naming the one the game has. Lists are always private (only the user can publish one, from the web app) and start with nothing ticked — tick_checklist_items ticks items once the user has done them. Build a list from what the user gave you or a source you can name, and tell the user where the items came from: a mission list recalled from memory is easy to get wrong.",
       inputSchema: {
         game: gameRef.describe("A game in the user's library: its library id, or its exact title."),
         title: z
@@ -450,6 +501,40 @@ export function buildMcpServer(caller: McpCaller): McpServer {
       annotations: { title: "Create checklist", ...WRITE },
     },
     (args) => write(() => toolCreateChecklist(access, args)),
+  );
+
+  server.registerTool(
+    "tick_checklist_items",
+    {
+      title: "Tick checklist items",
+      description:
+        "Record progress on one of the user's checklists for a game in their library: tick items off as done or, with done: false, untick them. Use it when the user says they did something (\"I just beat Margit\", \"mark the first three Act 1 missions done\") or asks you to tick what their Steam achievements show. Name items by their exact text (case and punctuation aside), by number from get_checklist, or both; with steamAchievements, every item named exactly like a Steam achievement the user has unlocked for the game is ticked too. Nothing is guessed: text that matches no item comes back in notFound with the closest items and their numbers, and text that matches several items (repeats like \"Mask Shard\") comes back with their numbers to choose from — call again by number. On a sequential main story list, ticking an item also ticks every unticked item before it, as the app does; unticking clears only the items named. Only tick what the user says they've done, or what their unlocked achievements show. Returns what changed, the list's done/total, and the game's progress percentage and hours remaining.",
+      inputSchema: {
+        game: gameRef.describe("A game in the user's library: its library id, or its exact title."),
+        list: listRef,
+        items: z
+          .array(checklistItem)
+          .max(MAX_CHECKLIST_ENTRIES_PER_WRITE)
+          .optional()
+          .describe(
+            "Items by their exact text: each a string, or { text, chapter } to say which chapter's item when the same text is under several.",
+          ),
+        numbers: z
+          .array(z.number().int().min(1))
+          .max(MAX_CHECKLIST_ENTRIES_PER_WRITE)
+          .optional()
+          .describe("Items by their number on the list, from 1 — the numbers get_checklist shows."),
+        steamAchievements: z
+          .boolean()
+          .optional()
+          .describe(
+            "Also tick every item whose text is exactly the name of a Steam achievement the user has unlocked for this game. Ticking only.",
+          ),
+        done: z.boolean().optional().describe("true (the default) ticks the items; false unticks them."),
+      },
+      annotations: { title: "Tick checklist items", ...WRITE },
+    },
+    (args) => write(() => toolTickChecklistItems(access, args)),
   );
 
   server.registerTool(

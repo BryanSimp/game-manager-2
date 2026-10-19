@@ -13,7 +13,16 @@ import { db, schema } from "../db/index.js";
 import { logEvent } from "./analytics.js";
 import { upsertGameFromIgdb } from "./catalog.js";
 import { listCategories } from "./categories.js";
-import { addChecklistEntries, createChecklist, type ChecklistTemplate } from "./checklists.js";
+import {
+  addChecklistEntries,
+  createChecklist,
+  fillsInSequence,
+  loadChecklistItems,
+  setChecklistItemsDone,
+  throughLastTarget,
+  type ChecklistItemState,
+  type ChecklistTemplate,
+} from "./checklists.js";
 import {
   addGamesToCollection,
   createCollection,
@@ -24,6 +33,7 @@ import { communityRatings } from "./community.js";
 import { linkGames } from "./game-links.js";
 import { igdbConfigured, searchIgdb } from "./igdb.js";
 import type { McpCaller } from "./mcp-auth.js";
+import { similarity } from "./noise-filter.js";
 import { gameTime } from "./progress.js";
 import { ServiceError } from "./service-error.js";
 import { addTagToEntries, createTag, findTagByName, removeTagFromEntries, type Tag } from "./tags.js";
@@ -37,6 +47,7 @@ import {
   loadLibraryEntries,
   type LoadedLibraryEntry,
 } from "../routes/library.js";
+import { loadAchievements } from "../routes/steam.js";
 
 /**
  * What the MCP tools (`routes/mcp.ts`) answer, as plain data.
@@ -57,7 +68,9 @@ import {
  * web routes do (`services/tags.ts`, `collections.ts`, `checklists.ts`,
  * `game-links.ts`, `time-to-beat.ts`), so validation, ownership and the
  * content filter are the app's own, and each refuses unless the caller's
- * credential allows changes (`requireWrite`).
+ * credential allows changes (`requireWrite`). Checklist items are numbered
+ * the same way for reading (`get_checklist`) and ticking: from 1, in the
+ * Progress tab's order (`loadChecklistItems`).
  */
 
 /** A tool asked for something that isn't there; reported to the model as an error result. */
@@ -409,11 +422,12 @@ async function findOwnedCollection(
 export async function toolGetGame(userId: string, args: { id?: string; title?: string }) {
   const loaded = await findEntry(userId, args);
   const { entry } = loaded;
-  const [categories, progress, checklists, links] = await Promise.all([
+  const [categories, progress, checklists, links, achievements] = await Promise.all([
     categoriesFor(userId),
     loadEntryProgress(userId, entry.id),
     loadMyChecklists(userId, entry.game.id),
     gameLinksFor(userId, entry.game.id),
+    loadAchievements(userId, entry.id),
   ]);
 
   return {
@@ -438,6 +452,11 @@ export async function toolGetGame(userId: string, args: { id?: string; title?: s
       done: c.doneCount,
       total: c.itemCount,
     })),
+    // counts only — get_achievements has the names
+    steamAchievements:
+      achievements && achievements.total > 0
+        ? { unlocked: achievements.unlocked, total: achievements.total }
+        : null,
     // only the sections that have something in them, named the way the
     // Linked tab names them ("DLC", "Prequels", "Remakes & remasters"…)
     linkedGames: Object.fromEntries(
@@ -637,16 +656,109 @@ export async function toolGetBacklogCandidates(
   };
 }
 
+/**
+ * A game in the user's own library, by entry id, catalog id or exact title —
+ * the way the write tools name one — or an error saying why not, with ids
+ * to pick from when the title was ambiguous or a near miss.
+ */
+async function ownedEntry(userId: string, ref: string): Promise<LibraryRow> {
+  const { found, missing } = resolveEntries(await libraryIndex(userId), [ref]);
+  const entry = found[0];
+  if (!entry) throw new McpToolError(missing[0]?.reason ?? "Give a game id or title.");
+  return entry;
+}
+
+/** `"Main quest" (main story), "Bosses" (extra)` — a game's lists, named back. */
+function listNames(lists: ChecklistTemplate[]): string {
+  return lists.map((l) => `"${l.title}" (${listKindName(l.kind)})`).join(", ");
+}
+
+/**
+ * The list a tool means: the one with this title, ignoring case — the match
+ * `create_checklist` makes — or, with no title, the game's only list.
+ */
+function pickList(game: string, lists: ChecklistTemplate[], title: string | undefined): ChecklistTemplate {
+  if (lists.length === 0) {
+    throw new McpToolError(`"${game}" has no checklists yet — create_checklist makes one.`);
+  }
+  if (title === undefined || !fold(title)) {
+    if (lists.length === 1) return lists[0]!;
+    throw new McpToolError(`"${game}" has ${lists.length} checklists — say which: ${listNames(lists)}.`);
+  }
+  const hit = lists.find((l) => fold(l.title) === fold(title));
+  if (!hit) {
+    throw new McpToolError(`"${game}" has no checklist called "${title}". Its checklists: ${listNames(lists)}.`);
+  }
+  return hit;
+}
+
+export async function toolGetChecklist(userId: string, args: { game: string; list?: string }) {
+  const entry = await ownedEntry(userId, args.game);
+  const checklist = pickList(entry.title, await listsOf(userId, entry.gameId), args.list);
+  const items = await loadChecklistItems(userId, checklist.id);
+  return {
+    game: entry.title,
+    id: entry.id,
+    list: checklist.title,
+    kind: listKindName(checklist.kind),
+    // whether ticking an item fills in the ones before it
+    sequential: fillsInSequence(checklist),
+    done: items.filter((it) => it.completedAt).length,
+    total: items.length,
+    // numbered from 1 in the Progress tab's order: the numbers
+    // tick_checklist_items takes
+    items: items.map((it, i) => ({
+      number: i + 1,
+      text: it.text,
+      ...(it.category ? { chapter: it.category } : {}),
+      done: it.completedAt !== null,
+      ...(it.completedAt ? { doneOn: day(it.completedAt) } : {}),
+    })),
+  };
+}
+
+const NO_ACHIEVEMENTS =
+  "No Steam achievements are synced for this game. They come from a linked Steam account (Preferences → Steam in Game Manager) for games matched to a Steam app, and only for games that have achievements on Steam.";
+
+export async function toolGetAchievements(userId: string, args: { game: string; unlocked?: boolean }) {
+  const entry = await ownedEntry(userId, args.game);
+  const loaded = await loadAchievements(userId, entry.id);
+  const all = loaded?.achievements ?? [];
+  if (all.length === 0) {
+    return { game: entry.title, id: entry.id, total: 0, unlocked: 0, achievements: [], note: NO_ACHIEVEMENTS };
+  }
+  // unlocked first, newest unlock first — "I just beat X" is usually the
+  // latest one — then the locked ones in name order
+  const when = (a: { unlockedAt: Date | null }) => a.unlockedAt?.getTime() ?? 0;
+  const sorted = [...all].sort((a, b) =>
+    a.unlocked !== b.unlocked ? (a.unlocked ? -1 : 1) : a.unlocked ? when(b) - when(a) : 0,
+  );
+  const shown = args.unlocked === undefined ? sorted : sorted.filter((a) => a.unlocked === args.unlocked);
+  return {
+    game: entry.title,
+    id: entry.id,
+    total: loaded!.total,
+    unlocked: loaded!.unlocked,
+    steamHours: loaded!.steamPlaytimeMinutes == null ? null : Math.round(loaded!.steamPlaytimeMinutes / 6) / 10,
+    achievements: shown.map((a) => ({
+      name: a.name,
+      ...(a.description ? { description: a.description } : {}),
+      unlocked: a.unlocked,
+      ...(a.unlockedAt ? { unlockedOn: day(a.unlockedAt) } : {}),
+    })),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Writes
 //
-// Eight tools, all of which only add: tags and tag assignments, collections
-// and the games in them, progress checklists and their items, links between
-// games, and the user's own time-to-beat figures. `untag_games` is the one
-// that takes anything away, and it removes an assignment, never a tag.
-// Nothing here deletes, renames, recategorises, rates, publishes, ticks a
-// checklist item or touches the account — that's the whole list, and adding
-// to it is a decision, not a refactor.
+// Nine tools. Seven only add: tags and tag assignments, collections and the
+// games in them, progress checklists and their items, links between games,
+// and the user's own time-to-beat figures. `untag_games` removes an
+// assignment, never a tag, and `tick_checklist_items` records progress —
+// ticking items, or unticking exactly the ones it's told to. Nothing here
+// deletes, renames, recategorises, rates, publishes or touches the account —
+// that's the whole list, and adding to it is a decision, not a refactor.
 
 /** The most games one write may name — the same cap as `PUT /api/library/:id/tags`. */
 export const MAX_GAMES_PER_WRITE = 100;
@@ -1090,6 +1202,20 @@ export async function toolAddGamesToCollection(
   };
 }
 
+/** The user's own lists for a game, in the order the Progress tab shows them. */
+async function listsOf(userId: string, gameId: string): Promise<ChecklistTemplate[]> {
+  return db
+    .select()
+    .from(schema.checklistTemplates)
+    .where(
+      and(
+        eq(schema.checklistTemplates.gameId, gameId),
+        eq(schema.checklistTemplates.authorUserId, userId),
+      ),
+    )
+    .orderBy(asc(schema.checklistTemplates.position), asc(schema.checklistTemplates.createdAt));
+}
+
 /** The kinds `create_checklist` takes, by the names the tools report them under. */
 export const CHECKLIST_KIND_INPUTS = ["main_story", "extra"] as const;
 
@@ -1117,16 +1243,7 @@ export async function toolCreateChecklist(
   const items = args.items.map((item) =>
     typeof item === "string" ? { text: item } : { text: item.text, category: item.chapter ?? null },
   );
-  const lists = await db
-    .select()
-    .from(schema.checklistTemplates)
-    .where(
-      and(
-        eq(schema.checklistTemplates.gameId, entry.gameId),
-        eq(schema.checklistTemplates.authorUserId, access.userId),
-      ),
-    )
-    .orderBy(asc(schema.checklistTemplates.position), asc(schema.checklistTemplates.createdAt));
+  const lists = await listsOf(access.userId, entry.gameId);
   const same = lists.find((l) => fold(l.title) === fold(args.title));
 
   let checklist: ChecklistTemplate;
@@ -1195,6 +1312,241 @@ export async function toolCreateChecklist(
     },
     added,
     alreadyOnList: already,
+    ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+  };
+}
+
+/** How many changed items a tick result names; past this it only counts them. */
+const ITEMS_NAMED_PER_RESULT = 50;
+
+interface NumberedItem {
+  item: ChecklistItemState;
+  /** 1-based, in the Progress tab's order */
+  number: number;
+  key: string;
+  chapterKey: string;
+}
+
+/** `#12 "Margit, the Fell Omen" (Limgrave)` — an item as a result names it. */
+function describeItem(n: NumberedItem, withState = false): string {
+  const extras = [n.item.category, withState ? (n.item.completedAt ? "ticked" : "not ticked") : null]
+    .filter(Boolean)
+    .join(", ");
+  return `#${n.number} "${n.item.text}"${extras ? ` (${extras})` : ""}`;
+}
+
+/**
+ * Items that come close to `text` without being it — one contains the other,
+ * or they share most of their letter pairs. Offered back, never ticked.
+ */
+function nearItems(numbered: NumberedItem[], text: string): NumberedItem[] {
+  const key = titleKey(text);
+  if (!key) return [];
+  return numbered
+    .map((n) => ({
+      n,
+      score:
+        n.key.includes(key) || (n.key.length >= 4 && key.includes(n.key)) ? 1 : similarity(text, n.item.text),
+    }))
+    .filter((s) => s.score >= 0.5)
+    .sort((a, b) => b.score - a.score || a.n.number - b.n.number)
+    .slice(0, 5)
+    .map((s) => s.n);
+}
+
+/**
+ * The items a tick names: by number, and by exact text (`titleKey`: case and
+ * punctuation aside), optionally within a chapter. Text that matches nothing,
+ * or several items, is a miss carrying the numbers to use instead — two
+ * "Mask Shard" entries are two different collectibles, and which one you
+ * found isn't something to pick for you.
+ */
+function locateItems(
+  listTitle: string,
+  numbered: NumberedItem[],
+  args: { items?: ChecklistItemArg[]; numbers?: number[] },
+): { targets: Set<string>; notFound: Miss[] } {
+  const targets = new Set<string>();
+  const notFound: Miss[] = [];
+
+  for (const n of args.numbers ?? []) {
+    const hit = numbered[n - 1];
+    if (hit) targets.add(hit.item.id);
+    else {
+      notFound.push({
+        input: `#${n}`,
+        reason: `"${listTitle}" has ${numbered.length} items, numbered 1 to ${numbered.length}.`,
+      });
+    }
+  }
+
+  for (const arg of args.items ?? []) {
+    const text = typeof arg === "string" ? arg : arg.text;
+    const chapter = typeof arg === "string" ? undefined : arg.chapter?.trim() || undefined;
+    const input = chapter ? `${text} (${chapter})` : text;
+    const key = titleKey(text);
+    const sameText = key ? numbered.filter((n) => n.key === key) : [];
+    const hits = chapter ? sameText.filter((n) => n.chapterKey === titleKey(chapter)) : sameText;
+
+    if (hits.length === 1) {
+      targets.add(hits[0]!.item.id);
+      continue;
+    }
+    if (hits.length > 1) {
+      notFound.push({
+        input,
+        reason: `"${text}" is ${hits.length} items on "${listTitle}": ${hits
+          .slice(0, 20)
+          .map((h) => describeItem(h, true))
+          .join("; ")}. Call again with the numbers of the ones the user means.`,
+      });
+      continue;
+    }
+    if (sameText.length > 0) {
+      notFound.push({
+        input,
+        reason: `"${text}" isn't under "${chapter}" on "${listTitle}" — it's ${sameText
+          .slice(0, 10)
+          .map((h) => describeItem(h))
+          .join("; ")}. Call again with the number, or the right chapter.`,
+      });
+      continue;
+    }
+    const near = nearItems(numbered, text);
+    notFound.push({
+      input,
+      reason: near.length
+        ? `Nothing on "${listTitle}" is called "${text}". Closest: ${near.map((n) => describeItem(n)).join("; ")} — call again with the number or the exact text.`
+        : `Nothing on "${listTitle}" is called "${text}" — get_checklist lists every item.`,
+    });
+  }
+  return { targets, notFound };
+}
+
+export async function toolTickChecklistItems(
+  access: McpAccess,
+  args: {
+    game: string;
+    list?: string;
+    items?: ChecklistItemArg[];
+    numbers?: number[];
+    steamAchievements?: boolean;
+    done?: boolean;
+  },
+) {
+  requireWrite(access);
+  const done = args.done ?? true;
+  if (!args.items?.length && !args.numbers?.length && !args.steamAchievements) {
+    throw new McpToolError("Name the items by text or number, or set steamAchievements to tick what Steam says is unlocked.");
+  }
+  if (args.steamAchievements && !done) {
+    throw new McpToolError("steamAchievements only ticks items — name the ones to untick by text or number.");
+  }
+
+  // your own games and your own lists only, like the Progress tab: ticks
+  // on someone's published list need a copy of it first
+  const entry = await ownedEntry(access.userId, args.game);
+  const checklist = pickList(entry.title, await listsOf(access.userId, entry.gameId), args.list);
+  const items = await loadChecklistItems(access.userId, checklist.id);
+  const numbered: NumberedItem[] = items.map((item, i) => ({
+    item,
+    number: i + 1,
+    key: titleKey(item.text),
+    chapterKey: titleKey(item.category ?? ""),
+  }));
+
+  const { targets, notFound } = locateItems(checklist.title, numbered, args);
+
+  // an item named exactly like an unlocked achievement is one Steam says
+  // you've done — the only thing ticked that the caller didn't name itself.
+  // An achievement matching several items is a miss like any other repeat:
+  // unlocking "Mask Shard" once doesn't say which of four shards it was.
+  let steam: { unlockedAchievements: number; matchedItems: number } | null = null;
+  if (args.steamAchievements) {
+    const achievements = await loadAchievements(access.userId, entry.id);
+    const byKey = new Map<string, NumberedItem[]>();
+    for (const n of numbered) byKey.set(n.key, [...(byKey.get(n.key) ?? []), n]);
+    const matched = new Set<string>();
+    for (const a of achievements?.achievements ?? []) {
+      const key = titleKey(a.name);
+      const hits = a.unlocked && key ? (byKey.get(key) ?? []) : [];
+      if (hits.length === 1) matched.add(hits[0]!.item.id);
+      else if (hits.length > 1) {
+        notFound.push({
+          input: `Steam achievement "${a.name}"`,
+          reason: `It's named like ${hits.length} items on "${checklist.title}": ${hits
+            .slice(0, 20)
+            .map((h) => describeItem(h, true))
+            .join("; ")}. Tick the one it stands for by number.`,
+        });
+      }
+    }
+    for (const id of matched) targets.add(id);
+    steam = { unlockedAchievements: achievements?.unlocked ?? 0, matchedItems: matched.size };
+  }
+
+  // the Progress tab's rule: on a sequential main story list, ticking an
+  // item ticks the ones before it; unticking clears only what was named
+  const filledIn = done && fillsInSequence(checklist) ? throughLastTarget(items, targets) : [];
+  const changing = numbered.filter((n) => targets.has(n.item.id) && (n.item.completedAt !== null) !== done);
+  const { changed } =
+    targets.size > 0
+      ? await setChecklistItemsDone(access.userId, checklist.id, [...targets, ...filledIn], done)
+      : { changed: 0 };
+
+  const doneBefore = items.filter((it) => it.completedAt).length;
+  const progress = await loadEntryProgress(access.userId, entry.id);
+  const notes: string[] = [];
+  if (filledIn.length > 0) {
+    const furthest = numbered.reduce((max, n) => (targets.has(n.item.id) ? n.number : max), 0);
+    notes.push(
+      `"${checklist.title}" is played in order, so the ${filledIn.length} unticked item${filledIn.length === 1 ? "" : "s"} before #${furthest} ${filledIn.length === 1 ? "was" : "were"} ticked too.`,
+    );
+  }
+  if (changed > 0 && checklist.kind !== MAIN_LIST_KIND && progress && progress.total > 0) {
+    notes.push("This is an extra list, which isn't timed: the game's progress comes from its main story list and didn't move.");
+  }
+  if (steam && steam.unlockedAchievements === 0) {
+    notes.push("No Steam achievements are unlocked (or synced) for this game, so none were matched.");
+  } else if (steam && steam.matchedItems === 0) {
+    notes.push(
+      `None of the ${steam.unlockedAchievements} unlocked achievements is named exactly like an item on this list — compare get_achievements with get_checklist and tick by number instead.`,
+    );
+  }
+
+  logEvent("mcp_write", access.userId, {
+    tool: "tick_checklist_items",
+    done,
+    kind: checklist.kind,
+    changed: changing.length,
+    unchanged: targets.size - changing.length,
+    filledIn: filledIn.length,
+    steamMatched: steam?.matchedItems ?? 0,
+    notFound: notFound.length,
+  });
+  return {
+    game: entry.title,
+    list: checklist.title,
+    action: done ? "ticked" : "unticked",
+    changed: changing.length,
+    changedItems: changing.slice(0, ITEMS_NAMED_PER_RESULT).map((n) => ({ number: n.number, text: n.item.text })),
+    // named, but already ticked (or, unticking, already not)
+    unchanged: targets.size - changing.length,
+    ...(fillsInSequence(checklist) && done ? { filledIn: filledIn.length } : {}),
+    ...(steam ? { steam } : {}),
+    notFound,
+    listProgress: { done: doneBefore + (done ? changed : -changed), total: items.length },
+    // the Progress tab's figures, after the change: GET /api/library/:id/progress
+    gameProgress:
+      progress && progress.total > 0
+        ? {
+            mainList: progress.checklistTitle,
+            percent: progress.percent,
+            missionsDone: progress.done,
+            missionsTotal: progress.total,
+            remainingHours: hours(progress.remainingSeconds),
+          }
+        : null,
     ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
   };
 }
