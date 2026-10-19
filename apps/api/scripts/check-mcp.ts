@@ -415,10 +415,10 @@ try {
   const listRes = await rpc(aliceKey, "tools/list");
   const tools = (listRes.json() as { result: { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }> } }).result.tools;
   const names = tools.map((t) => t.name).sort();
-  const READ_TOOLS = ["get_backlog_candidates", "get_collection", "get_dashboard", "get_game", "list_categories", "list_collections", "list_library"];
-  const WRITE_TOOLS = ["add_games_to_collection", "create_checklist", "create_collection", "create_tag", "link_games", "set_time_to_beat", "tag_games", "untag_games"];
+  const READ_TOOLS = ["get_achievements", "get_backlog_candidates", "get_checklist", "get_collection", "get_dashboard", "get_game", "list_categories", "list_collections", "list_library"];
+  const WRITE_TOOLS = ["add_games_to_collection", "create_checklist", "create_collection", "create_tag", "link_games", "set_time_to_beat", "tag_games", "tick_checklist_items", "untag_games"];
   check(
-    "tools/list offers the seven read tools and the eight write tools, even to a read-only key",
+    "tools/list offers the nine read tools and the nine write tools, even to a read-only key",
     JSON.stringify(names) === JSON.stringify([...READ_TOOLS, ...WRITE_TOOLS].sort()),
     names,
   );
@@ -599,6 +599,7 @@ try {
     link_games: { game: aHollow.id, relatedGame: shortOne.title, role: "sequel" },
     set_time_to_beat: { game: aHollow.id, mainHours: 1 },
     create_checklist: { game: aHollow.id, title: `refused-${run}`, items: ["Refused item"] },
+    tick_checklist_items: { game: aHollow.id, list: "Main quest", numbers: [3, 4] },
   };
   const refusals = await Promise.all(
     Object.entries(refusedArgs).map(async ([name, args]) => ({ name, ...(await tool(aliceKey, name, args)) })),
@@ -624,10 +625,18 @@ try {
     .select()
     .from(schema.checklistTemplates)
     .where(eq(schema.checklistTemplates.title, `refused-${run}`));
+  const hollowTicks = await db
+    .select()
+    .from(schema.userChecklistItems)
+    .where(and(eq(schema.userChecklistItems.userId, alice.id), inArray(schema.userChecklistItems.itemId, items.map((i) => i.id))));
   check(
     "…and none of the refused calls wrote anything",
-    refusedRows.length === 0 && hollowTagsBefore.length === 1 && aliceCollectionGames.length === 2 && refusedLists.length === 0,
-    { tags: refusedRows.map((t) => t.name), hollowTags: hollowTagsBefore.length, inCollection: aliceCollectionGames.length, lists: refusedLists.length },
+    refusedRows.length === 0 &&
+      hollowTagsBefore.length === 1 &&
+      aliceCollectionGames.length === 2 &&
+      refusedLists.length === 0 &&
+      hollowTicks.length === 2,
+    { tags: refusedRows.map((t) => t.name), hollowTags: hollowTagsBefore.length, inCollection: aliceCollectionGames.length, lists: refusedLists.length, ticks: hollowTicks.length },
   );
 
   console.log("\nWrites: tags");
@@ -1043,6 +1052,370 @@ try {
       bobAdds.statusCode === 404 &&
       JSON.stringify(rowsOf(await entriesOf(typedId))) === JSON.stringify([[0, "Good ending", "Endings"]]),
     { addOne: addOne.body, addBlank: addBlank.statusCode, bobAdds: bobAdds.statusCode },
+  );
+
+  console.log("\nWrites: ticking");
+  /** The texts of a list's entries this user has ticked, in list order. */
+  const ticksOf = async (templateId: string, userId = alice.id) =>
+    (
+      await db
+        .select({ text: schema.checklistItems.text })
+        .from(schema.userChecklistItems)
+        .innerJoin(schema.checklistItems, eq(schema.checklistItems.id, schema.userChecklistItems.itemId))
+        .where(and(eq(schema.checklistItems.templateId, templateId), eq(schema.userChecklistItems.userId, userId)))
+        .orderBy(schema.checklistItems.position)
+    ).map((r) => r.text);
+  const progressOf = async (entryId: string) =>
+    (await asUser(alice.cookie, "GET", `/api/library/${entryId}/progress`)).json() as {
+      done: number;
+      total: number;
+      percent: number;
+      remainingSeconds: number;
+    };
+  const hoursOf = (seconds: number) => Math.round(seconds / 360) / 10;
+
+  const storyList = await tool(aliceKey, "get_checklist", { game: shortOne.title, list: "story" });
+  check(
+    "get_checklist (any key) numbers a list's items from 1 in order, with chapters and tick state",
+    storyList.data?.list === "Story" &&
+      storyList.data.kind === "main story" &&
+      storyList.data.sequential === true &&
+      storyList.data.total === 5 &&
+      storyList.data.done === 0 &&
+      JSON.stringify(storyList.data.items.map((i: any) => [i.number, i.text, i.chapter ?? null, i.done])) ===
+        JSON.stringify([
+          [1, "Wake up", "Act 1", false],
+          [2, "Leave the village", "Act 1", false],
+          [3, "Cross the bridge", "Act 2", false],
+          [4, "Final boss", null, false],
+          [5, "Epilogue", "Act 3", false],
+        ]),
+    storyList.data ?? storyList.text,
+  );
+  const whichList = await tool(aliceKey, "get_checklist", { game: aHollow.id });
+  check(
+    "…asks which list when a game has several, naming them",
+    whichList.isError && whichList.text.includes('"Main quest" (main story)') && whichList.text.includes('"Mask shards" (extra)'),
+    whichList.text,
+  );
+  const mainQuest = await tool(aliceKey, "get_checklist", { game: aHollow.id, list: "MAIN QUEST" });
+  check(
+    "…and says which items are ticked, and on what day",
+    mainQuest.data?.done === 2 &&
+      mainQuest.data.items[0].done === true &&
+      /^\d{4}-\d{2}-\d{2}$/.test(mainQuest.data.items[0].doneOn) &&
+      mainQuest.data.items[2].done === false &&
+      mainQuest.data.items[2].doneOn === undefined,
+    mainQuest.data ?? mainQuest.text,
+  );
+
+  const byText = await tool(aliceWriteKey, "tick_checklist_items", { game: aHollow.id, list: "main quest", items: ["boss 3"] });
+  const afterText = await progressOf(aHollow.id);
+  check(
+    "tick_checklist_items ticks an item by its text, ignoring case",
+    byText.data?.action === "ticked" &&
+      byText.data.changed === 1 &&
+      byText.data.changedItems[0]?.number === 3 &&
+      byText.data.listProgress.done === 3 &&
+      byText.data.listProgress.total === 4 &&
+      JSON.stringify(await ticksOf(list!.id)) === JSON.stringify(["Boss 1", "Boss 2", "Boss 3"]),
+    byText.data ?? byText.text,
+  );
+  check(
+    "…and returns the game's progress as the Progress tab now shows it",
+    byText.data?.gameProgress?.percent === 75 &&
+      byText.data.gameProgress.percent === afterText.percent &&
+      byText.data.gameProgress.missionsDone === 3 &&
+      byText.data.gameProgress.remainingHours === hoursOf(afterText.remainingSeconds),
+    { tool: byText.data?.gameProgress, route: afterText },
+  );
+  const movedGame = await tool(aliceKey, "get_game", { id: aHollow.id });
+  check(
+    "…which get_game reads back too",
+    movedGame.data?.progress?.missionsDone === 3 && movedGame.data.progress.percent === 75 && movedGame.data.checklists[0]?.done === 3,
+    movedGame.data?.progress,
+  );
+  const tickAgain = await tool(aliceWriteKey, "tick_checklist_items", { game: aHollow.id, list: "Main quest", items: ["Boss 3"] });
+  check(
+    "ticking it again changes nothing",
+    tickAgain.data?.changed === 0 && tickAgain.data.unchanged === 1 && tickAgain.data.listProgress.done === 3,
+    tickAgain.data ?? tickAgain.text,
+  );
+  const byNumber = await tool(aliceWriteKey, "tick_checklist_items", { game: hollow.title, list: "Main quest", numbers: [4] });
+  check(
+    "…ticks by number",
+    byNumber.data?.changed === 1 && byNumber.data.changedItems[0]?.text === "Boss 4" && byNumber.data.gameProgress?.percent === 100,
+    byNumber.data ?? byNumber.text,
+  );
+  const untick = await tool(aliceWriteKey, "tick_checklist_items", { game: aHollow.id, list: "Main quest", numbers: [2, 3], done: false });
+  check(
+    "done: false unticks exactly the items named",
+    untick.data?.action === "unticked" &&
+      untick.data.changed === 2 &&
+      untick.data.gameProgress?.percent === 50 &&
+      untick.data.listProgress.done === 2 &&
+      JSON.stringify(await ticksOf(list!.id)) === JSON.stringify(["Boss 1", "Boss 4"]),
+    untick.data ?? untick.text,
+  );
+
+  const fill = await tool(aliceWriteKey, "tick_checklist_items", { game: shortOne.title, list: "Story", items: ["Cross the bridge!"] });
+  check(
+    "on a sequential main story list, ticking an item fills in the unticked ones before it",
+    fill.data?.changed === 1 &&
+      fill.data.filledIn === 2 &&
+      fill.data.note?.includes("before #3") &&
+      fill.data.listProgress.done === 3 &&
+      JSON.stringify(await ticksOf(storyRow!.id)) === JSON.stringify(["Wake up", "Leave the village", "Cross the bridge"]),
+    fill.data ?? fill.text,
+  );
+  const unfill = await tool(aliceWriteKey, "tick_checklist_items", { game: shortOne.title, list: "Story", numbers: [1], done: false });
+  check(
+    "…while unticking clears only the item named",
+    unfill.data?.changed === 1 && JSON.stringify(await ticksOf(storyRow!.id)) === JSON.stringify(["Leave the village", "Cross the bridge"]),
+    unfill.data ?? unfill.text,
+  );
+  const wrongChapter = await tool(aliceWriteKey, "tick_checklist_items", {
+    game: shortOne.title,
+    list: "Story",
+    items: [{ text: "Wake up", chapter: "Act 2" }],
+  });
+  const rightChapter = await tool(aliceWriteKey, "tick_checklist_items", {
+    game: shortOne.title,
+    list: "Story",
+    items: [{ text: "wake up", chapter: "act 1" }],
+  });
+  check(
+    "{ text, chapter } only matches under that chapter, and says where the text is instead",
+    wrongChapter.data?.changed === 0 &&
+      wrongChapter.data.notFound[0]?.reason.includes("isn't under") &&
+      wrongChapter.data.notFound[0].reason.includes("#1") &&
+      rightChapter.data?.changed === 1 &&
+      rightChapter.data.filledIn === 0 &&
+      JSON.stringify(await ticksOf(storyRow!.id)) === JSON.stringify(["Wake up", "Leave the village", "Cross the bridge"]),
+    { wrong: wrongChapter.data ?? wrongChapter.text, right: rightChapter.data ?? rightChapter.text },
+  );
+
+  await db.update(schema.checklistTemplates).set({ sequential: true }).where(eq(schema.checklistTemplates.id, shardRow!.id));
+  const shardEntries = await entriesOf(shardRow!.id);
+  const extraTick = await tool(aliceWriteKey, "tick_checklist_items", { game: aHollow.id, list: "Mask shards", numbers: [3] });
+  const [shardTick] = await db
+    .select()
+    .from(schema.userChecklistItems)
+    .where(and(eq(schema.userChecklistItems.userId, alice.id), inArray(schema.userChecklistItems.itemId, shardEntries.map((e) => e.id))));
+  check(
+    "an extra list doesn't fill in, even flagged sequential, and says the game's progress didn't move",
+    extraTick.data?.changed === 1 &&
+      extraTick.data.filledIn === undefined &&
+      extraTick.data.note?.includes("extra list") &&
+      (await ticksOf(shardRow!.id)).length === 1 &&
+      shardTick?.itemId === shardEntries[2]!.id,
+    extraTick.data ?? extraTick.text,
+  );
+  const dup = await tool(aliceWriteKey, "tick_checklist_items", { game: aHollow.id, list: "Mask shards", items: ["Mask Shard"] });
+  check(
+    "a text that matches several items is never guessed: it comes back with each one's number and state",
+    dup.data?.changed === 0 &&
+      dup.data.notFound.length === 1 &&
+      dup.data.notFound[0].reason.includes("is 4 items") &&
+      dup.data.notFound[0].reason.includes('#3 "Mask Shard" (ticked)') &&
+      dup.data.notFound[0].reason.includes('#1 "Mask Shard" (not ticked)') &&
+      (await ticksOf(shardRow!.id)).length === 1,
+    dup.data ?? dup.text,
+  );
+  const misses = await tool(aliceWriteKey, "tick_checklist_items", {
+    game: shortOne.title,
+    list: "Story",
+    items: ["Cross bridge", "Collect every feather"],
+    numbers: [9],
+  });
+  const missFor = (input: string): string =>
+    misses.data?.notFound.find((m: { input: string }) => m.input === input)?.reason ?? "";
+  check(
+    "a near miss comes back with the closest items' numbers, an unknown one says so, and a number past the end is refused",
+    misses.data?.changed === 0 &&
+      missFor("Cross bridge").includes('#3 "Cross the bridge"') &&
+      missFor("Collect every feather").includes("get_checklist") &&
+      missFor("#9").includes("numbered 1 to 5") &&
+      (await ticksOf(storyRow!.id)).length === 3,
+    misses.data ?? misses.text,
+  );
+  const nothing = await tool(aliceWriteKey, "tick_checklist_items", { game: shortOne.title });
+  const steamUntick = await tool(aliceWriteKey, "tick_checklist_items", { game: aHollow.id, list: "Main quest", steamAchievements: true, done: false });
+  const noSuchList = await tool(aliceWriteKey, "tick_checklist_items", { game: aHollow.id, list: "Grubs", numbers: [1] });
+  const noLists = await tool(aliceWriteKey, "tick_checklist_items", { game: longOne.title, numbers: [1] });
+  check(
+    "naming no items, unticking from Steam, an unknown list and a game with no lists are errors",
+    nothing.isError &&
+      steamUntick.isError &&
+      noSuchList.isError &&
+      noSuchList.text.includes('"Main quest"') &&
+      noLists.isError &&
+      noLists.text.includes("create_checklist"),
+    { nothing: nothing.text, steamUntick: steamUntick.text, noSuchList: noSuchList.text, noLists: noLists.text },
+  );
+
+  console.log("\nSteam achievements");
+  const noAchievements = await tool(aliceKey, "get_achievements", { game: shortOne.title });
+  check(
+    "get_achievements on a game with none synced says so",
+    noAchievements.data?.total === 0 && noAchievements.data.note?.includes("Steam"),
+    noAchievements.data ?? noAchievements.text,
+  );
+  const achs = await db
+    .insert(schema.achievements)
+    .values([
+      { gameId: hollow.id, externalId: `boss2-${run}`, name: "Boss 2", description: "Beat the second boss." },
+      { gameId: hollow.id, externalId: `boss3-${run}`, name: "Boss 3" },
+      { gameId: hollow.id, externalId: `shard-${run}`, name: "Mask Shard" },
+    ])
+    .returning();
+  await db.insert(schema.userAchievements).values([
+    { userId: alice.id, achievementId: achs[0]!.id, unlockedAt: new Date("2026-10-10T12:00:00Z") },
+    { userId: alice.id, achievementId: achs[2]!.id, unlockedAt: new Date("2026-10-12T12:00:00Z") },
+    // bob's unlock is bob's: it must never tick alice's Boss 3
+    { userId: bob.id, achievementId: achs[1]!.id, unlockedAt: new Date("2026-10-11T12:00:00Z") },
+  ]);
+  const aliceAchs = await tool(aliceKey, "get_achievements", { game: aHollow.id });
+  check(
+    "get_achievements lists a game's achievements with the user's own unlocks, newest first",
+    aliceAchs.data?.total === 3 &&
+      aliceAchs.data.unlocked === 2 &&
+      aliceAchs.data.steamHours === 12.5 &&
+      aliceAchs.data.achievements[1]?.description === "Beat the second boss." &&
+      JSON.stringify(aliceAchs.data.achievements.map((a: any) => [a.name, a.unlocked, a.unlockedOn ?? null])) ===
+        JSON.stringify([
+          ["Mask Shard", true, "2026-10-12"],
+          ["Boss 2", true, "2026-10-10"],
+          ["Boss 3", false, null],
+        ]),
+    aliceAchs.data ?? aliceAchs.text,
+  );
+  const lockedOnly = await tool(aliceKey, "get_achievements", { game: aHollow.id, unlocked: false });
+  check(
+    "…filters to the locked ones",
+    lockedOnly.data?.achievements.length === 1 && lockedOnly.data.achievements[0].name === "Boss 3",
+    lockedOnly.data ?? lockedOnly.text,
+  );
+  const achGame = await tool(aliceKey, "get_game", { id: aHollow.id });
+  check(
+    "get_game carries the achievement counts",
+    achGame.data?.steamAchievements?.unlocked === 2 && achGame.data.steamAchievements.total === 3,
+    achGame.data?.steamAchievements,
+  );
+  const routeAchs = (await asUser(alice.cookie, "GET", `/api/library/${aHollow.id}/achievements`)).json();
+  check(
+    "(the web app's achievements route still answers the same, in name order)",
+    routeAchs.total === 3 && routeAchs.unlocked === 2 && routeAchs.achievements[0]?.name === "Boss 2",
+    routeAchs,
+  );
+  const fromSteam = await tool(aliceWriteKey, "tick_checklist_items", { game: aHollow.id, list: "Main quest", steamAchievements: true });
+  check(
+    "steamAchievements ticks items named exactly like an achievement the user unlocked — not one only someone else did",
+    fromSteam.data?.changed === 1 &&
+      fromSteam.data.changedItems[0]?.text === "Boss 2" &&
+      fromSteam.data.steam?.unlockedAchievements === 2 &&
+      fromSteam.data.steam.matchedItems === 1 &&
+      fromSteam.data.notFound.length === 0 &&
+      JSON.stringify(await ticksOf(list!.id)) === JSON.stringify(["Boss 1", "Boss 2", "Boss 4"]),
+    fromSteam.data ?? fromSteam.text,
+  );
+  const steamShards = await tool(aliceWriteKey, "tick_checklist_items", { game: aHollow.id, list: "Mask shards", steamAchievements: true });
+  check(
+    "…and an achievement named like several items is a miss with their numbers, not four ticks",
+    steamShards.data?.changed === 0 &&
+      steamShards.data.steam?.matchedItems === 0 &&
+      steamShards.data.notFound[0]?.reason.includes("4 items") &&
+      (await ticksOf(shardRow!.id)).length === 1,
+    steamShards.data ?? steamShards.text,
+  );
+
+  console.log("\nWrites: ticking is yours alone");
+  const [bobsShard] = await db
+    .insert(schema.checklistItems)
+    .values({ templateId: bobsHollowList!.id, position: 0, text: "Mask Shard" })
+    .returning();
+  const [bobsList] = await db
+    .insert(schema.checklistTemplates)
+    .values({ gameId: bobsGame.id, authorUserId: bob.id, title: "Bob's quests", kind: "missions" })
+    .returning();
+  const [bobsItem] = await db
+    .insert(schema.checklistItems)
+    .values({ templateId: bobsList!.id, position: 0, text: "Secret mission" })
+    .returning();
+  const viaEntry = await tool(aliceWriteKey, "tick_checklist_items", { game: bSecret.id, numbers: [1] });
+  const viaTitle = await tool(aliceWriteKey, "tick_checklist_items", { game: bobsGame.title, items: ["Secret mission"] });
+  const readBobs = await tool(aliceKey, "get_checklist", { game: bSecret.id });
+  const bobsAchs = await tool(aliceKey, "get_achievements", { game: bSecret.id });
+  const routeBulk = await asUser(alice.cookie, "PUT", `/api/checklists/${bobsList!.id}/items/check`, {
+    itemIds: [bobsItem!.id],
+    completed: true,
+  });
+  const routeOne = await asUser(alice.cookie, "PUT", `/api/checklists/items/${bobsItem!.id}/check`, { completed: true });
+  // bob's entry id smuggled into a tick of alice's own list: dropped, not ticked
+  const smuggledIds = await asUser(alice.cookie, "PUT", `/api/checklists/${shardRow!.id}/items/check`, {
+    itemIds: [bobsShard!.id],
+    completed: true,
+  });
+  const bobsTicks = await db
+    .select()
+    .from(schema.userChecklistItems)
+    .where(inArray(schema.userChecklistItems.itemId, [bobsItem!.id, bobsShard!.id]));
+  check(
+    "alice can't read or tick bob's lists — by his entry id, his game's title, or the web routes",
+    viaEntry.isError &&
+      viaTitle.isError &&
+      readBobs.isError &&
+      bobsAchs.isError &&
+      routeBulk.statusCode === 404 &&
+      routeOne.statusCode === 404 &&
+      smuggledIds.statusCode === 200 &&
+      smuggledIds.json().changed === 0 &&
+      bobsTicks.length === 0,
+    {
+      viaEntry: viaEntry.text,
+      viaTitle: viaTitle.text,
+      readBobs: readBobs.text,
+      routeBulk: routeBulk.statusCode,
+      routeOne: routeOne.statusCode,
+      smuggled: smuggledIds.body,
+      bobsTicks: bobsTicks.length,
+    },
+  );
+  const sameNameTick = await tool(aliceWriteKey, "tick_checklist_items", { game: aHollow.id, list: "Mask shards", numbers: [1] });
+  check(
+    "…and the list bob keeps under the same name for the same game isn't the one ticked",
+    sameNameTick.data?.changed === 1 &&
+      (await ticksOf(shardRow!.id)).length === 2 &&
+      (await ticksOf(bobsHollowList!.id, bob.id)).length === 0 &&
+      (await ticksOf(bobsHollowList!.id, alice.id)).length === 0,
+    sameNameTick.data ?? sameNameTick.text,
+  );
+
+  const storyEntriesNow = await entriesOf(storyRow!.id);
+  const bulkRoute = await asUser(alice.cookie, "PUT", `/api/checklists/${storyRow!.id}/items/check`, {
+    itemIds: [storyEntriesNow[3]!.id, storyEntriesNow[4]!.id],
+    completed: true,
+  });
+  const oneRoute = await asUser(alice.cookie, "PUT", `/api/checklists/items/${storyEntriesNow[4]!.id}/check`, { completed: false });
+  const badRoute = await asUser(alice.cookie, "PUT", `/api/checklists/${storyRow!.id}/items/check`, { itemIds: [], completed: true });
+  const storyDetail = (await asUser(alice.cookie, "GET", `/api/checklists/${storyRow!.id}`)).json() as {
+    items: Array<{ text: string; completedAt: string | null }>;
+  };
+  check(
+    "(the web app's tick routes still work — bulk, single, a bad body refused — and GET shows the result in order)",
+    bulkRoute.statusCode === 200 &&
+      bulkRoute.json().changed === 2 &&
+      oneRoute.statusCode === 200 &&
+      badRoute.statusCode === 400 &&
+      JSON.stringify(storyDetail.items.map((i) => [i.text, i.completedAt !== null])) ===
+        JSON.stringify([
+          ["Wake up", true],
+          ["Leave the village", true],
+          ["Cross the bridge", true],
+          ["Final boss", true],
+          ["Epilogue", false],
+        ]),
+    { bulk: bulkRoute.body, one: oneRoute.body, bad: badRoute.statusCode, items: storyDetail.items },
   );
 
   console.log("\nWrites: limits and logging");

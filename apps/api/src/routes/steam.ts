@@ -243,51 +243,64 @@ export function registerSteamRoutes(app: FastifyInstance): void {
     async (request, reply) => {
       const user = await requireUser(request, reply);
       if (!user) return;
-      const [entry] = await db
-        .select({
-          gameId: schema.userGames.gameId,
-          steamPlaytimeMinutes: schema.userGames.steamPlaytimeMinutes,
-        })
-        .from(schema.userGames)
-        .where(and(eq(schema.userGames.id, request.params.id), eq(schema.userGames.userId, user.id)));
-      if (!entry) return reply.status(404).send({ message: "Entry not found" });
-
-      const rows = await db
-        .select({
-          id: schema.achievements.id,
-          name: schema.achievements.name,
-          description: schema.achievements.description,
-          iconUrl: schema.achievements.iconUrl,
-          iconGrayUrl: schema.achievements.iconGrayUrl,
-          unlockedAt: schema.userAchievements.unlockedAt,
-          userId: schema.userAchievements.userId,
-        })
-        .from(schema.achievements)
-        .leftJoin(
-          schema.userAchievements,
-          and(
-            eq(schema.userAchievements.achievementId, schema.achievements.id),
-            eq(schema.userAchievements.userId, user.id),
-          ),
-        )
-        .where(eq(schema.achievements.gameId, entry.gameId))
-        .orderBy(asc(schema.achievements.name));
-
-      const achievements = rows.map((r) => ({
-        id: r.id,
-        name: r.name,
-        description: r.description,
-        iconUrl: r.iconUrl,
-        iconGrayUrl: r.iconGrayUrl,
-        unlockedAt: r.unlockedAt,
-        unlocked: r.userId !== null,
-      }));
-      return {
-        total: achievements.length,
-        unlocked: achievements.filter((a) => a.unlocked).length,
-        achievements,
-        steamPlaytimeMinutes: entry.steamPlaytimeMinutes,
-      };
+      const loaded = await loadAchievements(user.id, request.params.id);
+      if (!loaded) return reply.status(404).send({ message: "Entry not found" });
+      return loaded;
     },
   );
+}
+
+/**
+ * A library entry's achievements — the game's definitions, synced from Steam,
+ * with this user's unlock state — in name order. `GET
+ * /api/library/:id/achievements`, and what the MCP `get_achievements` and
+ * `tick_checklist_items` tools read, so a tool and the Achievements panel
+ * can't disagree about what's unlocked. Null when the entry isn't the user's.
+ */
+export async function loadAchievements(userId: string, entryId: string) {
+  const [entry] = await db
+    .select({
+      gameId: schema.userGames.gameId,
+      steamPlaytimeMinutes: schema.userGames.steamPlaytimeMinutes,
+    })
+    .from(schema.userGames)
+    .where(and(eq(schema.userGames.id, entryId), eq(schema.userGames.userId, userId)));
+  if (!entry) return null;
+
+  const rows = await db
+    .select({
+      id: schema.achievements.id,
+      name: schema.achievements.name,
+      description: schema.achievements.description,
+      iconUrl: schema.achievements.iconUrl,
+      iconGrayUrl: schema.achievements.iconGrayUrl,
+      unlockedAt: schema.userAchievements.unlockedAt,
+      userId: schema.userAchievements.userId,
+    })
+    .from(schema.achievements)
+    .leftJoin(
+      schema.userAchievements,
+      and(
+        eq(schema.userAchievements.achievementId, schema.achievements.id),
+        eq(schema.userAchievements.userId, userId),
+      ),
+    )
+    .where(eq(schema.achievements.gameId, entry.gameId))
+    .orderBy(asc(schema.achievements.name));
+
+  const achievements = rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    iconUrl: r.iconUrl,
+    iconGrayUrl: r.iconGrayUrl,
+    unlockedAt: r.unlockedAt,
+    unlocked: r.userId !== null,
+  }));
+  return {
+    total: achievements.length,
+    unlocked: achievements.filter((a) => a.unlocked).length,
+    achievements,
+    steamPlaytimeMinutes: entry.steamPlaytimeMinutes,
+  };
 }

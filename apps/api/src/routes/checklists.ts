@@ -13,7 +13,10 @@ import {
   addChecklistEntries,
   createChecklist,
   hasMainList,
+  loadChecklistItems,
   nextPosition,
+  setChecklistItemDone,
+  setChecklistItemsDone,
 } from "../services/checklists.js";
 import { inspectAll } from "../services/content-filter.js";
 import { replyWithServiceError } from "../services/service-error.js";
@@ -310,24 +313,7 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
     if (!tpl || !canView(tpl, user)) {
       return reply.status(404).send({ message: "Checklist not found" });
     }
-    const items = await db
-      .select({
-        id: schema.checklistItems.id,
-        position: schema.checklistItems.position,
-        text: schema.checklistItems.text,
-        category: schema.checklistItems.category,
-        completedAt: schema.userChecklistItems.completedAt,
-      })
-      .from(schema.checklistItems)
-      .leftJoin(
-        schema.userChecklistItems,
-        and(
-          eq(schema.userChecklistItems.itemId, schema.checklistItems.id),
-          eq(schema.userChecklistItems.userId, user.id),
-        ),
-      )
-      .where(eq(schema.checklistItems.templateId, tpl.id))
-      .orderBy(asc(schema.checklistItems.position), asc(schema.checklistItems.text));
+    const items = await loadChecklistItems(user.id, tpl.id);
     let authorName: string | null = null;
     if (tpl.authorUserId !== user.id) {
       const [author] = await db
@@ -561,51 +547,30 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
   /**
    * Tick several entries at once. Sequential lists need this: marking mission
    * 70 done implies the 69 before it, and that shouldn't be 70 round trips.
-   * Items are re-checked against the template so a caller can't tick off
-   * someone else's list by guessing ids.
+   * The ticking is `setChecklistItemsDone`, shared with the MCP tool: own
+   * lists only, and ids re-checked against the template so a caller can't
+   * tick off someone else's list by guessing ids.
    */
   app.put<{ Params: { id: string } }>(
     "/api/checklists/:id/items/check",
     async (request, reply) => {
       const user = await requireUser(request, reply);
       if (!user) return;
-      const tpl = await getTemplate(request.params.id);
-      if (!tpl || tpl.authorUserId !== user.id) {
-        return reply.status(404).send({ message: "Checklist not found" });
-      }
       const parsed = bulkCheckSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ message: "Invalid input" });
-
-      const owned = await db
-        .select({ id: schema.checklistItems.id })
-        .from(schema.checklistItems)
-        .where(
-          and(
-            eq(schema.checklistItems.templateId, tpl.id),
-            inArray(schema.checklistItems.id, parsed.data.itemIds),
-          ),
+      try {
+        const { matched } = await setChecklistItemsDone(
+          user.id,
+          request.params.id,
+          parsed.data.itemIds,
+          parsed.data.completed,
         );
-      if (owned.length === 0) return { ok: true, changed: 0 };
-
-      if (parsed.data.completed) {
-        await db
-          .insert(schema.userChecklistItems)
-          .values(owned.map((it) => ({ userId: user.id, itemId: it.id })))
-          .onConflictDoNothing();
-      } else {
-        await db
-          .delete(schema.userChecklistItems)
-          .where(
-            and(
-              eq(schema.userChecklistItems.userId, user.id),
-              inArray(
-                schema.userChecklistItems.itemId,
-                owned.map((it) => it.id),
-              ),
-            ),
-          );
+        // "changed" has always counted the entries on the list, ticked
+        // already or not — the Progress tab refetches either way
+        return { ok: true, changed: matched };
+      } catch (err) {
+        return replyWithServiceError(reply, err);
       }
-      return { ok: true, changed: owned.length };
     },
   );
 
@@ -616,33 +581,12 @@ export function registerChecklistRoutes(app: FastifyInstance): void {
       if (!user) return;
       const parsed = z.object({ completed: z.boolean() }).safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ message: "Invalid input" });
-      const [row] = await db
-        .select({ itemId: schema.checklistItems.id, authorUserId: schema.checklistTemplates.authorUserId })
-        .from(schema.checklistItems)
-        .innerJoin(
-          schema.checklistTemplates,
-          eq(schema.checklistItems.templateId, schema.checklistTemplates.id),
-        )
-        .where(eq(schema.checklistItems.id, request.params.itemId));
-      if (!row || row.authorUserId !== user.id) {
-        return reply.status(404).send({ message: "Item not found" });
+      try {
+        await setChecklistItemDone(user.id, request.params.itemId, parsed.data.completed);
+        return { ok: true };
+      } catch (err) {
+        return replyWithServiceError(reply, err);
       }
-      if (parsed.data.completed) {
-        await db
-          .insert(schema.userChecklistItems)
-          .values({ userId: user.id, itemId: row.itemId })
-          .onConflictDoNothing();
-      } else {
-        await db
-          .delete(schema.userChecklistItems)
-          .where(
-            and(
-              eq(schema.userChecklistItems.userId, user.id),
-              eq(schema.userChecklistItems.itemId, row.itemId),
-            ),
-          );
-      }
-      return { ok: true };
     },
   );
 }

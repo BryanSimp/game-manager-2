@@ -332,25 +332,27 @@ Phase 0–8 roadmap — read it before making design decisions.
   request builds a fresh `McpServer` whose tools are closed over the caller,
   so there are no MCP sessions to mix up between users; GET/DELETE are a 405.
   The credential that reaches the route works nowhere else, so what it can
-  change is exactly the eight write tools (below) and nothing more. The tools
+  change is exactly the nine write tools (below) and nothing more. The tools
   (`services/mcp-tools.ts`) read through the *same* loaders the web routes
   use — `loadLibraryEntries`/`loadEntryProgress` (`routes/library.ts`),
   `loadDashboard`, `loadCollections`/`loadCollectionDetail`,
-  `loadMyChecklists`, `gameLinksFor` — which were extracted from their route
-  handlers for exactly this, so a tool's numbers can't drift from the app's.
+  `loadMyChecklists`, `loadChecklistItems` (`services/checklists.ts`),
+  `loadAchievements` (`routes/steam.ts`), `gameLinksFor` — which were
+  extracted from their route handlers for exactly this, so a tool's numbers
+  can't drift from the app's.
   Results are compact JSON with category *names*, hours rather than seconds,
   and no UI-only fields; the one id kept is a library entry's, because
   `get_game` takes it. `get_collection` refuses other people's public
   collections even though the route would open them — the tools describe
   your library, nothing else.
-- **Claude can organise the library, if you let it** (phase 30). Eight
+- **Claude can organise the library, if you let it** (phase 30). Nine
   write tools — `create_tag`, `tag_games`, `untag_games`,
   `create_collection`, `add_games_to_collection`, `create_checklist`
-  (phase 31), `link_games`, `set_time_to_beat` — and a deliberate list of
-  what's *not* there: no deleting, no renaming or deleting tags,
-  collections or checklists, no ticking checklist items, no category,
-  rating, notes, platform or date changes, no publishing, nothing on the
-  account. **Writes are a second grant**, asked for when the credential is
+  (phase 31), `tick_checklist_items` (phase 32), `link_games`,
+  `set_time_to_beat` — and a deliberate list of what's *not* there: no
+  deleting, no renaming or deleting tags, collections or checklists, no
+  editing, reordering or removing checklist items, no category, rating,
+  notes, platform or date changes, no publishing, nothing on the account. **Writes are a second grant**, asked for when the credential is
   made: an API key's `permissions` (`{ library: ["read", "write"] }`, set
   only by `routes/api-keys.ts` from the card's "Allow changes" box) or an
   OAuth token carrying `library:write`. `McpCaller.canWrite` holds the
@@ -530,6 +532,7 @@ was dev-only). Never use `db push`.
 | 29 MCP server + API keys | see git log | **Claude can read your library.** `POST /api/mcp` is a stateless, read-only MCP server with seven tools — `list_library`, `get_game`, `get_dashboard`, `list_collections`, `get_collection`, `list_categories`, `get_backlog_candidates` — answering from the loaders the web routes use (extracted into exported functions for it). Authenticated by **personal API keys** (better-auth's api-key plugin, migration 0030) made on **Preferences → API keys**: named per device, shown once with the `claude mcp add` command filled in, listed with last-used dates, revoked inline. A key works only at `/api/mcp`. `check:mcp` covers auth, cross-user isolation and every tool against a real database (44 checks) |
 | 30 Claude can make changes | see git log | **Seven MCP write tools**, opt-in: `create_tag`, `tag_games` (adds one tag, keeps the rest), `untag_games`, `create_collection` (always private), `add_games_to_collection`, `link_games`, `set_time_to_beat`. A key writes only if made with **Allow changes** (the api-key plugin's `permissions`, no migration — the column was already there); an OAuth token only with `library:write`, an unticked-by-default line on the consent page. Existing keys and connectors stay read-only. The routes' logic moved into `services/tags.ts`, `collections.ts`, `game-links.ts`, `time-to-beat.ts` (with `ServiceError`), so a tool and its route can't drift. One write per request, `mcp_write` events. `check:mcp` grew to 121: read-only refusals for every tool, cross-user isolation for tags, collections, links and play times, tag_games keeping existing tags, private-under-`always`, the route/tool normalisation match, the batch cap, and consent with and without Allow changes |
 | 31 checklists over MCP | see git log | **`create_checklist`**, the eighth write tool: a progress list for a game in your library — `main_story` (the one timed list the Progress tab divides time to beat across, optionally `sequential`) or `extra` (default) — with items as strings or `{ text, chapter }`, up to 500 per call. Always private. Same title (ignoring case) appends to that list, skipping entries it already has, so a repeat adds nothing; a second main story list is refused naming the first. List creation and entry appends moved out of `routes/checklists.ts` into `services/checklists.ts` (`createChecklist`, `addChecklistEntries`, `mainListOf`), which the three create routes now call — creating a list and its entries is one transaction now, and the add-entry route refuses a blank entry instead of storing it. `check:mcp` grew to 137: the item schema's two shapes, order and chapters, private-under-`always`, the progress estimate picking it up, repeat/append/occurrence counting, the main-story refusal, cross-user isolation, the content filter on create and append, and the web routes still behaving |
+| 32 ticking over MCP, Steam achievements | see git log | **`tick_checklist_items`**, the ninth write tool: tick (or with `done: false`, untick) items on one of your checklists for a game in your library, named by exact text (`titleKey`, optionally `{ text, chapter }`) and/or 1-based number, plus `steamAchievements` to tick every item named exactly like an achievement you've unlocked. Nothing is guessed — a text matching no item, or several, comes back in `notFound` with item numbers. A sequential main story list fills in the items before the furthest one, as the Progress tab does; unticking clears only what was named. The result has the list's done/total and the game's progress percent and hours remaining (`loadEntryProgress`). Two read tools to go with it: **`get_checklist`** (a list item by item, numbered) and **`get_achievements`** (a game's synced Steam achievements, unlocked newest first); `get_game` gained achievement counts. Ticking moved out of both `PUT …/items/check` routes into `services/checklists.ts` (`setChecklistItemsDone`, `setChecklistItemDone`, `loadChecklistItems`, `throughLastTarget`), and the achievements query out of its route into `loadAchievements`. The consent page's write line now mentions ticking. `check:mcp` grew to 163: the read-only refusal, text/number/chapter ticks, duplicate and near-miss misses, sequential fill-in, untick of one item, Steam matching, progress moving in `get_game`, cross-user isolation and the routes still behaving |
 | 29b claude.ai over OAuth | see git log | **claude.ai's custom connector can sign in.** better-auth's OAuth 2.1 provider (migration 0031) with dynamic client registration fenced by a redirect-URI allowlist, opaque `gmat_`/`gmrt_` tokens hashed with our own function, and discovery at `/.well-known/oauth-protected-resource` + `oauth-authorization-server` (new Traefik router, nginx `location`, Vite proxy). `/api/mcp` takes an API key *or* an access token granted `library:read`, and a 401 carries `WWW-Authenticate: Bearer resource_metadata=…`. The existing login page continues the flow (two-factor included); `/oauth/consent` asks Allow/Deny; Preferences → API keys lists connected apps and disconnects them. `check:mcp` grew to 71 checks: discovery, registration allowlist, a 2FA account's sign-in, consent/deny, PKCE token exchange, refresh, insufficient scope, disconnect |
 
 **Next: Phase 6 remainder (still open)** — email verification (better-auth config
@@ -607,12 +610,54 @@ file to be provided for reference).
   auto-fill with no visible control to stop it. `createChecklist` drops the
   flag for extras (the tool says it did); `PATCH /api/checklists/:id` still
   accepts it on any list, as it always has.
-- **Claude can make a list but not tick it.** Ticking is progress through
-  the game, which the user does in the app — and a model that ticks items
-  is a model deciding what you've played. A `tick_checklist_items` tool
-  would want the same opt-in thinking as the rest of phase 30. Likewise
-  there's no editing, reordering or removing entries over MCP: a wrong
-  entry is one click on the Progress tab's edit mode.
+- **Claude ticks what you tell it you've done** (phase 32,
+  `tick_checklist_items`). Phase 31 left ticking out because a model that
+  ticks items is a model deciding what you've played; the answer is that
+  the tool never decides. It ticks items named by exact text (`titleKey`)
+  or by number, and nothing else: a text matching no item comes back in
+  `notFound` with near misses (containment either way, or Dice similarity
+  ≥ 0.5 via `noise-filter.ts`'s `similarity`) and their numbers, and a text
+  matching *several* items is a miss too, with every candidate's number
+  and tick state — two "Mask Shard" entries are two collectibles, and
+  ticking "the next unticked one" would make a retried call tick a second.
+  The one thing it ticks that the caller didn't name is
+  `steamAchievements`: items whose text is exactly an unlocked
+  achievement's name, which is Steam's word rather than the model's. It
+  rides on the same "Allow changes" grant as every other write — no new
+  scope — because a tick is as reversible as a tag. Still no editing,
+  reordering or removing entries over MCP: a wrong entry is one click on
+  the Progress tab's edit mode.
+- **Items are numbered from 1 in the Progress tab's order** — position,
+  then text, `loadChecklistItems` — by both `get_checklist` and
+  `tick_checklist_items`, so "item 12" is the twelfth row on screen.
+  Chapters don't restart the count, matching the tab's continuous
+  numbering.
+- **Sequential fill-in is the Progress tab's rule, moved server-side for
+  the tool.** The tab ticks 1..N−1 along with N client-side and sends the
+  ids; the tool does the same through `throughLastTarget` (several targets
+  fill in through the furthest), and unticking clears only what was named.
+  `fillsInSequence` honours the flag on the **main story list only**,
+  where the tab differs: it fills in on any list flagged sequential. The
+  only way to flag an extra is a raw `PATCH`, and filling in a list with
+  no visible switch is the surprise the phase 31 note above describes.
+- **Ticking is own-lists-only in one place** (`setChecklistItemsDone` /
+  `setChecklistItemDone` in `services/checklists.ts`), which both
+  `PUT …/items/check` routes now call: ids are re-checked against the
+  template and ones that aren't on it are dropped, as before. The bulk
+  route's `changed` still counts matched ids, ticked already or not — the
+  web app only refetches on it — while the tool reports what really
+  changed, from the before-state.
+- **Steam achievements are readable over MCP** (`get_achievements`,
+  through the Achievements panel's own `loadAchievements`), and `get_game`
+  carries their counts. Achievements only exist for games a Steam import
+  matched to an appid and a sync has run on — so for most of a library the
+  answer is "none synced", which the tool says in a note rather than an
+  error. Exact-name matching is deliberately the only automatic link
+  between an achievement and a list item: mission names and achievement
+  names rarely agree ("Margit" vs "Margit, the Fell Omen" vs "Defeated a
+  Shardbearer's guardian"), and that judgement is the model's to make in
+  the open — it reads both lists and ticks by number, and says what it
+  matched.
 - **A list Claude writes from memory can be wrong**, which is why the tool
   description tells it to say where the items came from. Mission lists are
   exactly the content the wiki scraper (phase 16) got wrong more often than
