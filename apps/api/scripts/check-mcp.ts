@@ -2,7 +2,7 @@
  * The MCP endpoint, end to end: who may call it, that one user can never see
  * another's library through it, what each tool answers, which credentials
  * may use the write tools (and that those only ever touch the caller's own
- * games, tags and collections), and the OAuth flow claude.ai's connector
+ * games, tags, collections and checklists), and the OAuth flow claude.ai's connector
  * takes to get in (discovery, registration, login with two-factor, consent
  * with and without "Allow changes", tokens, disconnecting).
  *
@@ -416,9 +416,9 @@ try {
   const tools = (listRes.json() as { result: { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }> } }).result.tools;
   const names = tools.map((t) => t.name).sort();
   const READ_TOOLS = ["get_backlog_candidates", "get_collection", "get_dashboard", "get_game", "list_categories", "list_collections", "list_library"];
-  const WRITE_TOOLS = ["add_games_to_collection", "create_collection", "create_tag", "link_games", "set_time_to_beat", "tag_games", "untag_games"];
+  const WRITE_TOOLS = ["add_games_to_collection", "create_checklist", "create_collection", "create_tag", "link_games", "set_time_to_beat", "tag_games", "untag_games"];
   check(
-    "tools/list offers the seven read tools and the seven write tools, even to a read-only key",
+    "tools/list offers the seven read tools and the eight write tools, even to a read-only key",
     JSON.stringify(names) === JSON.stringify([...READ_TOOLS, ...WRITE_TOOLS].sort()),
     names,
   );
@@ -432,6 +432,15 @@ try {
     annotated
       .filter((t) => WRITE_TOOLS.includes(t.name))
       .every((t) => t.annotations?.readOnlyHint === false && t.annotations?.destructiveHint === false),
+  );
+  const checklistItems = (tools as Array<{ name: string; inputSchema?: any }>).find((t) => t.name === "create_checklist")
+    ?.inputSchema?.properties?.items?.items;
+  const itemShapes = (checklistItems?.anyOf ?? []) as Array<{ type?: string; properties?: Record<string, unknown> }>;
+  check(
+    "create_checklist's items are each a string or { text, chapter }",
+    itemShapes.some((s) => s.type === "string") &&
+      itemShapes.some((s) => s.type === "object" && !!s.properties?.text && !!s.properties?.chapter),
+    checklistItems,
   );
 
   const lib = await tool(aliceKey, "list_library");
@@ -589,6 +598,7 @@ try {
     add_games_to_collection: { collectionId: aliceCollection, games: [shortOne.title] },
     link_games: { game: aHollow.id, relatedGame: shortOne.title, role: "sequel" },
     set_time_to_beat: { game: aHollow.id, mainHours: 1 },
+    create_checklist: { game: aHollow.id, title: `refused-${run}`, items: ["Refused item"] },
   };
   const refusals = await Promise.all(
     Object.entries(refusedArgs).map(async ([name, args]) => ({ name, ...(await tool(aliceKey, name, args)) })),
@@ -610,10 +620,14 @@ try {
   const [aliceCollectionGames] = [
     await db.select().from(schema.collectionGames).where(eq(schema.collectionGames.collectionId, aliceCollection)),
   ];
+  const refusedLists = await db
+    .select()
+    .from(schema.checklistTemplates)
+    .where(eq(schema.checklistTemplates.title, `refused-${run}`));
   check(
     "…and none of the refused calls wrote anything",
-    refusedRows.length === 0 && hollowTagsBefore.length === 1 && aliceCollectionGames.length === 2,
-    { tags: refusedRows.map((t) => t.name), hollowTags: hollowTagsBefore.length, inCollection: aliceCollectionGames.length },
+    refusedRows.length === 0 && hollowTagsBefore.length === 1 && aliceCollectionGames.length === 2 && refusedLists.length === 0,
+    { tags: refusedRows.map((t) => t.name), hollowTags: hollowTagsBefore.length, inCollection: aliceCollectionGames.length, lists: refusedLists.length },
   );
 
   console.log("\nWrites: tags");
@@ -838,6 +852,198 @@ try {
   check("alice can't set a time on bob's game", bobsTtb.isError && bobTtbRows.length === 0, bobsTtb.text);
   const notOwnedTtb = await tool(aliceWriteKey, "set_time_to_beat", { game: notOwned.title, mainHours: 5 });
   check("…nor on a game she doesn't own", notOwnedTtb.isError, notOwnedTtb.text);
+
+  console.log("\nWrites: checklists");
+  const listsOf = (gameId: string, userId = alice.id) =>
+    db
+      .select()
+      .from(schema.checklistTemplates)
+      .where(and(eq(schema.checklistTemplates.gameId, gameId), eq(schema.checklistTemplates.authorUserId, userId)));
+  const entriesOf = (templateId: string) =>
+    db
+      .select()
+      .from(schema.checklistItems)
+      .where(eq(schema.checklistItems.templateId, templateId))
+      .orderBy(schema.checklistItems.position);
+  const rowsOf = (entries: Array<{ position: number; text: string; category: string | null }>) =>
+    entries.map((e) => [e.position, e.text, e.category]);
+
+  // publish mode is still 'always' from the collection checks above
+  const story = [
+    { text: "Wake up", chapter: "Act 1" },
+    { text: "Leave the village", chapter: "Act 1" },
+    { text: "Cross the bridge", chapter: " Act 2 " },
+    "Final boss",
+  ];
+  const madeList = await tool(aliceWriteKey, "create_checklist", {
+    game: shortOne.title,
+    title: "Story",
+    kind: "main_story",
+    items: story,
+    sequential: true,
+  });
+  const [storyRow] = await listsOf(shortOne.id);
+  const storyEntries = storyRow ? await entriesOf(storyRow.id) : [];
+  check(
+    "create_checklist makes a main story list, its items in order under their chapters",
+    madeList.data?.created === true &&
+      madeList.data.checklist.kind === "main story" &&
+      madeList.data.checklist.sequential === true &&
+      madeList.data.added === 4 &&
+      storyRow?.kind === "missions" &&
+      storyRow.sequential === true &&
+      JSON.stringify(rowsOf(storyEntries)) ===
+        JSON.stringify([[0, "Wake up", "Act 1"], [1, "Leave the village", "Act 1"], [2, "Cross the bridge", "Act 2"], [3, "Final boss", null]]),
+    { result: madeList.data ?? madeList.text, entries: rowsOf(storyEntries) },
+  );
+  check(
+    "…private, even though the publish preference is 'always'",
+    madeList.data?.checklist.public === false && storyRow?.isPublic === false,
+    madeList.data,
+  );
+  const storyGame = await tool(aliceWriteKey, "get_game", { title: shortOne.title });
+  check(
+    "…and it's what the game's progress now divides its time to beat across",
+    storyGame.data?.progress?.missionsTotal === 4 &&
+      storyGame.data.progress.missionsDone === 0 &&
+      storyGame.data.progress.totalHours > 0 &&
+      storyGame.data.progress.remainingHours === storyGame.data.progress.totalHours &&
+      storyGame.data.checklists.some((c: { title: string; kind: string; total: number }) => c.title === "Story" && c.kind === "main story" && c.total === 4),
+    storyGame.data ? { progress: storyGame.data.progress, checklists: storyGame.data.checklists } : storyGame.text,
+  );
+  const repeated = await tool(aliceWriteKey, "create_checklist", { game: shortOne.title, title: "Story", kind: "main_story", items: story });
+  check(
+    "the same call again adds nothing twice",
+    repeated.data?.created === false && repeated.data.added === 0 && repeated.data.alreadyOnList === 4 && (await entriesOf(storyRow!.id)).length === 4,
+    repeated.data ?? repeated.text,
+  );
+  const more = await tool(aliceWriteKey, "create_checklist", {
+    game: shortOne.id,
+    title: "STORY",
+    items: [{ text: "final boss" }, { text: "Epilogue", chapter: "Act 3" }],
+  });
+  const afterMore = await entriesOf(storyRow!.id);
+  check(
+    "…while the list's title in any case appends only what's new, to the end",
+    more.data?.created === false &&
+      more.data.added === 1 &&
+      more.data.alreadyOnList === 1 &&
+      more.data.checklist.items === 5 &&
+      JSON.stringify(rowsOf(afterMore).at(-1)) === JSON.stringify([4, "Epilogue", "Act 3"]) &&
+      (await listsOf(shortOne.id)).length === 1,
+    { result: more.data ?? more.text, entries: rowsOf(afterMore) },
+  );
+  const secondMain = await tool(aliceWriteKey, "create_checklist", {
+    game: aHollow.id,
+    title: "Another story",
+    kind: "main_story",
+    items: ["Somewhere"],
+  });
+  check(
+    "a second main story list is refused, naming the one the game has",
+    secondMain.isError && secondMain.text.includes('"Main quest"') && (await listsOf(hollow.id)).length === 1,
+    secondMain.text,
+  );
+
+  // bob keeps a published list for the same game under the same name: alice's
+  // call must make her own, never add to his
+  const [bobsHollowList] = await db
+    .insert(schema.checklistTemplates)
+    .values({ gameId: hollow.id, authorUserId: bob.id, title: "Mask shards", kind: "side_quests", isPublic: true })
+    .returning();
+  const shards = await tool(aliceWriteKey, "create_checklist", {
+    game: aHollow.id,
+    title: "Mask shards",
+    items: ["Mask Shard", "Mask Shard", "Mask Shard"],
+    sequential: true,
+  });
+  const shardRow = (await listsOf(hollow.id)).find((l) => l.title === "Mask shards");
+  check(
+    "an extra list keeps repeated items, comes after the main story list, and can't be sequential",
+    shards.data?.created === true &&
+      shards.data.checklist.kind === "extra" &&
+      shards.data.added === 3 &&
+      shards.data.checklist.sequential === false &&
+      shards.data.note?.includes("sequential") &&
+      shardRow?.kind === "side_quests" &&
+      shardRow.sequential === false &&
+      shardRow.position > list!.position,
+    shards.data ?? shards.text,
+  );
+  check(
+    "…and bob's list of the same name for the same game is untouched",
+    (await entriesOf(bobsHollowList!.id)).length === 0 && shardRow?.id !== bobsHollowList!.id,
+  );
+  await db.update(schema.checklistTemplates).set({ isPublic: true }).where(eq(schema.checklistTemplates.id, shardRow!.id));
+  const shardsAgain = await tool(aliceWriteKey, "create_checklist", {
+    game: hollow.title,
+    title: "mask shards",
+    items: ["Mask Shard", "Mask Shard", "Mask Shard", "Mask Shard"],
+  });
+  check(
+    "repeating it counts the copies the list already has, adding only the one more",
+    shardsAgain.data?.added === 1 && shardsAgain.data.alreadyOnList === 3 && (await entriesOf(shardRow!.id)).length === 4,
+    shardsAgain.data ?? shardsAgain.text,
+  );
+  check("…and says so when the list it added to is published", shardsAgain.data?.note?.includes("published"), shardsAgain.data?.note);
+
+  const filteredList = await tool(aliceWriteKey, "create_checklist", {
+    game: wish.title,
+    title: "Contacts",
+    items: ["Find the merchant", `write to someone-${run}@example.com`],
+  });
+  const filteredAppend = await tool(aliceWriteKey, "create_checklist", {
+    game: shortOne.title,
+    title: "Story",
+    items: [`call someone-${run}@example.com`],
+  });
+  check(
+    "the content filter applies to every item, on a new list and an existing one",
+    filteredList.isError && filteredAppend.isError && (await listsOf(wish.id)).length === 0 && (await entriesOf(storyRow!.id)).length === 5,
+    { create: filteredList.text, append: filteredAppend.text },
+  );
+  const notOwnedList = await tool(aliceWriteKey, "create_checklist", { game: notOwned.title, title: "Nope", items: ["Nope"] });
+  const bobsEntryList = await tool(aliceWriteKey, "create_checklist", { game: bSecret.id, title: "Nope", items: ["Nope"] });
+  const bobsTitleList = await tool(aliceWriteKey, "create_checklist", { game: bobsGame.title, title: "Nope", items: ["Nope"] });
+  check(
+    "only games in the user's own library: not a catalog game she doesn't own, not bob's",
+    notOwnedList.isError &&
+      bobsEntryList.isError &&
+      bobsTitleList.isError &&
+      (await listsOf(notOwned.id)).length === 0 &&
+      (await listsOf(bobsGame.id)).length === 0 &&
+      (await listsOf(bobsGame.id, bob.id)).length === 0,
+    { notOwned: notOwnedList.text, bobsEntry: bobsEntryList.text, bobsTitle: bobsTitleList.text },
+  );
+
+  // the web routes now share the service: they must behave as they did
+  const pasted = await asUser(alice.cookie, "POST", `/api/games/${done.id}/missions`, { title: "Pasted", missions: ["One", "  ", "Two"] });
+  const typed = await asUser(alice.cookie, "POST", `/api/games/${done.id}/checklists`, { title: "Endings" });
+  check(
+    "(the web app's own create routes still work, and still follow publish mode 'always')",
+    pasted.statusCode === 201 &&
+      pasted.json().count === 2 &&
+      pasted.json().isPublic === true &&
+      typed.statusCode === 201 &&
+      typed.json().isPublic === true &&
+      (await listsOf(done.id)).find((l) => l.id === typed.json().id)?.kind === "side_quests",
+    { pasted: pasted.body, typed: typed.body },
+  );
+  const pastedAgain = await asUser(alice.cookie, "POST", `/api/games/${done.id}/missions`, { title: "Again", missions: ["Three"] });
+  check("(…still refuse a second main story list with a 409)", pastedAgain.statusCode === 409, pastedAgain.body);
+  const typedId = typed.statusCode === 201 ? (typed.json().id as string) : "";
+  const addOne = await asUser(alice.cookie, "POST", `/api/checklists/${typedId}/items`, { text: "  Good ending ", category: " Endings " });
+  const addBlank = await asUser(alice.cookie, "POST", `/api/checklists/${typedId}/items`, { text: "   " });
+  const bobAdds = await asUser(bob.cookie, "POST", `/api/checklists/${typedId}/items`, { text: "bob was here" });
+  check(
+    "(…and POST /api/checklists/:id/items adds a trimmed entry, refuses a blank one and someone else's list)",
+    addOne.statusCode === 201 &&
+      addOne.json().position === 0 &&
+      addBlank.statusCode === 400 &&
+      bobAdds.statusCode === 404 &&
+      JSON.stringify(rowsOf(await entriesOf(typedId))) === JSON.stringify([[0, "Good ending", "Endings"]]),
+    { addOne: addOne.body, addBlank: addBlank.statusCode, bobAdds: bobAdds.statusCode },
+  );
 
   console.log("\nWrites: limits and logging");
   const batch = await app.inject({

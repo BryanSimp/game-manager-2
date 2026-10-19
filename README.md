@@ -111,8 +111,8 @@ for Expo Go over a LAN.
 The API serves an [MCP](https://modelcontextprotocol.io) server at `/api/mcp`, so Claude can
 answer questions about your library — "what should I play next?", "how far through Hollow Knight
 am I?", "how long is the rest of my Zelda marathon?" — and, if you let it, organise it: "tag all
-my co-op games", "make a collection of the Zelda games in release order", "link the DLC to its
-base games". Each person connects with their own credentials and only ever sees or changes their
+my co-op games", "make a collection of the Zelda games in release order", "make a checklist of
+Hollow Knight's bosses", "link the DLC to its base games". Each person connects with their own credentials and only ever sees or changes their
 own library.
 
 Reading is always on. **Changes are opt-in, per key or per connection**: a key only writes if you
@@ -162,6 +162,10 @@ Changing, only with **Allow changes** on:
 - `create_collection` — a collection, optionally started with games in order. Always private,
   whatever your publish preference says; a name you already have returns that collection.
 - `add_games_to_collection` — append up to 100 games to one of your collections, in order.
+- `create_checklist` — a progress checklist for a game in your library, up to 500 items, optionally
+  grouped into chapters. A `main_story` list (one per game) is what the Progress tab divides the
+  time to beat across; anything else is an extra list. Always private and nothing ticked. A title
+  the game already has a list under adds to that list, skipping items it already has.
 - `link_games` — DLC, prequel/sequel or remake/remaster links, with the same rules as the Linked
   tab (no self-links, one link per pair).
 - `set_time_to_beat` — your own main / main + extras / completionist hours for a game. These feed
@@ -172,9 +176,9 @@ Games are named by id or exact title. Collections and links can include games yo
 in the web app: a title that isn't in your library is looked up in the shared catalog, then on
 IGDB.
 
-What it can't do, with any key: delete anything; rename or delete tags or collections; change a
-game's category, rating, notes, platforms or dates; publish a collection; or touch your account
-or settings. One request carries at most one change, and every change is logged (tool name and
+What it can't do, with any key: delete anything; rename or delete tags, collections or
+checklists; tick checklist items off or edit them; change a game's category, rating, notes,
+platforms or dates; publish a collection or checklist; or touch your account or settings. One request carries at most one change, and every change is logged (tool name and
 counts, never titles) like the web app's own writes.
 
 ### claude.ai (custom connector)
