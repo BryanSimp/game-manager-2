@@ -103,6 +103,21 @@ export function CollectionList({
   const prefs = usePreferences();
   const categories = useCategories();
   const [sort, setSort] = useState<ListSort>("custom");
+  const [layout, setLayout] = useState<"list" | "grid">(() => {
+    try {
+      return localStorage.getItem("gm.collectionLayout") === "grid" ? "grid" : "list";
+    } catch {
+      return "list";
+    }
+  });
+  function chooseLayout(next: "list" | "grid") {
+    setLayout(next);
+    try {
+      localStorage.setItem("gm.collectionLayout", next);
+    } catch {
+      /* private mode: the choice just doesn't stick */
+    }
+  }
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CollectionNode[] | null>(null);
 
@@ -165,6 +180,22 @@ export function CollectionList({
         ))}
 
         <div className="ml-auto flex gap-2">
+          <div className="flex overflow-hidden rounded-lg border border-zinc-700" role="group" aria-label="View">
+            {(["list", "grid"] as const).map((l) => (
+              <button
+                key={l}
+                onClick={() => chooseLayout(l)}
+                aria-pressed={layout === l}
+                className={`px-3 py-1.5 text-sm transition ${
+                  layout === l
+                    ? "bg-indigo-600/20 text-indigo-200"
+                    : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                }`}
+              >
+                {l === "list" ? "☰ List" : "▦ Grid"}
+              </button>
+            ))}
+          </div>
           {!readOnly &&
             !selecting &&
             sort === "custom" &&
@@ -203,10 +234,141 @@ export function CollectionList({
 
       {editing && (
         <p className="mb-3 text-xs text-zinc-500">
-          Use the arrows to set the play order, then save. Rows don't open while you're editing.
+          Use the arrows to set the play order, then save. Games don't open while you're editing.
         </p>
       )}
 
+      {layout === "grid" ? (
+        <ol className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          {rows.map((game, index) => {
+            const chip = game.status ? statusChip(game.status, prefs, categories) : null;
+            const owned = !!game.userGameId;
+            const checked = selected?.has(game.gameId) ?? false;
+            const dimmed = selecting && owned;
+            const tile = (
+              <div
+                className={`group relative overflow-hidden rounded-xl border bg-zinc-900 transition ${
+                  selecting && checked
+                    ? "border-indigo-500 ring-2 ring-indigo-500/60"
+                    : owned
+                      ? "border-zinc-800 hover:border-zinc-600"
+                      : "border-dashed border-zinc-700 hover:border-indigo-600"
+                } ${dimmed ? "opacity-50" : ""}`}
+              >
+                <div className="relative aspect-[3/4] bg-zinc-800">
+                  {game.coverSrc ? (
+                    <img
+                      src={game.coverSrc}
+                      alt=""
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center p-2 text-center text-xs text-zinc-500">
+                      {game.title}
+                    </div>
+                  )}
+                  <span
+                    className="absolute left-1.5 top-1.5 min-w-6 rounded-md bg-zinc-950/80 px-1.5 py-0.5 text-center text-xs font-bold tabular-nums"
+                    style={{ color: accent }}
+                  >
+                    {index + 1}
+                  </span>
+                  {chip ? (
+                    <span
+                      className={`${chip.className} absolute bottom-1.5 left-1.5 rounded-full px-2 py-0.5 text-[11px]`}
+                      style={chip.style}
+                    >
+                      {statusLabel(game.status!, categories)}
+                    </span>
+                  ) : (
+                    <span className="absolute bottom-1.5 left-1.5 rounded-full bg-zinc-950/80 px-2 py-0.5 text-[11px] text-zinc-400">
+                      Not in library
+                    </span>
+                  )}
+                  {selecting && !owned && (
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      readOnly
+                      className="absolute right-1.5 top-1.5 h-4 w-4 accent-indigo-500"
+                    />
+                  )}
+                  {editing && (
+                    <div className="absolute right-1.5 top-1.5 flex gap-1">
+                      <button
+                        onClick={() => move(index, -1)}
+                        disabled={index === 0}
+                        aria-label="Move earlier"
+                        className="rounded border border-zinc-700 bg-zinc-950/80 px-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-30"
+                      >
+                        ◀
+                      </button>
+                      <button
+                        onClick={() => move(index, 1)}
+                        disabled={index === rows.length - 1}
+                        aria-label="Move later"
+                        className="rounded border border-zinc-700 bg-zinc-950/80 px-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-30"
+                      >
+                        ▶
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="p-2">
+                  <p className="truncate text-sm font-medium text-zinc-100" title={game.title}>
+                    {game.title}
+                  </p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500">
+                    {game.releaseDate && <span>{game.releaseDate.slice(0, 4)}</span>}
+                    <RowTime game={game} />
+                  </div>
+                </div>
+              </div>
+            );
+
+            if (selecting) {
+              if (owned) {
+                return (
+                  <li key={game.gameId} title="Already in your library">
+                    {tile}
+                  </li>
+                );
+              }
+              return (
+                <li key={game.gameId}>
+                  <button
+                    type="button"
+                    onClick={() => onToggleSelect?.(game.gameId)}
+                    className="block w-full text-left"
+                  >
+                    {tile}
+                  </button>
+                </li>
+              );
+            }
+            if (editing) return <li key={game.gameId}>{tile}</li>;
+            return (
+              <li key={game.gameId}>
+                {owned ? (
+                  <Link to="/game/$id" params={{ id: game.userGameId! }} className="block">
+                    {tile}
+                  </Link>
+                ) : (
+                  <Link
+                    to="/catalog/$gameId"
+                    params={{ gameId: game.gameId }}
+                    title="You don't own this yet — opens the game, with one button to add it"
+                    className="block"
+                  >
+                    {tile}
+                  </Link>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
       <ol className="space-y-2">
         {rows.map((game, index) => {
           const chip = game.status ? statusChip(game.status, prefs, categories) : null;
@@ -339,6 +501,7 @@ export function CollectionList({
           );
         })}
       </ol>
+      )}
 
       {saveOrder.isError && (
         <p className="mt-3 text-sm text-red-400">
